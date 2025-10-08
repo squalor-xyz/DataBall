@@ -1,3 +1,4 @@
+// DataBall.cs
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -12,11 +13,14 @@ using SharpCompress.Readers;
 using SharpCompress.Common;
 using System.Text.Json;
 using System.Reflection;
+using NLog;
 
 namespace squalor.DataBall
 {
     public class DataBall
     {
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+
         public DataFrame Data { get; private set; } = new DataFrame();
         public Dictionary<string, object> Metadata { get; } = new Dictionary<string, object>();
 
@@ -31,14 +35,17 @@ namespace squalor.DataBall
 
         public DataBall(string configPath = null)
         {
+            Logger.Info("Initializing DataBall");
             if (!string.IsNullOrEmpty(configPath))
             {
+                Logger.Debug($"Loading config from {configPath}");
                 LoadConfig(configPath);
             }
         }
 
         private void LoadConfig(string path)
         {
+            Logger.Debug("Loading configuration file");
             var json = File.ReadAllText(path);
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
             var config = JsonSerializer.Deserialize<Config>(json, options);
@@ -46,9 +53,11 @@ namespace squalor.DataBall
             foreach (var kvp in config.metadata ?? new Dictionary<string, object>())
             {
                 Metadata[kvp.Key] = kvp.Value;
+                Logger.Debug($"Added metadata: {kvp.Key}");
             }
 
             Relationships = (config.relationships ?? new List<Relationship>()).Select(r => new Relationship { trigger = r.trigger, reset = r.reset ?? new List<string>() }).ToList();
+            Logger.Debug($"Loaded {Relationships.Count} relationships");
 
             ExpectedColumnTypes = new Dictionary<string, Type>();
             var typeMap = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase)
@@ -65,6 +74,7 @@ namespace squalor.DataBall
             foreach (var col in config.columns ?? new Dictionary<string, string>())
             {
                 ExpectedColumnTypes[col.Key] = typeMap.TryGetValue(col.Value, out var t) ? t : typeof(string);
+                Logger.Debug($"Expected type for {col.Key}: {ExpectedColumnTypes[col.Key]}");
             }
 
             // If no data, add empty columns
@@ -75,6 +85,7 @@ namespace squalor.DataBall
                     AddEmptyColumn(exp.Key, exp.Value);
                 }
             }
+            Logger.Info("Configuration loaded successfully");
         }
 
         private void AddEmptyColumn(string name, Type type)
@@ -90,6 +101,7 @@ namespace squalor.DataBall
                 col = CreatePrimitiveColumn(name, type, length);
             }
             Data.Append(col, inPlace: true);
+            Logger.Debug($"Added empty column {name} of type {type}");
         }
 
         private IDataFrameColumn CreatePrimitiveColumn(string name, Type type, long length)
@@ -107,6 +119,7 @@ namespace squalor.DataBall
         // Row building methods
         public void InitializeRow(Dictionary<string, object> initialValues = null)
         {
+            Logger.Debug("Initializing new row");
             _originalRow = new Dictionary<string, object>();
             _pendingRow = new Dictionary<string, object>();
             _modifiedFields = new HashSet<string>();
@@ -127,6 +140,7 @@ namespace squalor.DataBall
                 {
                     _pendingRow[kvp.Key] = kvp.Value;
                     _modifiedFields.Add(kvp.Key);
+                    Logger.Debug($"Initial value set for {kvp.Key}");
                 }
             }
         }
@@ -135,19 +149,23 @@ namespace squalor.DataBall
         {
             if (_pendingRow == null)
             {
+                Logger.Error("Attempted to modify field without initialized row");
                 throw new InvalidOperationException("No pending row initialized.");
             }
             _pendingRow[field] = value;
             _modifiedFields.Add(field);
+            Logger.Debug($"Modified field {field}");
         }
 
         public void Roll()
         {
             if (_pendingRow == null)
             {
+                Logger.Error("Attempted to roll without initialized row");
                 throw new InvalidOperationException("No pending row initialized.");
             }
 
+            Logger.Debug("Applying relationships");
             // Apply relationships
             foreach (var rel in Relationships)
             {
@@ -163,6 +181,7 @@ namespace squalor.DataBall
                         if (!_modifiedFields.Contains(dep))
                         {
                             _pendingRow[dep] = null;
+                            Logger.Debug($"Reset dependent field {dep} due to trigger {rel.trigger}");
                         }
                     }
                 }
@@ -188,6 +207,7 @@ namespace squalor.DataBall
                         newColumn = CreatePrimitiveColumn(key, columnType, currentLength);
                     }
                     Data.Append(newColumn, inPlace: true);
+                    Logger.Debug($"Added new column {key}");
                 }
             }
 
@@ -201,6 +221,7 @@ namespace squalor.DataBall
 
             // Append the row
             Data.Append(values, inPlace: true);
+            Logger.Info("Row committed successfully");
 
             // Clear pending row
             _pendingRow = null;
@@ -211,6 +232,7 @@ namespace squalor.DataBall
         // Bounce method for compaction
         public void Bounce(string partitionedParquetPath = null, string[] partitionColumns = null)
         {
+            Logger.Info("Starting bounce operation");
             // Identify and remove constant columns to metadata
             var columnsToRemove = new List<string>();
             for (int i = 0; i < Data.Columns.Count; i++)
@@ -238,6 +260,7 @@ namespace squalor.DataBall
                 {
                     Metadata[col.Name] = first;
                     columnsToRemove.Add(col.Name);
+                    Logger.Debug($"Moved constant column {col.Name} to metadata");
                 }
             }
             foreach (var name in columnsToRemove)
@@ -247,22 +270,27 @@ namespace squalor.DataBall
 
             // Other optimizations: e.g., deduplicate rows (simple unique)
             Data = Data.DropDuplicates();
+            Logger.Debug("Dropped duplicate rows");
 
             // If partitioned path provided, export to partitioned Parquet
             if (!string.IsNullOrEmpty(partitionedParquetPath))
             {
                 ExportToPartitionedParquet(partitionedParquetPath, partitionColumns ?? Array.Empty<string>());
+                Logger.Info($"Exported to partitioned Parquet at {partitionedParquetPath}");
             }
+            Logger.Info("Bounce operation completed");
         }
 
         // Save method
         public void Save(string filePath = null, string[] partitionColumns = null)
         {
+            Logger.Info("Starting save operation");
             Bounce();
 
             string savePath = filePath ?? _currentFilePath;
             if (string.IsNullOrEmpty(savePath))
             {
+                Logger.Error("No file path provided for save");
                 throw new InvalidOperationException("No file path provided for save and no current file path set.");
             }
 
@@ -281,6 +309,7 @@ namespace squalor.DataBall
             {
                 var json = JsonSerializer.Serialize(Metadata);
                 sw.Write(json);
+                Logger.Debug("Saved metadata.json");
             }
 
             // Data: If partitioned, create entries with paths
@@ -302,6 +331,7 @@ namespace squalor.DataBall
                     var entry = zip.CreateEntry(entryName);
                     using var stream = entry.Open();
                     stream.WriteParquetAsync(group.Group).GetAwaiter().GetResult();
+                    Logger.Debug($"Saved partitioned Parquet entry {entryName}");
                 }
             }
             else
@@ -309,14 +339,17 @@ namespace squalor.DataBall
                 var parquetEntry = zip.CreateEntry("data.parquet");
                 using var stream = parquetEntry.Open();
                 stream.WriteParquetAsync(Data).GetAwaiter().GetResult();
+                Logger.Debug("Saved data.parquet");
             }
 
             _currentFilePath = savePath;
+            Logger.Info($"Saved to {savePath}");
         }
 
         // Partitioned Parquet export (to directory)
         public void ExportToPartitionedParquet(string basePath, params string[] partitionColumns)
         {
+            Logger.Info($"Exporting to partitioned Parquet at {basePath}");
             if (partitionColumns.Length == 0)
             {
                 // No partitioning, write single file
@@ -343,6 +376,7 @@ namespace squalor.DataBall
                 var filePath = Path.Combine(partitionPath, "part-0.parquet");
                 using var fs = File.OpenWrite(filePath);
                 fs.WriteParquetAsync(group.Group).GetAwaiter().GetResult();
+                Logger.Debug($"Exported partition to {filePath}");
             }
         }
 
@@ -351,21 +385,25 @@ namespace squalor.DataBall
         {
             var column = new PrimitiveDataFrameColumn<T>(name, values);
             Data.Append(column, inPlace: true);
+            Logger.Debug($"Added column {name}");
         }
 
         public void RemoveColumn(string name)
         {
             Data.Remove(name);
+            Logger.Debug($"Removed column {name}");
         }
 
         public void AddRow(IEnumerable<object> values)
         {
             Data.Append(values, inPlace: true);
+            Logger.Debug("Added row");
         }
 
         public void RemoveRow(long index)
         {
             Data.RemoveAt(index);
+            Logger.Debug($"Removed row at index {index}");
         }
 
         // Modify cell
@@ -373,11 +411,13 @@ namespace squalor.DataBall
         {
             var column = Data[columnName];
             column[rowIndex] = value;
+            Logger.Debug($"Set value at row {rowIndex}, column {columnName}");
         }
 
         // Import methods
         public void ImportFromCsv(string path, bool append = false, int? chunkSize = null)
         {
+            Logger.Info($"Importing from CSV {path}");
             if (chunkSize.HasValue)
             {
                 // For large files, load in chunks
@@ -396,6 +436,7 @@ namespace squalor.DataBall
 
                 var chunk = new List<string[]>();
                 string line;
+                int chunkCount = 0;
                 while ((line = reader.ReadLine()) != null)
                 {
                     chunk.Add(line.Split(','));
@@ -403,11 +444,14 @@ namespace squalor.DataBall
                     {
                         AppendChunk(chunk, columns);
                         chunk.Clear();
+                        chunkCount++;
+                        Logger.Debug($"Processed chunk {chunkCount}");
                     }
                 }
                 if (chunk.Count > 0)
                 {
                     AppendChunk(chunk, columns);
+                    Logger.Debug("Processed final chunk");
                 }
             }
             else
@@ -415,6 +459,7 @@ namespace squalor.DataBall
                 var df = DataFrame.LoadCsv(path);
                 MergeOrAppend(df, append);
             }
+            Logger.Info("CSV import completed");
         }
 
         private void AppendChunk(List<string[]> chunk, string[] columns)
@@ -430,6 +475,7 @@ namespace squalor.DataBall
 
         public void ImportFromParquet(string path, bool append = false)
         {
+            Logger.Info($"Importing from Parquet {path}");
             if (Directory.Exists(path))
             {
                 // Assume partitioned directory
@@ -441,6 +487,7 @@ namespace squalor.DataBall
                     var df = fs.ReadParquetAsDataFrameAsync().GetAwaiter().GetResult();
                     MergeOrAppend(df, localAppend);
                     localAppend = true;
+                    Logger.Debug($"Imported from {file}");
                 }
             }
             else
@@ -449,16 +496,19 @@ namespace squalor.DataBall
                 var df = fs.ReadParquetAsDataFrameAsync().GetAwaiter().GetResult();
                 MergeOrAppend(df, append);
             }
+            Logger.Info("Parquet import completed");
         }
 
         public void ImportFromSqlite(string path, string tableName = "data", bool append = false)
         {
+            Logger.Info($"Importing from SQLite {path}, table {tableName}");
             using var conn = new SqliteConnection($"Data Source={path}");
             conn.Open();
             using var cmd = new SqliteCommand($"SELECT * FROM {tableName}", conn);
             using var reader = cmd.ExecuteReader();
             var df = LoadDataFrameFromReader(reader);
             MergeOrAppend(df, append);
+            Logger.Info("SQLite import completed");
         }
 
         private DataFrame LoadDataFrameFromReader(SqliteDataReader reader)
@@ -497,6 +547,7 @@ namespace squalor.DataBall
 
         public void ImportFromArchive(string path, bool append = false)
         {
+            Logger.Info($"Importing from archive {path}");
             using var fs = File.OpenRead(path);
             using var reader = ReaderFactory.Open(fs);
             bool localAppend = append;
@@ -507,13 +558,16 @@ namespace squalor.DataBall
                     using var entryStream = reader.OpenEntryStream();
                     var df = DataFrame.LoadCsv(entryStream);
                     MergeOrAppend(df, localAppend);
-                    localAppend = true; // append subsequent files
+                    localAppend = true;
+                    Logger.Debug($"Imported CSV from archive entry {reader.Entry.Key}");
                 }
             }
+            Logger.Info("Archive import completed");
         }
 
         public void ImportFromDataBall(string path, bool append = false)
         {
+            Logger.Info($"Importing from DataBall {path}");
             _currentFilePath = path;
             using var zip = ZipFile.OpenRead(path);
             var metadataEntry = zip.Entries.FirstOrDefault(e => e.FullName == "metadata.json");
@@ -527,6 +581,7 @@ namespace squalor.DataBall
                 foreach (var kvp in loadedMetadata)
                 {
                     Metadata[kvp.Key] = kvp.Value;
+                    Logger.Debug($"Loaded metadata {kvp.Key}");
                 }
             }
 
@@ -539,11 +594,14 @@ namespace squalor.DataBall
                 var df = stream.ReadParquetAsDataFrameAsync().GetAwaiter().GetResult();
                 MergeOrAppend(df, localAppend);
                 localAppend = true;
+                Logger.Debug($"Imported Parquet from {entry.FullName}");
             }
+            Logger.Info("DataBall import completed");
         }
 
         private void MergeOrAppend(DataFrame df, bool append)
         {
+            Logger.Debug("Merging or appending DataFrame");
             if (!append || Data.Rows.Count == 0)
             {
                 Data = df.Clone();
@@ -580,18 +638,21 @@ namespace squalor.DataBall
                     {
                         // Remove from df
                         df.Remove(key);
+                        Logger.Debug($"Removed constant column {key} from appended DF");
                     }
                     else
                     {
                         // Move to column: Add column to existing Data with val
                         AddConstantColumn(key, val, Data.Rows.Count);
                         keepInMetadata = false;
+                        Logger.Debug($"Promoted metadata {key} to column");
                     }
                 }
                 else
                 {
                     // Add column to df with val
                     AddConstantColumn(key, val, df.Rows.Count);
+                    Logger.Debug($"Added metadata {key} as column to appended DF");
                 }
 
                 if (!keepInMetadata)
@@ -653,6 +714,7 @@ namespace squalor.DataBall
             }
 
             Data = newData;
+            Logger.Debug("Merge/append completed");
         }
 
         private void AddConstantColumn(string name, object value, long length)
@@ -673,6 +735,7 @@ namespace squalor.DataBall
                 col = new StringDataFrameColumn(name, Enumerable.Repeat(value?.ToString(), (int)length));
             }
             Data.Append(col, inPlace: true);
+            Logger.Debug($"Added constant column {name}");
         }
 
         private void SetColumnValue(IDataFrameColumn col, long index, object value)
@@ -682,10 +745,12 @@ namespace squalor.DataBall
                 try
                 {
                     value = Convert.ChangeType(value, col.DataType);
+                    Logger.Debug($"Converted value for index {index}");
                 }
                 catch
                 {
                     value = null; // or throw
+                    Logger.Warn($"Failed to convert value for index {index}, set to null");
                 }
             }
             col[index] = value;
@@ -694,11 +759,14 @@ namespace squalor.DataBall
         // Export methods
         public void ExportToCsv(string path)
         {
+            Logger.Info($"Exporting to CSV {path}");
             DataFrame.SaveCsv(Data, path);
+            Logger.Info("CSV export completed");
         }
 
         public void ExportToParquet(string path, string[] partitionColumns = null)
         {
+            Logger.Info($"Exporting to Parquet {path}");
             if (partitionColumns != null && partitionColumns.Length > 0)
             {
                 ExportToPartitionedParquet(Path.GetDirectoryName(path), partitionColumns);
@@ -708,10 +776,12 @@ namespace squalor.DataBall
                 using var fs = File.OpenWrite(path);
                 fs.WriteParquetAsync(Data).GetAwaiter().GetResult();
             }
+            Logger.Info("Parquet export completed");
         }
 
         public void ExportToSqlite(string path, string tableName = "data")
         {
+            Logger.Info($"Exporting to SQLite {path}, table {tableName}");
             using var conn = new SqliteConnection($"Data Source={path}");
             conn.Open();
 
@@ -734,6 +804,7 @@ namespace squalor.DataBall
                 }
                 insertCmd.ExecuteNonQuery();
             }
+            Logger.Info("SQLite export completed");
         }
 
         private string GetSqliteType(Type type)
@@ -749,6 +820,7 @@ namespace squalor.DataBall
 
         public void ExportToArchive(string path, CompressionType compressionType = CompressionType.Deflate)
         {
+            Logger.Info($"Exporting to archive {path}");
             // For simplicity, export as ZIP with CSV inside; can extend for tar.gz etc.
             using var fs = File.OpenWrite(path);
             using var archive = SharpCompress.Archives.Zip.ZipArchive.Create();
@@ -757,10 +829,12 @@ namespace squalor.DataBall
             csvStream.Position = 0;
             archive.AddEntry("data.csv", csvStream, closeStream: false);
             archive.SaveTo(fs, new SharpCompress.Writers.WriterOptions(compressionType));
+            Logger.Info("Archive export completed");
         }
 
         public void ExportToDataBall(string path)
         {
+            Logger.Info($"Exporting to DataBall {path}");
             using var fs = File.OpenWrite(path);
             using var zip = new ZipArchive(fs, ZipArchiveMode.Create);
             var parquetEntry = zip.CreateEntry("data.parquet");
@@ -776,6 +850,7 @@ namespace squalor.DataBall
                 var json = JsonSerializer.Serialize(Metadata);
                 sw.Write(json);
             }
+            Logger.Info("DataBall export completed");
         }
 
         private class Config
