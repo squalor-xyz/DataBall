@@ -40,7 +40,7 @@ namespace squalor.DataBall.Tests
         {
             var db = new DataBall();
             db.AddColumn<int>("Id", new int[] { 1 });
-            db.AddColumn("Name", new string[] { "Test" }); // Use non-generic for string
+            db.AddColumn("Name", new string[] { "Test" });
 
             db.InitializeRow();
             db.ModifyField("Id", 2);
@@ -51,16 +51,6 @@ namespace squalor.DataBall.Tests
             Assert.Equal("Test", db.Data.Columns["Name"][1]);
         }
 
-        // Add non-generic AddColumn for string
-        // In DataBall.cs, add:
-        public void AddColumn(string name, IEnumerable<string> values)
-        {
-            var column = new StringDataFrameColumn(name, values);
-            Data.Columns.Add(column);
-            Logger.Debug($"Added string column {name}");
-        }
-
-        // Similar for other tests...
         [Fact]
         public void Roll_AppliesRelationships_ResetIfTriggerChanged()
         {
@@ -93,6 +83,91 @@ namespace squalor.DataBall.Tests
             File.Delete(configPath);
         }
 
-        // Update other tests similarly, using AddColumn for string types without <T>
+        [Fact]
+        public void AddColumn_AddsNewColumn()
+        {
+            var db = new DataBall();
+            db.AddColumn<int>("Id", Enumerable.Range(1, 5));
+
+            Assert.Single(db.Data.Columns);
+            Assert.Equal(5, db.Data.Rows.Count);
+            Assert.Equal(3, db.Data.Columns["Id"][2]);
+        }
+
+        [Fact]
+        public void RemoveColumn_RemovesColumn()
+        {
+            var db = new DataBall();
+            db.AddColumn<int>("Id", new int[0]);
+            db.AddColumn("Name", new string[0]);
+
+            db.RemoveColumn("Name");
+
+            Assert.Single(db.Data.Columns);
+            Assert.Equal("Id", db.Data.Columns[0].Name);
+        }
+
+        [Fact]
+        public void ImportFromCsv_AppendsData()
+        {
+            var csvPath = "test.csv";
+            File.WriteAllText(csvPath, "Id,Name\n1,Test");
+            var db = new DataBall();
+
+            db.ImportFromCsv(csvPath, append: false);
+
+            Assert.Equal(1, db.Data.Rows.Count);
+            Assert.Equal("1", db.Data.Columns["Id"][0]);
+
+            File.Delete(csvPath);
+        }
+
+        [Fact]
+        public void ExportToParquet_WritesFile()
+        {
+            var db = new DataBall();
+            db.AddColumn<int>("Id", new[] { 1 });
+            var path = "test.parquet";
+
+            db.ExportToParquet(path);
+
+            Assert.True(File.Exists(path));
+            File.Delete(path);
+        }
+
+        [Fact]
+        public void MergeOrAppend_AlignsSchemas()
+        {
+            var db = new DataBall();
+            db.AddColumn<int>("Id", new[] { 1 });
+            var df = new DataFrame();
+            df.Columns.Add(new StringDataFrameColumn("Name", new[] { "Test" }));
+
+            db.MergeOrAppend(df, append: true);
+
+            Assert.Equal(2, db.Data.Columns.Count);
+            Assert.Equal(1, db.Data.Rows.Count);
+            Assert.Null(db.Data.Columns["Name"][0]);
+        }
+
+        [Fact]
+        public void Save_ToBallFile()
+        {
+            var db = new DataBall();
+            db.AddColumn("Category", new[] { "A", "B", "A" });
+            db.AddColumn<int>("Value", new[] { 1, 2, 3 });
+            var path = "test";
+
+            db.Save(path, new[] { "Category" });
+
+            var ballPath = "test.ball";
+            Assert.True(File.Exists(ballPath));
+
+            var db2 = new DataBall();
+            db2.ImportFromDataBall(ballPath);
+            Assert.Equal(3, db2.Data.Rows.Count);
+
+            File.Delete(ballPath);
+        }
     }
 }

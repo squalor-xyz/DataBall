@@ -320,7 +320,7 @@ namespace squalor.DataBall
             if (partitionColumns is { Length: > 0 })
             {
                 var groupBy = Data.GroupBy(partitionColumns);
-                foreach (GroupedDataFrame group in groupBy)
+                foreach (var group in groupBy.Groupings)
                 {
                     var entryName = "";
                     for (int i = 0; i < partitionColumns.Length; i++)
@@ -333,7 +333,7 @@ namespace squalor.DataBall
 
                     var entry = zip.CreateEntry(entryName);
                     using var stream = entry.Open();
-                    WriteParquet(group.DataFrame, stream);
+                    WriteParquet(group.Group, stream);
                     Logger.Debug($"Saved partitioned Parquet entry {entryName}");
                 }
             }
@@ -378,7 +378,7 @@ namespace squalor.DataBall
             }
 
             var groupBy = Data.GroupBy(partitionColumns);
-            foreach (GroupedDataFrame group in groupBy)
+            foreach (var group in groupBy.Groupings)
             {
                 var partitionPath = basePath;
                 for (int i = 0; i < partitionColumns.Length; i++)
@@ -391,23 +391,24 @@ namespace squalor.DataBall
 
                 var filePath = Path.Combine(partitionPath, "part-0.parquet");
                 using var fs = File.OpenWrite(filePath);
-                WriteParquet(group.DataFrame, fs);
+                WriteParquet(group.Group, fs);
                 Logger.Debug($"Exported partition to {filePath}");
             }
         }
 
-        public void AddColumn<T>(string name, IEnumerable<T> values) where T : unmanaged
+        public void AddColumn<T>(string name, IEnumerable<T> values)
         {
-            var column = new PrimitiveDataFrameColumn<T>(name, values);
+            DataFrameColumn column;
+            if (typeof(T) == typeof(string))
+            {
+                column = new StringDataFrameColumn(name, values.Cast<string?>());
+            }
+            else
+            {
+                column = new PrimitiveDataFrameColumn<T>(name, values);
+            }
             Data.Columns.Add(column);
             Logger.Debug($"Added column {name}");
-        }
-
-        public void AddColumn(string name, IEnumerable<string?> values)
-        {
-            var column = new StringDataFrameColumn(name, values);
-            Data.Columns.Add(column);
-            Logger.Debug($"Added string column {name}");
         }
 
         public void RemoveColumn(string name)
@@ -499,7 +500,7 @@ namespace squalor.DataBall
             for (int i = 0; i < columns.Length; i++)
             {
                 var values = chunk.Select(row => row[i]).ToArray();
-                df.AddColumn(columns[i], values);
+                df.AddColumn(values, columns[i]);
             }
             MergeOrAppend(df, true);
         }
@@ -529,35 +530,24 @@ namespace squalor.DataBall
 
         private DataFrame ReadParquet(string path)
         {
-            using var stream = File.OpenRead(path);
-            using var reader = new ParquetReader(stream);
-            var table = new Table(reader.Schema);
-            for (int rg = 0; rg < reader.RowGroupCount; rg++)
-            {
-                using var rgReader = reader.OpenRowGroupReader(rg);
-                for (int c = 0; c < reader.Schema.DataFields.Length; c++)
-                {
-                    var field = reader.Schema.DataFields[c];
-                    var col = rgReader.ReadColumn(field);
-                    table.AddColumn(col);
-                }
-            }
+            using var reader = ParquetReader.CreateAsync(File.OpenRead(path)).GetAwaiter().GetResult();
+            var table = reader.ReadEntireRowGroup(0); // Assume single row group for simplicity; extend for multiple
             return FromParquetTable(table);
         }
 
-        private DataFrame FromParquetTable(Table table)
+        private DataFrame FromParquetTable(RowGroup rowGroup)
         {
             var df = new DataFrame();
-            for (int i = 0; i < table.ColumnCount; i++)
+            for (int i = 0; i < rowGroup.Schema.DataFields.Length; i++)
             {
-                var col = table[i];
-                Type type = col.Field.ClrType ?? typeof(string);
-                if (type == typeof(string))
+                var field = rowGroup.Schema.DataFields[i];
+                var col = rowGroup.ReadColumn(field).Data;
+                if (field.ClrType == typeof(string))
                 {
-                    df.AddColumn(col.Field.Name, col.StringData());
-                } else if (type == typeof(int))
+                    df.AddColumn(field.Name, col.Cast<string?>());
+                } else if (field.ClrType == typeof(int))
                 {
-                    df.AddColumn(col.Field.Name, col.IntData());
+                    df.AddColumn(field.Name, col.Cast<int>());
                 } // add for other types
             }
             return df;
@@ -660,8 +650,7 @@ namespace squalor.DataBall
             foreach (var entry in parquetEntries)
             {
                 using var stream = entry.Open();
-                var table = ReadParquetTable(stream);
-                var df = FromParquetTable(table);
+                var df = ReadParquet(stream);
                 MergeOrAppend(df, localAppend);
                 localAppend = true;
                 Logger.Debug($"Imported Parquet from {entry.FullName}");
@@ -669,22 +658,21 @@ namespace squalor.DataBall
             Logger.Info("DataBall import completed");
         }
 
-        private Table ReadParquetTable(Stream stream)
+        private DataFrame ReadParquet(Stream stream)
         {
             using var reader = new ParquetReader(stream);
-            var schema = reader.Schema;
-            var table = new Table(schema);
+            var table = new Table(reader.Schema);
             for (int rg = 0; rg < reader.RowGroupCount; rg++)
             {
                 using var rgReader = reader.OpenRowGroupReader(rg);
-                for (int c = 0; c < schema.DataFields.Length; c++)
+                for (int c = 0; c < reader.Schema.DataFields.Length; c++)
                 {
-                    var field = schema.DataFields[c];
+                    var field = reader.Schema.DataFields[c];
                     var col = rgReader.ReadColumn(field);
                     table.AddColumn(col);
                 }
             }
-            return table;
+            return FromParquetTable(table);
         }
 
         private DataFrame FromParquetTable(Table table)
@@ -866,28 +854,10 @@ namespace squalor.DataBall
             else
             {
                 using var fs = File.OpenWrite(path);
-                WriteParquetToStream(Data, fs);
+                using var writer = new ParquetWriter(fs);
+                writer.Write(Data.ToTable());
             }
             Logger.Info("Parquet export completed");
-        }
-
-        private void WriteParquetToStream(DataFrame df, Stream stream)
-        {
-            var fields = df.Columns.Select(c => new DataField(c.Name, c.DataType)).ToArray();
-            var schema = new ParquetSchema(fields);
-            using var writer = new ParquetWriter(schema, stream);
-            using var groupWriter = writer.CreateRowGroup();
-            for (int i = 0; i < df.Columns.Count; i++)
-            {
-                var col = df.Columns[i];
-                var data = new object[col.Length];
-                for (long j = 0; j < col.Length; j++)
-                {
-                    data[j] = col[j] ?? new object();
-                }
-                var dataColumn = new DataColumn(fields[i], data);
-                groupWriter.WriteColumn(dataColumn);
-            }
         }
 
         public void ExportToSqlite(string path, string tableName = "data")
@@ -947,7 +917,8 @@ namespace squalor.DataBall
             var parquetEntry = zip.CreateEntry("data.parquet");
             using (var stream = parquetEntry.Open())
             {
-                WriteParquetToStream(Data, stream);
+                using var writer = new ParquetWriter(stream);
+                writer.Write(Data.ToTable());
             }
 
             var metadataEntry = zip.CreateEntry("metadata.json");
