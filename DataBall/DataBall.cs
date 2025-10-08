@@ -8,6 +8,7 @@ using Microsoft.Data.Analysis;
 using Microsoft.Data.Sqlite;
 using Parquet;
 using Parquet.Data;
+using Parquet.Data.DataFrameExtensions; // For Parquet read/write
 using System.IO.Compression;
 using SharpCompress.Readers;
 using SharpCompress.Writers;
@@ -319,21 +320,13 @@ namespace squalor.DataBall
 
             if (partitionColumns is { Length: > 0 })
             {
-                var groupBy = Data.GroupBy(partitionColumns);
-                foreach (var group in groupBy.Groupings)
+                var groupBy = Data.GroupBy(partitionColumns.First()); // Use first column for simplicity
+                foreach (var group in groupBy)
                 {
-                    var entryName = "";
-                    for (int i = 0; i < partitionColumns.Length; i++)
-                    {
-                        object? val = group.KeyValues[i];
-                        string valStr = val?.ToString() ?? "null";
-                        entryName += $"{partitionColumns[i]}={valStr}/";
-                    }
-                    entryName += "part-0.parquet";
-
+                    var entryName = $"{partitionColumns.First()}={group.Key?.ToString() ?? "null"}/part-0.parquet";
                     var entry = zip.CreateEntry(entryName);
                     using var stream = entry.Open();
-                    WriteParquet(group.Group, stream);
+                    group.DataFrame.WriteParquet(stream);
                     Logger.Debug($"Saved partitioned Parquet entry {entryName}");
                 }
             }
@@ -341,31 +334,12 @@ namespace squalor.DataBall
             {
                 var parquetEntry = zip.CreateEntry("data.parquet");
                 using var stream = parquetEntry.Open();
-                WriteParquet(Data, stream);
+                Data.WriteParquet(stream);
                 Logger.Debug("Saved data.parquet");
             }
 
             _currentFilePath = savePath;
             Logger.Info($"Saved to {savePath}");
-        }
-
-        private void WriteParquet(DataFrame df, Stream stream)
-        {
-            var fields = df.Columns.Select(c => new DataField(c.Name, c.DataType)).ToArray();
-            var schema = new ParquetSchema(fields);
-            using var writer = new ParquetWriter(schema, stream);
-            using var groupWriter = writer.CreateRowGroup();
-            for (int i = 0; i < df.Columns.Count; i++)
-            {
-                var col = df.Columns[i];
-                var data = new object[col.Length];
-                for (long j = 0; j < col.Length; j++)
-                {
-                    data[j] = col[j] ?? new object();
-                }
-                var dataColumn = new DataColumn(fields[i], data);
-                groupWriter.WriteColumn(dataColumn);
-            }
         }
 
         public void ExportToPartitionedParquet(string basePath, params string[] partitionColumns)
@@ -377,21 +351,15 @@ namespace squalor.DataBall
                 return;
             }
 
-            var groupBy = Data.GroupBy(partitionColumns);
-            foreach (var group in groupBy.Groupings)
+            var groupBy = Data.GroupBy(partitionColumns.First()); // Use first column for simplicity
+            foreach (var group in groupBy)
             {
-                var partitionPath = basePath;
-                for (int i = 0; i < partitionColumns.Length; i++)
-                {
-                    object? val = group.KeyValues[i];
-                    string valStr = val?.ToString() ?? "null";
-                    partitionPath = Path.Combine(partitionPath, $"{partitionColumns[i]}={valStr}");
-                }
+                var partitionPath = Path.Combine(basePath, $"{partitionColumns.First()}={group.Key?.ToString() ?? "null"}");
                 Directory.CreateDirectory(partitionPath);
 
                 var filePath = Path.Combine(partitionPath, "part-0.parquet");
                 using var fs = File.OpenWrite(filePath);
-                WriteParquet(group.Group, fs);
+                group.DataFrame.WriteParquet(fs);
                 Logger.Debug($"Exported partition to {filePath}");
             }
         }
@@ -500,7 +468,7 @@ namespace squalor.DataBall
             for (int i = 0; i < columns.Length; i++)
             {
                 var values = chunk.Select(row => row[i]).ToArray();
-                df.AddColumn(values, columns[i]);
+                df.Columns.Add(new StringDataFrameColumn(columns[i], values));
             }
             MergeOrAppend(df, true);
         }
@@ -514,7 +482,8 @@ namespace squalor.DataBall
                 bool localAppend = append;
                 foreach (var file in parquetFiles)
                 {
-                    var df = ReadParquet(file);
+                    using var fs = File.OpenRead(file);
+                    var df = DataFrameExtensions.ReadParquet(fs);
                     MergeOrAppend(df, localAppend);
                     localAppend = true;
                     Logger.Debug($"Imported from {file}");
@@ -522,35 +491,11 @@ namespace squalor.DataBall
             }
             else
             {
-                var df = ReadParquet(path);
+                using var fs = File.OpenRead(path);
+                var df = DataFrameExtensions.ReadParquet(fs);
                 MergeOrAppend(df, append);
             }
             Logger.Info("Parquet import completed");
-        }
-
-        private DataFrame ReadParquet(string path)
-        {
-            using var reader = ParquetReader.CreateAsync(File.OpenRead(path)).GetAwaiter().GetResult();
-            var table = reader.ReadEntireRowGroup(0); // Assume single row group for simplicity; extend for multiple
-            return FromParquetTable(table);
-        }
-
-        private DataFrame FromParquetTable(RowGroup rowGroup)
-        {
-            var df = new DataFrame();
-            for (int i = 0; i < rowGroup.Schema.DataFields.Length; i++)
-            {
-                var field = rowGroup.Schema.DataFields[i];
-                var col = rowGroup.ReadColumn(field).Data;
-                if (field.ClrType == typeof(string))
-                {
-                    df.AddColumn(field.Name, col.Cast<string?>());
-                } else if (field.ClrType == typeof(int))
-                {
-                    df.AddColumn(field.Name, col.Cast<int>());
-                } // add for other types
-            }
-            return df;
         }
 
         public void ImportFromSqlite(string path, string tableName = "data", bool append = false)
@@ -650,7 +595,7 @@ namespace squalor.DataBall
             foreach (var entry in parquetEntries)
             {
                 using var stream = entry.Open();
-                var df = ReadParquet(stream);
+                var df = DataFrameExtensions.ReadParquet(stream);
                 MergeOrAppend(df, localAppend);
                 localAppend = true;
                 Logger.Debug($"Imported Parquet from {entry.FullName}");
@@ -658,42 +603,7 @@ namespace squalor.DataBall
             Logger.Info("DataBall import completed");
         }
 
-        private DataFrame ReadParquet(Stream stream)
-        {
-            using var reader = new ParquetReader(stream);
-            var table = new Table(reader.Schema);
-            for (int rg = 0; rg < reader.RowGroupCount; rg++)
-            {
-                using var rgReader = reader.OpenRowGroupReader(rg);
-                for (int c = 0; c < reader.Schema.DataFields.Length; c++)
-                {
-                    var field = reader.Schema.DataFields[c];
-                    var col = rgReader.ReadColumn(field);
-                    table.AddColumn(col);
-                }
-            }
-            return FromParquetTable(table);
-        }
-
-        private DataFrame FromParquetTable(Table table)
-        {
-            var df = new DataFrame();
-            for (int i = 0; i < table.ColumnCount; i++)
-            {
-                var col = table[i];
-                Type type = col.Field.ClrType ?? typeof(string);
-                if (type == typeof(string))
-                {
-                    df.AddColumn(col.Field.Name, col.StringData());
-                } else if (type == typeof(int))
-                {
-                    df.AddColumn(col.Field.Name, col.IntData());
-                } // add for other types
-            }
-            return df;
-        }
-
-        private void MergeOrAppend(DataFrame df, bool append)
+        public void MergeOrAppend(DataFrame df, bool append)
         {
             Logger.Debug("Merging or appending DataFrame");
             if (!append || Data.Rows.Count == 0)
@@ -824,7 +734,7 @@ namespace squalor.DataBall
             if (value != null && value.GetType() != col.DataType)
             {
                 try
-                {
+                    {
                     value = Convert.ChangeType(value, col.DataType);
                     Logger.Debug($"Converted value for index {index}");
                 }
@@ -854,8 +764,7 @@ namespace squalor.DataBall
             else
             {
                 using var fs = File.OpenWrite(path);
-                using var writer = new ParquetWriter(fs);
-                writer.Write(Data.ToTable());
+                Data.WriteParquet(fs);
             }
             Logger.Info("Parquet export completed");
         }
@@ -917,8 +826,7 @@ namespace squalor.DataBall
             var parquetEntry = zip.CreateEntry("data.parquet");
             using (var stream = parquetEntry.Open())
             {
-                using var writer = new ParquetWriter(stream);
-                writer.Write(Data.ToTable());
+                Data.WriteParquet(stream);
             }
 
             var metadataEntry = zip.CreateEntry("metadata.json");
