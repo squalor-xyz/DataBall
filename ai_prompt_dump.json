@@ -1,0 +1,43 @@
+{
+  "project_name": "DataBall .NET Core Class",
+  "description": "Versatile data handling class for test executive applications, supporting import/export in various formats, data manipulation, metadata, and configuration-based relationships. Supports large datasets via chunked imports and partitioned Parquet exports. Licensed under MPL 2.0.",
+  "features": {
+    "storage": "Microsoft.Data.Analysis.DataFrame (Arrow-backed) for data storage. Dictionary<string, object> for metadata (constants).",
+    "import": "CSV (chunked for large), Parquet (partitioned), SQLite, Archive (zip/tar.gz/tar.xz of CSVs), DataBall (.ball ZIP with partitioned Parquet and JSON metadata).",
+    "export": "CSV, Parquet (partitioned), SQLite, Archive (zip/tar.gz/tar.xz with CSV), DataBall (.ball ZIP with partitioned Parquet and JSON metadata).",
+    "manipulation": "Add/Remove columns, Add/Remove rows, Set cell values, Row builder: InitializeRow (optional initial values), ModifyField, CommitRow (commit with propagation and relationships), Bounce: Compact by removing constants to metadata, deduplicate rows, chunk deduplication (4x4 to 1000x1000, max 5 tables), Squish: Full chunk deduplication and partitioning for disk storage, Roll: Export to specified format with switch on ExportType enum, DataFrame ops: Select, Filter, GroupBy, Join, Pivot, Sort, Aggregate.",
+    "config": "JSON for metadata, column types (int, long, float, double, bool, datetime, string), relationships (trigger field and list of fields to reset if trigger changes).",
+    "merge": "Append with schema alignment, type coercion for mismatches, filling nulls for missing columns. Checks metadata consistency, promotes to columns if values differ.",
+    "relationships": "On CommitRow, if trigger field changed (value differs from original or newly set), reset dependent fields to null unless explicitly modified.",
+    "backend": "IDataBackend interface with InMemoryBackend (DataFrame) and ParquetBackend (lazy streaming of row groups).",
+    "versioning": "Metadata['Version'] = '1.0' on save; on import, if < '1.0', call MigrateData (add columns, convert formats).",
+    "error_handling": "DataBallException base, ImportException, ExportException subclasses. Wrap import/export, log with NLog.Error, throw custom exceptions."
+  },
+  "implementation_details": {
+    "backend_abstraction": "IDataBackend with LoadData, SaveData, Filter (extend for GroupBy, Join, etc.). InMemoryBackend uses DataFrame; ParquetBackend streams Parquet row groups for out-of-core.",
+    "versioning": "Metadata['Version'] = '1.0' on save; import checks version, runs MigrateData for older formats (e.g., add missing columns).",
+    "error_handling": "Wrap import/export in try/catch, log with NLog, throw DataBallException/ImportException/ExportException.",
+    "dataframe_ops": "Delegate to DataFrame methods (e.g., public DataFrame Filter(Func<DataFrameRow, bool> predicate) => Data.Filter(predicate);). Bounce before Save/Roll.",
+    "bounce": "Remove constants to metadata, deduplicate rows, chunk deduplication (4x4 to 1000x1000, max 5 tables) for in-memory operability.",
+    "squish": "Full chunk deduplication (no table limit) and partitioning for disk storage, reconstruct on import with Bounce.",
+    "roll": "ExportType enum (Csv, Parquet, Sqlite, Archive, DataBall); switch to call ExportTo* methods.",
+    "chunk_deduplication": "Scan for duplicate matrices (min 4x4, max 1000x1000), replace with IDs in metadata tables. Bounce limits to 5 tables for performance; Squish uses full deduplication."
+  },
+  "documentation_needs": {
+    "files": [
+      "DataBall_Class_Documentation.md (overview, features, usage)",
+      "Row_Builder_Pattern_Details.md",
+      "Proposal_for_Apache_Arrow_Integration.md",
+      "Data_Backing_Proposal_for_DataBall.md",
+      "Apache_Arrow_Overview.md",
+      "Microsoft_Data_Analysis_DataFrame_Overview.md",
+      "Tabular_Data_Libraries_in_NET_Performance_Insights.md",
+      "Bounce_Operation_Details.md",
+      "Proposal_for_Polars_Integration_in_DataBall.md",
+      "Proposal_for_Parquet_as_Data_Backing_in_DataBall.md",
+      "Performance.md (benchmark results)"
+    ],
+    "updates": "Include backend abstraction, versioning, error handling, exposed DataFrame ops, updated Roll, Bounce with chunk deduplication (max 5 tables), Squish for full partitioning, tar.gz/tar.xz export support, robust merge with type coercion."
+  },
+  "recreation_instructions": "Create a new .NET 9.0 project with Microsoft.Data.Analysis, Parquet.Net, SharpCompress, System.Text.Json, Microsoft.Data.Sqlite, NLog. Implement DataBall with features: multi-format import/export, row builder, Bounce (5-table limit), Squish (full partitioning), DataFrame ops, backend abstraction, versioning, custom exceptions. Add xUnit tests. Support large data with chunked imports, partitioned exports. Use ZIP for .ball files, support tar.gz/tar.xz for archives. License under MPL 2.0. Use NLog for logging."
+}
