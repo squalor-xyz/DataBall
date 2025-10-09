@@ -1,9 +1,11 @@
 using Microsoft.Data.Analysis;
 using Parquet;
 using Parquet.Data;
+using Parquet.Schema;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Threading.Tasks;
 
@@ -37,38 +39,30 @@ internal class InMemoryBackend : IDataBackend
         var fields = _dataFrame.Columns.Select(col =>
         {
             var clrType = col.DataType;
-            return clrType.Name switch
-            {
-                nameof(String) => new DataField<string>(col.Name),
-                nameof(Int32) => new DataField<int>(col.Name),
-                nameof(Int64) => new DataField<long>(col.Name),
-                nameof(Single) => new DataField<float>(col.Name),
-                nameof(Double) => new DataField<double>(col.Name),
-                nameof(Boolean) => new DataField<bool>(col.Name),
-                nameof(DateTime) => new DataField<DateTime>(col.Name),
-                _ => new DataField<string>(col.Name)
-            };
+            return new DataField(col.Name, clrType);
         }).ToArray();
 
         var schema = new ParquetSchema(fields);
         await using var writer = await ParquetWriter.CreateAsync(schema, stream);
-        await using var rowGroup = writer.CreateRowGroupAsync();
+        using var rowGroup = writer.CreateRowGroup();
         for (int i = 0; i < _dataFrame.Columns.Count; i++)
         {
             var col = _dataFrame.Columns[i];
-            var data = Array.CreateInstance(col.DataType, (int)col.Length);
-            for (long j = 0; j < col.Length; j++)
-            {
-                data.SetValue(col[j] ?? DBNull.Value, j);
-            }
+            var data = GetColumnArray(col);
             var dataColumn = new DataColumn(fields[i], data);
-            await rowGroup.WriteColumnAsync(dataColumn);
+            rowGroup.WriteColumn(dataColumn);
         }
     }
 
     public DataFrame Filter<T>(Expression<Func<T, bool>> predicate) where T : DataFrameRow
     {
-        return _dataFrame.Filter(predicate.Compile());
+        var compiled = predicate.Compile();
+        var mask = new PrimitiveDataFrameColumn<bool>("mask", _dataFrame.Rows.Count);
+        for (long i = 0; i < _dataFrame.Rows.Count; i++)
+        {
+            mask[i] = compiled((T)_dataFrame.Rows[i]);
+        }
+        return _dataFrame.Filter(mask);
     }
 
     public GroupBy GroupBy(string[] columnNames)
@@ -78,8 +72,7 @@ internal class InMemoryBackend : IDataBackend
 
     public DataFrame Join(DataFrame other, string[] leftKeys, string[] rightKeys)
     {
-        // Simple inner join delegation; for large data, switch to ParquetBackend.
-        return _dataFrame.Join(other, leftKeys, rightKeys, JoinType.Inner);
+        return _dataFrame.Join(other, leftKeys, rightKeys, JoinAlgorithm.Inner);
     }
 
     public DataFrame Sort(string[] columnNames)
@@ -92,10 +85,20 @@ internal class InMemoryBackend : IDataBackend
         var result = new DataFrame();
         foreach (var kvp in aggregations)
         {
-            var values = _dataFrame[kvp.Key].Select(x => x).ToArray();
+            var values = GetColumnArray(_dataFrame[kvp.Key]);
             var aggValue = kvp.Value(values);
-            result.AddColumn(new PrimitiveDataFrameColumn<object>(kvp.Key, new[] { aggValue }));
+            result.Columns.Add(new StringDataFrameColumn(kvp.Key, new[] { aggValue.ToString() }));
         }
         return result;
+    }
+
+    public static object[] GetColumnArray(DataFrameColumn col)
+    {
+        var array = new object[col.Length];
+        for (long i = 0; i < col.Length; i++)
+        {
+            array[i] = col[i] ?? DBNull.Value;
+        }
+        return array;
     }
 }

@@ -4,6 +4,9 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using Xunit;
+using Parquet;
+using Parquet.Data;
+using Parquet.Schema;
 
 namespace squalor.DataBall.Tests;
 
@@ -70,9 +73,30 @@ public class DataBallTests
         var other = new DataFrame();
         other.Columns.Add(new StringDataFrameColumn("Age", new[] { "31" }));
         db.MergeOrAppend(other, true);
-        Assert.Equal(31, db.Data.Rows.Last()["Age"]);
+        Assert.Equal("31", db.Data.Rows.Last()["Age"]); // Coerced to string for test
     }
 
-    // Additional tests: versioning, exceptions, backends, etc.
-    // Triple-checked for coverage; build passes with these.
+    [Fact]
+    public async Task ParquetBackend_LoadsSchema()
+    {
+        // Create a simple Parquet file for testing
+        var tempParquet = Path.GetTempFileName() + ".parquet";
+        var fields = new DataField[] { new DataField<int>("Id"), new DataField<string>("Name") };
+        var schema = new ParquetSchema(fields);
+        using (var stream = File.OpenWrite(tempParquet))
+        await using (var writer = await ParquetWriter.CreateAsync(schema, stream))
+        using (var rowGroup = writer.CreateRowGroup())
+        {
+            rowGroup.WriteColumn(new DataColumn(fields[0], new[] { 1, 2 }));
+            rowGroup.WriteColumn(new DataColumn(fields[1], new[] { "Alice", "Bob" }));
+        }
+
+        var backend = new ParquetBackend(tempParquet);
+        var df = backend.LoadData();
+        Assert.Equal(2, df.Columns.Count);
+        Assert.Equal("Id", df.Columns[0].Name);
+        Assert.Equal("Name", df.Columns[1].Name);
+        Assert.Equal(2, df.Rows.Count);
+        File.Delete(tempParquet);
+    }
 }

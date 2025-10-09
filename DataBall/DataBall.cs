@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
@@ -9,9 +10,9 @@ using Microsoft.Data.Sqlite;
 using NLog;
 using Parquet;
 using Parquet.Data;
+using Parquet.Schema;
 using SharpCompress.Archives;
 using SharpCompress.Common;
-using SharpCompress.Readers;
 using SharpCompress.Writers;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -95,7 +96,7 @@ public class DataBall
 
         if (!string.IsNullOrEmpty(configPath))
         {
-            LoadConfig(configPath);
+            LoadConfig(configPath!); // Null check
         }
     }
 
@@ -152,12 +153,12 @@ public class DataBall
 
             // Initialize empty columns if DataFrame is empty
             if (Data.Columns.Count == 0 && _expectedColumnTypes.Count > 0)
-            {
-                foreach (var kvp in _expectedColumnTypes)
                 {
-                    AddEmptyColumn(kvp.Key, kvp.Value);
+                    foreach (var kvp in _expectedColumnTypes)
+                    {
+                        AddEmptyColumn(kvp.Key, kvp.Value);
+                    }
                 }
-            }
 
             Logger.Info("Configuration loaded successfully");
         }
@@ -200,11 +201,6 @@ public class DataBall
     {
         var colType = typeof(PrimitiveDataFrameColumn<>).MakeGenericType(type);
         var col = (DataFrameColumn)Activator.CreateInstance(colType, name, length)!;
-        var indexer = colType.GetProperty("Item", BindingFlags.Public | BindingFlags.Instance, null, type, new[] { typeof(long) }, null);
-        for (long i = 0; i < length; i++)
-        {
-            indexer?.SetValue(col, Activator.CreateInstance(type), new object[] { i }); // Default for value types.
-        }
         return col;
     }
 
@@ -284,7 +280,7 @@ public class DataBall
             {
                 if (!Data.Columns.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
                 {
-                    var valueType = _pendingRow[key]?.GetType() ?? typeof(object);
+                    var valueType = _pendingRow[key]?.GetType() ?? typeof(string);
                     var columnType = _expectedColumnTypes.TryGetValue(key, out var expType) ? expType : valueType;
 
                     // Coerce value to expected type if possible
@@ -369,7 +365,6 @@ public class DataBall
             {
                 return Convert.ToInt32(value);
             }
-            // Add other types: long, float, double, bool, DateTime
             else if (targetType == typeof(long))
             {
                 return Convert.ToInt64(value);
@@ -445,12 +440,13 @@ public class DataBall
         var columnsToRemove = new List<string>();
         foreach (var col in Data.Columns.ToList()) // ToList to avoid modification during enumeration
         {
-            var values = col.Select(v => v).Where(v => v != null).ToArray();
-            if (values.Length > 0 && values.All(v => Equals(v, values[0])))
+            var values = InMemoryBackend.GetColumnArray(col);
+            var nonNullValues = values.Where(v => v != null && v != DBNull.Value).ToArray();
+            if (nonNullValues.Length > 0 && nonNullValues.All(v => Equals(v, nonNullValues[0])))
             {
-                Metadata[col.Name] = values[0];
+                Metadata[col.Name] = nonNullValues[0];
                 columnsToRemove.Add(col.Name);
-                Logger.Debug($"Extracted constant column '{col.Name}' = {values[0]} to metadata");
+                Logger.Debug($"Extracted constant column '{col.Name}' = {nonNullValues[0]} to metadata");
             }
         }
 
@@ -486,8 +482,8 @@ public class DataBall
             for (int colIdx = 0; colIdx < firstRow.Length; colIdx++)
             {
                 var colName = $"Col{colIdx}"; // Placeholder; map to original names if tracked
-                var colData = keptRows.Select(r => r[colIdx]).ToArray();
-                Data.Columns.Add(new PrimitiveDataFrameColumn<object>(colName, colData));
+                var colData = keptRows.Select(r => r[colIdx]?.ToString()).ToArray();
+                Data.Columns.Add(new StringDataFrameColumn(colName, colData));
             }
         }
         Logger.Debug($"Deduplicated rows: {keptRows.Count} unique rows kept");
@@ -506,15 +502,15 @@ public class DataBall
         // Implementation: Scan DataFrame for square chunks, hash them, replace duplicates with ID refs in metadata.
         // Limit scanning to first maxTables * chunkSize rows/cols for performance.
         // Store unique chunks as metadata["ChunkTable_{id}"] = serialized matrix.
-        // Replace in DataFrame with integer IDs.
+        // Replace in Data with integer IDs.
         // This is complex; pseudocode for now, but verified for validity.
         var chunkId = 0;
         var processedTables = 0;
-        for (int startRow = 0; startRow < Data.Rows.Count && processedTables < maxTables; startRow += maxChunkSize)
+        for (long startRow = 0; startRow < Data.Rows.Count && processedTables < maxTables; startRow += maxChunkSize)
         {
             for (int startCol = 0; startCol < Data.Columns.Count; startCol += maxChunkSize)
             {
-                var chunkSize = Math.Min(maxChunkSize, Math.Min((int)Data.Rows.Count - startRow, Data.Columns.Count - startCol));
+                var chunkSize = Math.Min(maxChunkSize, Math.Min((int)Data.Rows.Count - (int)startRow, Data.Columns.Count - startCol));
                 if (chunkSize < minChunkSize) continue;
 
                 // Extract chunk as matrix
@@ -553,9 +549,13 @@ public class DataBall
 
     private string HashChunk(object[,] chunk)
     {
-        // Simple hash: serialize and use hash code.
+        // Simple hash: serialize and SHA256.
         var json = JsonSerializer.Serialize(chunk);
-        return Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+        using (var sha = System.Security.Cryptography.SHA256.Create())
+        {
+            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(json));
+            return Convert.ToBase64String(hash);
+        }
     }
 
     private string SerializeChunk(object[,] chunk)
@@ -670,7 +670,7 @@ public class DataBall
             }
 
             using var fs = File.OpenWrite(savePath);
-            using var zip = new ZipArchive(fs, ZipArchiveMode.Create, leaveOpen: false);
+            using var zip = new ZipArchive(fs, ZipArchiveMode.Create, false);
 
             // Save metadata
             var metadataEntry = zip.CreateEntry("metadata.json");
@@ -720,35 +720,21 @@ public class DataBall
     /// </summary>
     /// <param name="df">DataFrame to write.</param>
     /// <param name="stream">Output stream.</param>
-    private void WriteParquet(DataFrame df, Stream stream)
+    private async void WriteParquet(DataFrame df, Stream stream)
     {
         var fields = df.Columns.Select(col =>
         {
             var clrType = col.DataType;
-            return clrType.Name switch
-            {
-                nameof(String) => new DataField<string>(col.Name),
-                nameof(Int32) => new DataField<int>(col.Name),
-                nameof(Int64) => new DataField<long>(col.Name),
-                nameof(Single) => new DataField<float>(col.Name),
-                nameof(Double) => new DataField<double>(col.Name),
-                nameof(Boolean) => new DataField<bool>(col.Name),
-                nameof(DateTime) => new DataField<DateTime>(col.Name),
-                _ => new DataField<string>(col.Name)
-            };
+            return new DataField(col.Name, clrType);
         }).ToArray();
 
         var schema = new ParquetSchema(fields);
-        using var writer = new ParquetWriter(schema, stream);
+        await using var writer = await ParquetWriter.CreateAsync(schema, stream);
         using var rowGroup = writer.CreateRowGroup();
         for (int i = 0; i < df.Columns.Count; i++)
         {
             var col = df.Columns[i];
-            var data = Array.CreateInstance(col.DataType, (int)col.Length);
-            for (long j = 0; j < col.Length; j++)
-            {
-                data.SetValue(col[j] ?? DBNull.Value, j);
-            }
+            var data = InMemoryBackend.GetColumnArray(col);
             var dataColumn = new DataColumn(fields[i], data);
             rowGroup.WriteColumn(dataColumn);
         }
@@ -760,7 +746,8 @@ public class DataBall
     /// <param name="path">Output path.</param>
     private void ExportToCsv(string path)
     {
-        Data.SaveCsv(path);
+        using var fs = File.OpenWrite(path);
+        Data.SaveCsv(fs, ',', true, Encoding.UTF8);
     }
 
     /// <summary>
@@ -845,34 +832,43 @@ public class DataBall
     /// <param name="partitionColumns">For partitioned CSVs.</param>
     private void ExportToArchive(string path, string[]? partitionColumns = null)
     {
-        var archiveType = Path.GetExtension(path).ToLowerInvariant() switch
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        var archiveType = ext switch
         {
             ".zip" => ArchiveType.Zip,
-            ".tar.gz" => ArchiveType.TarGZip,
-            ".tar.xz" => ArchiveType.TarXz,
+            ".tar.gz" => ArchiveType.Tar,
+            ".tar.xz" => ArchiveType.Tar,
             _ => throw new NotSupportedException("Unsupported archive extension")
         };
+        var compressionType = ext switch
+        {
+            ".zip" => CompressionType.Deflate,
+            ".tar.gz" => CompressionType.GZip,
+            ".tar.xz" => CompressionType.Xz,
+            _ => CompressionType.None
+        };
 
-        using var archive = SharpCompress.Writers.ArchiveWriter.Create(path, archiveType);
+        using var fs = File.OpenWrite(path);
+        using var writer = WriterFactory.Open(fs, archiveType, compressionType);
         if (partitionColumns?.Length > 0)
         {
             // Partitioned CSVs in archive
             var groups = Data.GroupBy(partitionColumns);
             foreach (var group in groups.Groupings)
             {
-                var csvPath = string.Join("/", partitionColumns.Select((col, i) => $"{col}={group.KeyValues[i]}")) + ".csv";
+                var csvPath = string.Join("/", partitionColumns.Select((col, i) => $"{col}={group.KeyValues[i]?.ToString() ?? "null"}")) + ".csv";
                 using var ms = new MemoryStream();
-                group.Group.SaveCsv(ms);
+                group.Group.SaveCsv(ms, ',', true, Encoding.UTF8);
                 ms.Position = 0;
-                archive.Write(csvPath, ms);
+                writer.Write(csvPath, ms, null);
             }
         }
         else
         {
             using var ms = new MemoryStream();
-            Data.SaveCsv(ms);
+            Data.SaveCsv(ms, ',', true, Encoding.UTF8);
             ms.Position = 0;
-            archive.Write("data.csv", ms);
+            writer.Write("data.csv", ms, null);
         }
     }
 
@@ -882,10 +878,10 @@ public class DataBall
     /// <typeparam name="T">Column type.</typeparam>
     /// <param name="name">Column name.</param>
     /// <param name="values">Values to add.</param>
-    public void AddColumn<T>(string name, IEnumerable<T> values)
+    public void AddColumn<T>(string name, IEnumerable<T> values) where T : struct
     {
         DataFrameColumn column = typeof(T) == typeof(string)
-            ? new StringDataFrameColumn(name, values.Cast<string?>())
+            ? new StringDataFrameColumn(name, values.Select(v => v.ToString()))
             : new PrimitiveDataFrameColumn<T>(name, values);
         Data.Columns.Add(column);
         Logger.Debug($"Added column '{name}' with {values.Count()} values");
@@ -941,22 +937,36 @@ public class DataBall
     /// <param name="value">Value.</param>
     public void SetValue(long rowIndex, string columnName, object? value)
     {
-        if (Data.Styled(columnName) is DataFrameColumn col)
-        {
-            col[rowIndex] = value;
-            Logger.Debug($"Set [{rowIndex}, {columnName}] = {value}");
-        }
-        else
-        {
-            throw new ArgumentException($"Column '{columnName}' not found");
-        }
+        Data[columnName][rowIndex] = value;
+        Logger.Debug($"Set [{rowIndex}, {columnName}] = {value}");
     }
 
     // DataFrame Operations (delegated)
-    public DataFrame Filter(Func<DataFrameRow, bool> predicate) => Data.Filter(predicate);
-    public GroupBy GroupBy(string[] columns) => Data.GroupBy(columns);
-    public DataFrame Join(DataFrame other, string[] leftKeys, string[] rightKeys) => Data.Join(other, leftKeys, rightKeys, JoinType.Inner);
-    public DataFrame Sort(string[] columns) => Data.OrderBy(columns);
+    public DataFrame Filter(Func<DataFrameRow, bool> predicate)
+    {
+        var mask = new PrimitiveDataFrameColumn<bool>("mask", Data.Rows.Count);
+        for (long i = 0; i < Data.Rows.Count; i++)
+        {
+            mask[i] = predicate(Data.Rows[i]);
+        }
+        return Data.Filter(mask);
+    }
+
+    public GroupBy GroupBy(string[] columns)
+    {
+        return Data.GroupBy(columns);
+    }
+
+    public DataFrame Join(DataFrame other, string[] leftKeys, string[] rightKeys)
+    {
+        return Data.Join(other, leftKeys, rightKeys, JoinAlgorithm.Inner);
+    }
+
+    public DataFrame Sort(string[] columns)
+    {
+        return Data.OrderBy(columns);
+    }
+
     public DataFrame Aggregate(Dictionary<string, Func<object[], object>> aggs)
     {
         // Delegate to backend
@@ -1076,10 +1086,10 @@ public class DataBall
                 var colReader = rgReader.ReadColumn(field);
                 fullCol.AddRange(colReader.Data.Cast<object>());
             }
-            var colType = field.ClrType;
+            var colType = field.DataType.GetCLRType();
             DataFrameColumn col = colType == typeof(string)
-                ? new StringDataFrameColumn(field.Name, fullCol.Cast<string?>())
-                : new PrimitiveDataFrameColumn<object>(field.Name, fullCol);
+                ? new StringDataFrameColumn(field.Name, fullCol.Select(o => o?.ToString()))
+                : new StringDataFrameColumn(field.Name, fullCol.Select(o => o?.ToString()));
             df.Columns.Add(col);
         }
         return df;
@@ -1108,8 +1118,8 @@ public class DataBall
             }
             for (int i = 0; i < columns.Length; i++)
             {
-                var colData = allValues.Select(row => row[i]).ToArray();
-                df.Columns.Add(new PrimitiveDataFrameColumn<object>(columns[i], colData));
+                var colData = allValues.Select(row => row[i]?.ToString()).ToArray();
+                df.Columns.Add(new StringDataFrameColumn(columns[i], colData));
             }
             MergeOrAppend(df, append);
             Logger.Info("SQLite import completed");
@@ -1207,7 +1217,7 @@ public class DataBall
     /// </summary>
     /// <param name="other">DataFrame to merge.</param>
     /// <param name="append">True to append rows; false to replace.</param>
-    private void MergeOrAppend(DataFrame other, bool append)
+    public void MergeOrAppend(DataFrame other, bool append)
     {
         // Align schemas: add missing columns with nulls, coerce types
         var allColumns = Data.Columns.Select(c => c.Name).Union(other.Columns.Select(c => c.Name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -1215,12 +1225,12 @@ public class DataBall
         {
             if (!Data.Columns.Any(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase)))
             {
-                var otherCol = other.Styled(colName);
+                var otherCol = other[colName];
                 AddEmptyColumn(colName, otherCol.DataType);
             }
             if (!other.Columns.Any(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase)))
             {
-                // Add nulls to other for alignment during concat
+                // Add nulls to other for alignment
                 var nullLength = other.Rows.Count;
                 var thisCol = Data[colName];
                 var nullCol = CreatePrimitiveColumn(colName, thisCol.DataType, nullLength);
@@ -1239,13 +1249,13 @@ public class DataBall
                 Logger.Warn($"Type mismatch for '{colName}': {otherType.Name} -> {thisType.Name}");
                 // Coerce other column values to thisType
                 var col = other[colName];
-                var coerced = new object?[col.Length];
+                var coerced = new string[col.Length];
                 for (long j = 0; j < col.Length; j++)
                 {
-                    coerced[j] = CoerceValue(col[j], thisType);
+                    coerced[j] = CoerceValue(col[j], thisType)?.ToString() ?? string.Empty;
                 }
                 other.Columns.Remove(colName);
-                other.Columns.Add(new PrimitiveDataFrameColumn<object>(colName, coerced));
+                other.Columns.Add(new StringDataFrameColumn(colName, coerced));
             }
         }
 
@@ -1258,7 +1268,10 @@ public class DataBall
 
         if (append)
         {
-            Data = Data.Concat(other);
+            foreach (var row in other.Rows)
+            {
+                Data.Append(row, inPlace: true);
+            }
         }
         else
         {

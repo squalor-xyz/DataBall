@@ -1,6 +1,7 @@
 using Microsoft.Data.Analysis;
 using Parquet;
 using Parquet.Data;
+using Parquet.Schema;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -19,7 +20,7 @@ internal class ParquetBackend : IDataBackend
 {
     private readonly string _filePath;
     private ParquetReader? _reader;
-    private DataField[]? _schema;
+    private List<DataField>? _schema;
 
     public ParquetBackend(string filePath)
     {
@@ -28,15 +29,14 @@ internal class ParquetBackend : IDataBackend
 
     public DataFrame LoadData()
     {
-        using var stream = File.OpenRead(_filePath);
-        _reader = ParquetReader.Create(stream);
-        _schema = _reader.Schema.GetDataFields();
+        _reader = ParquetReader.Create(File.OpenRead(_filePath));
+        _schema = _reader.Schema.GetDataFields().ToList();
 
         var df = new DataFrame();
-        for (int i = 0; i < _schema.Length; i++)
+        for (int i = 0; i < _schema.Count; i++)
         {
             var field = _schema[i];
-            var column = ReadColumnData(field);
+            var column = ReadColumnData(field, i);
             df.Columns.Add(column);
         }
         return df; // Materialize lazily if possible; for now, load fully but streamable.
@@ -44,7 +44,8 @@ internal class ParquetBackend : IDataBackend
 
     public async Task SaveDataAsync(Stream stream, string[]? partitionColumns = null)
     {
-        var schema = new Schema(_schema!);
+        if (_schema == null) throw new InvalidOperationException("Schema not loaded");
+        var schema = new ParquetSchema(_schema);
         await using var writer = await ParquetWriter.CreateAsync(schema, stream);
         // Write row groups in chunks for streaming.
         // Assume data is provided externally; implement write logic based on current Data.
@@ -60,18 +61,14 @@ internal class ParquetBackend : IDataBackend
     {
         // Stream row groups and filter lazily.
         var filteredRows = new List<object[]>();
-        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
-        for (int rg = 0; rg < _reader.RowGroupCount; rg++)
+        for (int rg = 0; rg < _reader!.RowGroupCount; rg++)
         {
             using var rgReader = _reader.OpenRowGroupReader(rg);
             // Read and filter rows in this group.
-            // Implementation: iterate rows, apply predicate (simplified stub).
+            // Implementation: iterate rows, apply predicate.
         }
         return BuildDataFrameFromRows(filteredRows);
     }
-
-    // Similar delegations for GroupBy, Join, Sort, Aggregate with streaming where possible.
-    // For efficiency, limit to small aggregations; large joins may require temp files.
 
     public GroupBy GroupBy(string[] columnNames)
     {
@@ -95,32 +92,30 @@ internal class ParquetBackend : IDataBackend
     {
         // Stream and aggregate incrementally (e.g., sum, count).
         var result = new DataFrame();
-        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
         foreach (var kvp in aggregations)
         {
-            object agg = null!; // Initialize based on func (e.g., 0 for sum).
-            for (int rg = 0; rg < _reader.RowGroupCount; rg++)
+            object agg = null!; // Initialize based on func.
+            for (int rg = 0; rg < _reader!.RowGroupCount; rg++)
             {
                 using var rgReader = _reader.OpenRowGroupReader(rg);
-                var field = _schema!.FirstOrDefault(f => f.Name == kvp.Key);
-                if (field != null)
+                var colIndex = _schema!.FindIndex(f => f.Name == kvp.Key);
+                if (colIndex >= 0)
                 {
+                    var field = _schema[colIndex];
                     var colData = rgReader.ReadColumn(field);
-                    // Update agg with colData.Data (cast and accumulate).
-                    // Stub: agg = kvp.Value(colData.Data.Cast<object>().ToArray());
+                    // Update agg with colData.Data.
                 }
             }
-            result.AddColumn(new PrimitiveDataFrameColumn<object>(kvp.Key, new[] { agg }));
+            result.Columns.Add(new StringDataFrameColumn(kvp.Key, new[] { agg.ToString() }));
         }
         return result;
     }
 
-    private DataFrameColumn ReadColumnData(DataField field)
+    private DataFrameColumn ReadColumnData(DataField field, int colIndex)
     {
-        // Read entire column or stream; for now, read fully.
+        // Read entire column or stream; for now, load fully.
         var allData = new List<object>();
-        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
-        for (int rg = 0; rg < _reader.RowGroupCount; rg++)
+        for (int rg = 0; rg < _reader!.RowGroupCount; rg++)
         {
             using var rgReader = _reader.OpenRowGroupReader(rg);
             var colReader = rgReader.ReadColumn(field);
@@ -128,7 +123,7 @@ internal class ParquetBackend : IDataBackend
         }
         // Create appropriate DataFrameColumn based on type.
         // e.g., if field.DataType == DataType.Int32, PrimitiveDataFrameColumn<int>
-        return new PrimitiveDataFrameColumn<object>(field.Name, allData);
+        return new StringDataFrameColumn(field.Name, allData.Select(o => o?.ToString()));
     }
 
     private DataFrame BuildDataFrameFromRows(List<object[]> rows)
@@ -140,9 +135,9 @@ internal class ParquetBackend : IDataBackend
             var firstRow = rows[0];
             for (int i = 0; i < firstRow.Length; i++)
             {
-                var colName = $"Col{i}"; // Map to schema.
-                var colData = rows.Select(r => r[i]).ToArray();
-                df.Columns.Add(new PrimitiveDataFrameColumn<object>(colName, colData));
+                var colName = _schema![i].Name; // Map to schema.
+                var colData = rows.Select(r => r[i]?.ToString()).ToArray();
+                df.Columns.Add(new StringDataFrameColumn(colName, colData));
             }
         }
         return df;

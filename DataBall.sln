@@ -1,8 +1,5 @@
-﻿
-Microsoft Visual Studio Solution File, Format Version 12.00
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataBall", "DataBall\DataBall.csproj", "{C8E269CC-AF52-424F-8D73-433CF35B2D59}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataBallApp", "DataBallApp\DataBallApp.csproj", "{6055B861-4C0F-4687-8C84-95E3AC074CA0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -14,9 +11,5 @@ Global
 		{C8E269CC-AF52-424F-8D73-433CF35B2D59}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C8E269CC-AF52-424F-8D73-433CF35B2D59}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C8E269CC-AF52-424F-8D73-433CF35B2D59}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6055B861-4C0F-4687-8C84-95E3AC074CA0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6055B861-4C0F-4687-8C84-95E3AC074CA0}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6055B861-4C0F-4687-8C84-95E3AC074CA0}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6055B861-4C0F-4687-8C84-95E3AC074CA0}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
