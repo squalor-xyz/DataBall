@@ -2,28 +2,28 @@
 
     <PropertyGroup>
         <TargetFramework>net9.0</TargetFramework>
-        <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <OutputType>Library</OutputType>
-        <GenerateDocumentationFile>true</GenerateDocumentationFile>
-        <RootNamespace>squalor.DataBall</RootNamespace>
+        <Nullable>enable</Nullable>
+        <IsPackable>true</IsPackable>
+        <PackageId>squalor.DataBall</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Jon Robbins</Authors>
+        <Description>Versatile data handling class for test executive applications, supporting import/export in various formats, data manipulation, metadata, and configuration-based relationships. Supports large datasets via chunked imports and partitioned Parquet exports.</Description>
+        <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+        <RepositoryUrl>https://github.com/squalor-xyz/DataBall</RepositoryUrl>
+        <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     </PropertyGroup>
 
     <ItemGroup>
-        <PackageReference Include="Microsoft.Data.Analysis" Version="0.21.1" />
-        <PackageReference Include="Parquet.Net" Version="4.24.0" />
-        <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.0" />
-        <PackageReference Include="SharpCompress" Version="0.38.0" />
+        <PackageReference Include="Microsoft.Data.Analysis" Version="0.22.2" />
+        <PackageReference Include="Parquet.Net" Version="4.23.0" />
+        <PackageReference Include="SharpCompress" Version="0.40.0" />
+        <PackageReference Include="System.Text.Json" Version="9.0.0" />
+        <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
         <PackageReference Include="NLog" Version="5.3.4" />
-        <PackageReference Include="xunit" Version="2.9.2" />
-        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
-            <PrivateAssets>all</PrivateAssets>
-            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-        </PackageReference>
-    </ItemGroup>
-
-    <ItemGroup>
-        <None Include="NLog.config" CopyToOutputDirectory="PreserveNewest" />
+        <PackageReference Include="xunit" Version="2.9.0" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
     </ItemGroup>
 
 </Project>
