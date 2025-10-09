@@ -1,0 +1,51 @@
+# Bytecode
+bin/
+obj/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.sln.docstates
+
+# NuGet
+packages/
+*.nupkg
+
+# Logs
+logs/
+*.log
+archives/
+
+# Temp files
+*.tmp
+*.bak
+*.swp
+~*
+*~
+.DS_Store
+Thumbs.db
+
+# IDE/Editor
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Documentation generated (if any)
+docs/generated/
+
+# Test results
+TestResults/
+coverlet/
+
+# OS-specific
+*.DS_Store
+
+# Other
+*.pdb
+*.cache
+*.deps.json
+*.runtimeconfig.json
+*.dll
+*.exe
