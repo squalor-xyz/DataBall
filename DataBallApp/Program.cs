@@ -4,7 +4,7 @@ class Program
 {
     static async Task Main(string[] args)
     {
-        var db = new DataBall("config.json"); // Optional config
+        var db = new DataBall(); // Optional: "config.json"
 
         // Example usage
         db.AddColumn<string>("Name", new[] { "Alice", "Bob" });
@@ -16,7 +16,7 @@ class Program
         db.Roll(ExportType.Csv, "output.csv");
 
         // Import example
-        db.ImportFromCsv("input.csv", append: true);
+        // db.ImportFromCsv("input.csv", append: true);
 
         Console.WriteLine("DataBall demo completed.");
     }

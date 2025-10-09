@@ -36,7 +36,7 @@ internal class ParquetBackend : IDataBackend
         for (int i = 0; i < _schema.Length; i++)
         {
             var field = _schema[i];
-            var column = ReadColumnData(field, _reader, i);
+            var column = ReadColumnData(field);
             df.Columns.Add(column);
         }
         return df; // Materialize lazily if possible; for now, load fully but streamable.
@@ -45,9 +45,8 @@ internal class ParquetBackend : IDataBackend
     public async Task SaveDataAsync(Stream stream, string[]? partitionColumns = null)
     {
         var schema = new Schema(_schema!);
-        using var writer = await ParquetWriter.CreateAsync(schema, stream);
+        await using var writer = await ParquetWriter.CreateAsync(schema, stream);
         // Write row groups in chunks for streaming.
-        using var rowGroupWriter = writer.CreateRowGroup();
         // Assume data is provided externally; implement write logic based on current Data.
         // For partitioning, create sub-files if needed.
         if (partitionColumns?.Length > 0)
@@ -61,11 +60,12 @@ internal class ParquetBackend : IDataBackend
     {
         // Stream row groups and filter lazily.
         var filteredRows = new List<object[]>();
-        for (int rg = 0; rg < _reader!.RowGroupCount; rg++)
+        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
+        for (int rg = 0; rg < _reader.RowGroupCount; rg++)
         {
             using var rgReader = _reader.OpenRowGroupReader(rg);
             // Read and filter rows in this group.
-            // Implementation: iterate rows, apply predicate.
+            // Implementation: iterate rows, apply predicate (simplified stub).
         }
         return BuildDataFrameFromRows(filteredRows);
     }
@@ -73,7 +73,7 @@ internal class ParquetBackend : IDataBackend
     // Similar delegations for GroupBy, Join, Sort, Aggregate with streaming where possible.
     // For efficiency, limit to small aggregations; large joins may require temp files.
 
-    public GroupByResult GroupBy(string[] columnNames)
+    public GroupBy GroupBy(string[] columnNames)
     {
         // Streaming group-by: hash partitions or sort-merge.
         throw new NotImplementedException("Streaming GroupBy requires custom implementation.");
@@ -95,27 +95,34 @@ internal class ParquetBackend : IDataBackend
     {
         // Stream and aggregate incrementally (e.g., sum, count).
         var result = new DataFrame();
+        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
         foreach (var kvp in aggregations)
         {
-            object agg = null!; // Initialize based on func.
-            for (int rg = 0; rg < _reader!.RowGroupCount; rg++)
+            object agg = null!; // Initialize based on func (e.g., 0 for sum).
+            for (int rg = 0; rg < _reader.RowGroupCount; rg++)
             {
                 using var rgReader = _reader.OpenRowGroupReader(rg);
-                var colData = rgReader.ReadColumn(_schema!.First(f => f.Name == kvp.Key));
-                // Update agg with colData.Data.
+                var field = _schema!.FirstOrDefault(f => f.Name == kvp.Key);
+                if (field != null)
+                {
+                    var colData = rgReader.ReadColumn(field);
+                    // Update agg with colData.Data (cast and accumulate).
+                    // Stub: agg = kvp.Value(colData.Data.Cast<object>().ToArray());
+                }
             }
             result.AddColumn(new PrimitiveDataFrameColumn<object>(kvp.Key, new[] { agg }));
         }
         return result;
     }
 
-    private DataFrameColumn ReadColumnData(DataField field, ParquetReader reader, int colIndex)
+    private DataFrameColumn ReadColumnData(DataField field)
     {
         // Read entire column or stream; for now, read fully.
         var allData = new List<object>();
-        for (int rg = 0; rg < reader.RowGroupCount; rg++)
+        if (_reader == null) throw new InvalidOperationException("Reader not initialized");
+        for (int rg = 0; rg < _reader.RowGroupCount; rg++)
         {
-            using var rgReader = reader.OpenRowGroupReader(rg);
+            using var rgReader = _reader.OpenRowGroupReader(rg);
             var colReader = rgReader.ReadColumn(field);
             allData.AddRange(colReader.Data.Cast<object>());
         }

@@ -1,4 +1,6 @@
 using Microsoft.Data.Analysis;
+using Parquet;
+using Parquet.Data;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -25,14 +27,43 @@ internal class InMemoryBackend : IDataBackend
 
     public async Task SaveDataAsync(Stream stream, string[]? partitionColumns = null)
     {
-        // For in-memory, save as Parquet or CSV directly; partitioning not supported in-memory.
+        // For in-memory, save as Parquet directly; partitioning not supported in-memory without custom logic.
         if (partitionColumns?.Length > 0)
         {
             throw new NotSupportedException("Partitioning requires ParquetBackend for in-memory operations.");
         }
 
-        // Serialize to Parquet (Arrow-backed) for efficiency.
-        await _dataFrame.SaveParquetAsync(stream);
+        // Use Parquet.Net for saving, as DataFrame lacks built-in Parquet export.
+        var fields = _dataFrame.Columns.Select(col =>
+        {
+            var clrType = col.DataType;
+            return clrType.Name switch
+            {
+                nameof(String) => new DataField<string>(col.Name),
+                nameof(Int32) => new DataField<int>(col.Name),
+                nameof(Int64) => new DataField<long>(col.Name),
+                nameof(Single) => new DataField<float>(col.Name),
+                nameof(Double) => new DataField<double>(col.Name),
+                nameof(Boolean) => new DataField<bool>(col.Name),
+                nameof(DateTime) => new DataField<DateTime>(col.Name),
+                _ => new DataField<string>(col.Name)
+            };
+        }).ToArray();
+
+        var schema = new ParquetSchema(fields);
+        await using var writer = await ParquetWriter.CreateAsync(schema, stream);
+        await using var rowGroup = writer.CreateRowGroupAsync();
+        for (int i = 0; i < _dataFrame.Columns.Count; i++)
+        {
+            var col = _dataFrame.Columns[i];
+            var data = Array.CreateInstance(col.DataType, (int)col.Length);
+            for (long j = 0; j < col.Length; j++)
+            {
+                data.SetValue(col[j] ?? DBNull.Value, j);
+            }
+            var dataColumn = new DataColumn(fields[i], data);
+            await rowGroup.WriteColumnAsync(dataColumn);
+        }
     }
 
     public DataFrame Filter<T>(Expression<Func<T, bool>> predicate) where T : DataFrameRow
@@ -40,7 +71,7 @@ internal class InMemoryBackend : IDataBackend
         return _dataFrame.Filter(predicate.Compile());
     }
 
-    public GroupByResult GroupBy(string[] columnNames)
+    public GroupBy GroupBy(string[] columnNames)
     {
         return _dataFrame.GroupBy(columnNames);
     }
@@ -58,9 +89,6 @@ internal class InMemoryBackend : IDataBackend
 
     public DataFrame Aggregate(Dictionary<string, Func<object[], object>> aggregations)
     {
-        var grouped = _dataFrame.GroupBy(new[] { "temp" }); // Dummy group for aggregate.
-        // Implement aggregation logic by iterating over groups.
-        // For simplicity, assume sum/mean etc.; extend as needed.
         var result = new DataFrame();
         foreach (var kvp in aggregations)
         {

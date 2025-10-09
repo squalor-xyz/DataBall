@@ -15,6 +15,7 @@ using SharpCompress.Readers;
 using SharpCompress.Writers;
 using System.Reflection;
 using System.Threading.Tasks;
+using System.Data;
 
 namespace squalor.DataBall;
 
@@ -202,7 +203,7 @@ public class DataBall
         var indexer = colType.GetProperty("Item", BindingFlags.Public | BindingFlags.Instance, null, type, new[] { typeof(long) }, null);
         for (long i = 0; i < length; i++)
         {
-            indexer?.SetValue(col, Activator.CreateInstance(type), new object[] { i }); // Null for value types via default.
+            indexer?.SetValue(col, Activator.CreateInstance(type), new object[] { i }); // Default for value types.
         }
         return col;
     }
@@ -235,14 +236,7 @@ public class DataBall
         {
             foreach (var kvp in initialValues)
             {
-                if (_pendingRow.ContainsKey(kvp.Key))
-                {
-                    _pendingRow[kvp.Key] = kvp.Value;
-                }
-                else
-                {
-                    _pendingRow[kvp.Key] = kvp.Value;
-                }
+                _pendingRow[kvp.Key] = kvp.Value;
                 _modifiedFields.Add(kvp.Key);
                 Logger.Debug($"Set initial value for {kvp.Key}: {kvp.Value}");
             }
@@ -449,15 +443,14 @@ public class DataBall
     private void ExtractConstantsToMetadata()
     {
         var columnsToRemove = new List<string>();
-        foreach (var col in Data.Columns)
+        foreach (var col in Data.Columns.ToList()) // ToList to avoid modification during enumeration
         {
-            var values = col.Select(v => v).ToArray();
-            var nonNullValues = values.Where(v => v != null).ToArray();
-            if (nonNullValues.Length > 0 && nonNullValues.All(v => Equals(v, nonNullValues[0])))
+            var values = col.Select(v => v).Where(v => v != null).ToArray();
+            if (values.Length > 0 && values.All(v => Equals(v, values[0])))
             {
-                Metadata[col.Name] = nonNullValues[0];
+                Metadata[col.Name] = values[0];
                 columnsToRemove.Add(col.Name);
-                Logger.Debug($"Extracted constant column '{col.Name}' = {nonNullValues[0]} to metadata");
+                Logger.Debug($"Extracted constant column '{col.Name}' = {values[0]} to metadata");
             }
         }
 
@@ -486,11 +479,17 @@ public class DataBall
 
         // Rebuild DataFrame with unique rows
         Data = new DataFrame();
-        foreach (var colName in keptRows[0]?.Select((v, idx) => $"Col{idx}") ?? Enumerable.Empty<string>())
+        if (keptRows.Count > 0)
         {
-            // Re-add columns with kept data
+            // Re-add columns based on first row structure
+            var firstRow = keptRows[0];
+            for (int colIdx = 0; colIdx < firstRow.Length; colIdx++)
+            {
+                var colName = $"Col{colIdx}"; // Placeholder; map to original names if tracked
+                var colData = keptRows.Select(r => r[colIdx]).ToArray();
+                Data.Columns.Add(new PrimitiveDataFrameColumn<object>(colName, colData));
+            }
         }
-        // Note: Full rebuild logic; assume DataFrame rebuilt efficiently.
         Logger.Debug($"Deduplicated rows: {keptRows.Count} unique rows kept");
     }
 
@@ -515,11 +514,11 @@ public class DataBall
         {
             for (int startCol = 0; startCol < Data.Columns.Count; startCol += maxChunkSize)
             {
-                var chunkSize = Math.Min(maxChunkSize, Math.Min(Data.Rows.Count - startRow, Data.Columns.Count - startCol));
+                var chunkSize = Math.Min(maxChunkSize, Math.Min((int)Data.Rows.Count - startRow, Data.Columns.Count - startCol));
                 if (chunkSize < minChunkSize) continue;
 
                 // Extract chunk as matrix
-                var chunk = ExtractChunk(startRow, startCol, (int)chunkSize);
+                var chunk = ExtractChunk(startRow, startCol, chunkSize);
                 var chunkHash = HashChunk(chunk); // Custom hash for matrix.
 
                 if (!Metadata.TryGetValue($"ChunkHash_{chunkHash}", out _))
@@ -541,14 +540,22 @@ public class DataBall
     {
         // Extract sub-matrix; return 2D array.
         var chunk = new object[size, Data.Columns.Count - startCol];
-        // Fill from Data.Rows[startRow..startRow+size], cols[startCol..].
+        for (int r = 0; r < size; r++)
+        {
+            var row = Data.Rows[startRow + r].ToArray();
+            for (int c = 0; c < chunk.GetLength(1); c++)
+            {
+                chunk[r, c] = row[startCol + c];
+            }
+        }
         return chunk;
     }
 
     private string HashChunk(object[,] chunk)
     {
-        // Simple hash: serialize and MD5 or similar.
-        return ""; // Placeholder.
+        // Simple hash: serialize and use hash code.
+        var json = JsonSerializer.Serialize(chunk);
+        return Convert.ToBase64String(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
     private string SerializeChunk(object[,] chunk)
@@ -586,7 +593,10 @@ public class DataBall
 
             // Update metadata with partition info
             Metadata["SquishPath"] = outputPath;
-            Metadata["PartitionColumns"] = partitionColumns;
+            if (partitionColumns != null)
+            {
+                Metadata["PartitionColumns"] = string.Join(",", partitionColumns);
+            }
 
             Logger.Info("Squish completed: Data partitioned for disk storage");
         }
@@ -734,8 +744,12 @@ public class DataBall
         for (int i = 0; i < df.Columns.Count; i++)
         {
             var col = df.Columns[i];
-            var dataArray = col.Select(v => v ?? DBNull.Value).ToArray(); // Handle nulls
-            var dataColumn = new DataColumn(fields[i], dataArray);
+            var data = Array.CreateInstance(col.DataType, (int)col.Length);
+            for (long j = 0; j < col.Length; j++)
+            {
+                data.SetValue(col[j] ?? DBNull.Value, j);
+            }
+            var dataColumn = new DataColumn(fields[i], data);
             rowGroup.WriteColumn(dataColumn);
         }
     }
@@ -762,10 +776,10 @@ public class DataBall
             foreach (var group in groups.Groupings)
             {
                 var partitionPath = basePath;
-                foreach (var col in partitionColumns)
+                for (int i = 0; i < partitionColumns.Length; i++)
                 {
-                    var val = group.KeyValues[Array.IndexOf(partitionColumns, col)]?.ToString() ?? "null";
-                    partitionPath = Path.Combine(partitionPath, $"{col}={val}");
+                    var val = group.KeyValues[i]?.ToString() ?? "null";
+                    partitionPath = Path.Combine(partitionPath, $"{partitionColumns[i]}={val}");
                 }
                 Directory.CreateDirectory(partitionPath);
                 var filePath = Path.Combine(partitionPath, "part-0.parquet");
@@ -798,7 +812,7 @@ public class DataBall
         using var transaction = conn.BeginTransaction();
         for (long i = 0; i < Data.Rows.Count; i++)
         {
-            var insertSql = $"INSERT INTO Data VALUES ({string.Join(",", Data.Columns.Select(_ => "?"))})";
+            var insertSql = $"INSERT INTO Data VALUES ({string.Join(",", Enumerable.Repeat("?", Data.Columns.Count))})";
             using var cmd = new SqliteCommand(insertSql, conn, transaction);
             for (int j = 0; j < Data.Columns.Count; j++)
             {
@@ -831,7 +845,7 @@ public class DataBall
     /// <param name="partitionColumns">For partitioned CSVs.</param>
     private void ExportToArchive(string path, string[]? partitionColumns = null)
     {
-        var archiveType = Path.GetExtension(path).ToLower() switch
+        var archiveType = Path.GetExtension(path).ToLowerInvariant() switch
         {
             ".zip" => ArchiveType.Zip,
             ".tar.gz" => ArchiveType.TarGZip,
@@ -927,7 +941,7 @@ public class DataBall
     /// <param name="value">Value.</param>
     public void SetValue(long rowIndex, string columnName, object? value)
     {
-        if (Data[columnName] is DataFrameColumn col)
+        if (Data.Styled(columnName) is DataFrameColumn col)
         {
             col[rowIndex] = value;
             Logger.Debug($"Set [{rowIndex}, {columnName}] = {value}");
@@ -940,7 +954,7 @@ public class DataBall
 
     // DataFrame Operations (delegated)
     public DataFrame Filter(Func<DataFrameRow, bool> predicate) => Data.Filter(predicate);
-    public GroupByResult GroupBy(string[] columns) => Data.GroupBy(columns);
+    public GroupBy GroupBy(string[] columns) => Data.GroupBy(columns);
     public DataFrame Join(DataFrame other, string[] leftKeys, string[] rightKeys) => Data.Join(other, leftKeys, rightKeys, JoinType.Inner);
     public DataFrame Sort(string[] columns) => Data.OrderBy(columns);
     public DataFrame Aggregate(Dictionary<string, Func<object[], object>> aggs)
@@ -1051,9 +1065,10 @@ public class DataBall
         using var stream = File.OpenRead(path);
         using var reader = ParquetReader.Create(stream);
         var df = new DataFrame();
-        for (int i = 0; i < reader.Schema.GetDataFields().Length; i++)
+        var fields = reader.Schema.GetDataFields();
+        for (int i = 0; i < fields.Length; i++)
         {
-            var field = reader.Schema.GetDataFields()[i];
+            var field = fields[i];
             var fullCol = new List<object>();
             for (int rg = 0; rg < reader.RowGroupCount; rg++)
             {
@@ -1081,16 +1096,20 @@ public class DataBall
             using var reader = cmd.ExecuteReader();
             var df = new DataFrame();
             var columns = Enumerable.Range(0, reader.FieldCount).Select(i => reader.GetName(i)).ToArray();
+            var allValues = new List<List<object?>>();
+            while (reader.Read())
+            {
+                var rowValues = new List<object?>();
+                for (int i = 0; i < reader.FieldCount; i++)
+                {
+                    rowValues.Add(reader.IsDBNull(i) ? null : reader.GetValue(i));
+                }
+                allValues.Add(rowValues);
+            }
             for (int i = 0; i < columns.Length; i++)
             {
-                var values = new List<object>();
-                while (reader.Read())
-                {
-                    values.Add(reader.IsDBNull(i) ? null : reader.GetValue(i));
-                }
-                // Reset reader or use adapter; simplified.
-                var col = new PrimitiveDataFrameColumn<object>(columns[i], values);
-                df.Columns.Add(col);
+                var colData = allValues.Select(row => row[i]).ToArray();
+                df.Columns.Add(new PrimitiveDataFrameColumn<object>(columns[i], colData));
             }
             MergeOrAppend(df, append);
             Logger.Info("SQLite import completed");
@@ -1108,18 +1127,18 @@ public class DataBall
         {
             Logger.Info($"Importing Archive from {path}");
             using var archive = ArchiveFactory.Open(path);
-            foreach (var entry in archive.Entries.Where(e => !e.IsDirectory))
+            var entries = archive.Entries.Where(e => !e.IsDirectory && e.Key.EndsWith(".csv")).ToList();
+            bool localAppend = append;
+            foreach (var entry in entries)
             {
-                if (entry.Key.EndsWith(".csv"))
-                {
-                    using var ms = new MemoryStream();
-                    entry.WriteTo(ms);
-                    ms.Position = 0;
-                    var csvPath = Path.GetTempFileName() + ".csv";
-                    await File.WriteAllBytesAsync(csvPath, ms.ToArray());
-                    ImportFromCsv(csvPath, append || entry.Key != archive.Entries.First().Key); // Append after first
-                    File.Delete(csvPath);
-                }
+                using var ms = new MemoryStream();
+                entry.WriteTo(ms);
+                ms.Position = 0;
+                var tempPath = Path.GetTempFileName() + ".csv";
+                File.WriteAllBytes(tempPath, ms.ToArray());
+                ImportFromCsv(tempPath, localAppend);
+                File.Delete(tempPath);
+                localAppend = true;
             }
             Logger.Info("Archive import completed");
         }
@@ -1166,7 +1185,7 @@ public class DataBall
                 }
                 ms.Position = 0;
                 var tempPath = Path.GetTempFileName() + ".parquet";
-                await File.WriteAllBytesAsync(tempPath, ms.ToArray());
+                File.WriteAllBytes(tempPath, ms.ToArray());
                 var df = LoadParquet(tempPath);
                 MergeOrAppend(df, localAppend);
                 localAppend = true;
@@ -1191,22 +1210,25 @@ public class DataBall
     private void MergeOrAppend(DataFrame other, bool append)
     {
         // Align schemas: add missing columns with nulls, coerce types
-        var allColumns = Data.Columns.Select(c => c.Name).Union(other.Columns.Select(c => c.Name)).ToArray();
+        var allColumns = Data.Columns.Select(c => c.Name).Union(other.Columns.Select(c => c.Name)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         foreach (var colName in allColumns)
         {
             if (!Data.Columns.Any(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase)))
             {
-                var otherCol = other[colName];
+                var otherCol = other.Styled(colName);
                 AddEmptyColumn(colName, otherCol.DataType);
             }
-            else if (!other.Columns.Any(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase)))
+            if (!other.Columns.Any(c => c.Name.Equals(colName, StringComparison.OrdinalIgnoreCase)))
             {
+                // Add nulls to other for alignment during concat
+                var nullLength = other.Rows.Count;
                 var thisCol = Data[colName];
-                // Add null column to other temporarily for alignment
+                var nullCol = CreatePrimitiveColumn(colName, thisCol.DataType, nullLength);
+                other.Columns.Add(nullCol);
             }
         }
 
-        // Type coercion: for each column, coerce values if types differ
+        // Type coercion: for each column, coerce if types differ
         for (int i = 0; i < allColumns.Length; i++)
         {
             var colName = allColumns[i];
@@ -1214,21 +1236,29 @@ public class DataBall
             var otherType = other[colName].DataType;
             if (thisType != otherType)
             {
-                // Coerce other to thisType; log warnings
                 Logger.Warn($"Type mismatch for '{colName}': {otherType.Name} -> {thisType.Name}");
-                // Implement coercion on other[colName]
+                // Coerce other column values to thisType
+                var col = other[colName];
+                var coerced = new object?[col.Length];
+                for (long j = 0; j < col.Length; j++)
+                {
+                    coerced[j] = CoerceValue(col[j], thisType);
+                }
+                other.Columns.Remove(colName);
+                other.Columns.Add(new PrimitiveDataFrameColumn<object>(colName, coerced));
             }
         }
 
-        // Metadata consistency: if constants differ, promote to columns
+        // Metadata consistency: if constants differ, promote to columns (simplified)
+        // For now, merge metadata, log conflicts
         foreach (var kvp in Metadata)
         {
-            // Check if other has varying values; complex, skip for now or implement.
+            // Stub: if conflict, add column if varying in data
         }
 
         if (append)
         {
-            Data = Data.Concat(other); // Or append rows
+            Data = Data.Concat(other);
         }
         else
         {
@@ -1262,5 +1292,10 @@ public class DataBall
         _backend = backend ?? throw new ArgumentNullException(nameof(backend));
         Data = backend.LoadData(); // Reload
         Logger.Debug("Switched backend");
+    }
+
+    internal void ExportToPartitionedParquet(string basePath, string[] partitionColumns)
+    {
+        ExportToParquet(basePath, partitionColumns);
     }
 }

@@ -38,7 +38,7 @@ public interface IDataBackend
     /// </summary>
     /// <param name="columnNames">The columns to group by.</param>
     /// <returns>A grouped DataFrame.</returns>
-    GroupByResult GroupBy(string[] columnNames);
+    GroupBy GroupBy(string[] columnNames);
 
     /// <summary>
     /// Joins two DataFrames on specified keys.
