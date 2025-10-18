@@ -1,0 +1,121 @@
+{
+  "project": {
+    "name": "DataBall",
+    "description": "A versatile data handling class for test executive applications, supporting import/export in multiple formats (CSV, Parquet, SQLite, Archives, .ball), data manipulation via row builder pattern and DataFrame operations, metadata storage, configuration-based relationships, and large dataset handling via chunking/partitioning. Uses backend abstraction for in-memory or out-of-core processing. Licensed under MPL 2.0.",
+    "goals": [
+      "Provide a flexible, modular data handling library for test applications.",
+      "Support multiple import/export formats for universality.",
+      "Enable efficient handling of large datasets with chunking and partitioning.",
+      "Implement in-memory optimizations like deduplication and constant extraction.",
+      "Allow backend abstraction for in-memory or disk-based operations.",
+      "Ensure modularity with namespaces for imports, exports, backends, and tests."
+    ],
+    "features": [
+      "Import from CSV, Parquet, SQLite, Archives (ZIP, TAR.GZ, TAR.XZ), .ball (custom ZIP format with Parquet and metadata.json).",
+      "Export to CSV, Parquet (partitioned), SQLite, Archives, .ball.",
+      "Row builder pattern for data manipulation with relationship-based resets.",
+      "Metadata storage for constants extracted during Bounce.",
+      "Backend abstraction (InMemoryBackend, ParquetBackend).",
+      "Bounce operation: Extracts constants to metadata, deduplicates rows, limited chunk deduplication (up to 5 tables), optional partitioned Parquet export.",
+      "Squish operation: Full chunk deduplication, partitioned Parquet export for disk storage.",
+      "Configuration loading from JSON for metadata, column types, and relationships.",
+      "DataFrame operations: Add/Remove columns/rows, set values, filter, group by, join, sort, aggregate."
+    ],
+    "planned_features": [
+      "Lazy loading for out-of-core processing.",
+      "Parallel operations for performance enhancements.",
+      "Advanced type mapping for SQLite imports/exports.",
+      "Parquet-based archives for consistency with .ball format.",
+      "Additional backends (e.g., Arrow direct integration if needed).",
+      "More unit tests for edge cases (empty DataFrames, null values, large datasets)."
+    ],
+    "must_haves": [
+      "Namespace reorganization: Backend in squalor.DataBall.Backend, Export in squalor.DataBall.Export, Import in squalor.DataBall.Import, Tests in squalor.DataBall.Tests.",
+      "No removal of files from csproj (Config.cs, Relationship.cs, DataBallException.cs, ExportType.cs).",
+      "Comprehensive XML documentation for all public members.",
+      "NLog logging for debug/info/error.",
+      "Exception handling with DataBallException.",
+      "Dependencies as specified in csproj."
+    ],
+    "logic_implementation_details": {
+      "imports": {
+        "formats": "CSV, Parquet, SQLite, Archives (ZIP/TAR.GZ/TAR.XZ containing CSVs), .ball (ZIP with partitioned Parquet and metadata.json).",
+        "implementation": "Static methods in Import/ImportManager.cs taking DataBall instance. For CSV: Use DataFrame.LoadCsv with chunking for large files (default chunk size 1000). For Parquet: Use ParquetReader, read row groups, add columns with type conversion (string or primitive). For SQLite: Use SqliteConnection, read rows as strings from 'data' table. For Archive: Use SharpCompress to extract CSVs and load. For .ball: Extract ZIP, load metadata.json to Dictionary<string, object?>, load Parquets. Supports append or replace mode."
+      },
+      "exports": {
+        "formats": "CSV, Parquet (partitioned), SQLite, Archives (ZIP/TAR.GZ/TAR.XZ with partitioned CSVs), .ball (ZIP with partitioned Parquet and metadata.json).",
+        "implementation": "Static methods in Export/ExportManager.cs. Roll method dispatches to export methods based on ExportType enum (in Export/ExportType.cs). For CSV: DataFrame.SaveCsv. For Parquet: Use ParquetWriter, create schema from DataFrame columns, support partitioning via GroupBy. For SQLite: Create table with TEXT columns, insert rows. For Archive: Create temp partitioned CSVs, archive with SharpCompress WriterFactory based on extension. For .ball: Create temp partitioned Parquet, serialize metadata to JSON, ZIP with System.IO.Compression."
+      },
+      "bounce_operation": {
+        "description": "In-memory optimization: Extracts constants to metadata, deduplicates rows, limited chunk deduplication (up to 5 tables), optional partitioned Parquet export.",
+        "implementation": "In DataBall.cs: ExtractConstantsToMetadata checks unique values per column, stores in Metadata dictionary. DeduplicateRows hashes rows to keep unique entries. PerformChunkDeduplication splits data into chunks (default size 100), hashes chunks, stores up to 5 unique chunks in metadata. Optional ExportToPartitionedParquet uses GroupBy to partition and calls ExportManager."
+      },
+      "roll_operation": {
+        "description": "Saves DataFrame to disk in specified format.",
+        "implementation": "In ExportManager.cs: Roll method takes ExportType and path, dispatches to specific export method. For .ball: Creates temp directory, saves partitioned Parquet files, serializes Metadata to metadata.json, zips using ZipFile.CreateFromDirectory."
+      },
+      "row_builder": {
+        "description": "Pattern for constructing and modifying rows with relationship-based resets.",
+        "implementation": "In DataBall.cs: InitializeRow copies last row or creates new. ModifyField updates field value and tracks changes. CommitRow applies relationships (resets dependent fields if trigger changed without explicit modification), coerces new columns to type, appends to DataFrame."
+      },
+      "relationships": {
+        "description": "Configuration-driven dependencies between columns.",
+        "implementation": "In Relationship.cs: List of trigger and reset fields loaded from config JSON. ApplyRelationships in CommitRow checks if trigger fields changed, resets dependents if not explicitly modified."
+      },
+      "backend_abstraction": {
+        "description": "Interface for in-memory or disk-based data operations.",
+        "implementation": "IDataBackend interface in Backend/IDataBackend.cs defines Load, Save, Filter, GroupBy, Join, Sort, Aggregate. InMemoryBackend uses DataFrame directly. ParquetBackend loads/saves to Parquet file, operations load full DataFrame into memory."
+      },
+      "data_manipulation": {
+        "description": "Operations on DataFrame for data processing.",
+        "implementation": "In DataBall.cs: AddColumn<T> (T : struct for primitives), AddRow (via row builder or direct), RemoveColumn (drops column), RemoveRow (uses Filter), SetValue (updates specific cell), Filter (Expression<Func<T, bool>>), GroupBy (single column due to Microsoft.Data.Analysis limits), Join (single-column join), Sort (OrderBy on single column), Aggregate (custom functions on rows)."
+      },
+      "configuration": {
+        "description": "Loads metadata, column types, and relationships from JSON.",
+        "implementation": "In Config.cs: Metadata as Dictionary<string, object?>, Columns as Dictionary<string, string> (name to type), Relationships as List<Relationship>. LoadConfig deserializes JSON, maps type strings to System.Type, initializes DataFrame columns."
+      },
+      "exceptions": {
+        "description": "Custom exception for DataBall errors.",
+        "implementation": "DataBallException.cs inherits from Exception, used for import/export failures, invalid configurations, or data errors."
+      }
+    },
+    "dependencies": {
+      "nuget_packages": [
+        {"name": "Microsoft.Data.Analysis", "version": "0.21.1"},
+        {"name": "Parquet.Net", "version": "5.2.0"},
+        {"name": "SharpCompress", "version": "0.40.0"},
+        {"name": "System.Text.Json", "version": "8.0.5"},
+        {"name": "Microsoft.Data.Sqlite", "version": "8.0.0"},
+        {"name": "NLog", "version": "5.3.4"},
+        {"name": "xunit", "version": "2.5.3"},
+        {"name": "xunit.runner.visualstudio", "version": "2.5.3"},
+        {"name": "Microsoft.NET.Test.Sdk", "version": "17.10.0"},
+        {"name": "Apache.Arrow", "version": "11.0.0"},
+        {"name": "IronCompress", "version": "1.6.3"}
+      ],
+      "notes": "Apache.Arrow and IronCompress are indirect dependencies of Parquet.Net. All packages are compatible with .NET 9.0 or fallback to net8.0/netstandard2.0."
+    },
+    "directory_structure": {
+      "root": "DataBall/",
+      "backend": "Backend/ (IDataBackend.cs, InMemoryBackend.cs, ParquetBackend.cs)",
+      "export": "Export/ (ExportManager.cs, ExportType.cs)",
+      "import": "Import/ (ImportManager.cs)",
+      "tests": "Tests/ (DataBallTests.cs)",
+      "other_files": "Config.cs, DataBall.cs, DataBall.csproj, DataBallException.cs, NLog.config, Relationship.cs"
+    },
+    "csproj_example": {
+      "description": "Targets .NET 9.0, library output, packable as NuGet package. Includes dependencies, MPL 2.0 license, and repository URL."
+    },
+    "nlog_config": {
+      "description": "Standard NLog.config for logging to console and file, with debug/info/error levels. Configurable via NLog.config in project root."
+    },
+    "questions_for_clarification": [
+      "Are there specific planned features beyond the current implementation (e.g., additional backends or formats)?",
+      "Any particular performance benchmarks or constraints for Bounce/Squish on large datasets?",
+      "Details on the NLog.config content or custom logging rules?",
+      "Any specific unit test coverage requirements or existing test cases?",
+      "Is there a preferred code style guide or formatting (e.g., .editorconfig)?",
+      "Any integration with CI/CD or deployment pipelines?"
+    ]
+  }
+}
