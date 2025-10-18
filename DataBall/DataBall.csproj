@@ -1,10 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-
     <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
+        <TargetFramework>net9.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
-        <LangVersion>12.0</LangVersion>
+        <LangVersion>13</LangVersion>
         <IsPackable>true</IsPackable>
         <PackageId>squalor.DataBall</PackageId>
         <Version>1.0.0</Version>
@@ -13,11 +12,13 @@
         <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
         <RepositoryUrl>https://github.com/squalor-xyz/DataBall</RepositoryUrl>
         <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+        <RootNamespace>Squalor.DataBall</RootNamespace>
+        <OutputType>Library</OutputType>
+        <GenerateRuntimeConfigurationFiles>false</GenerateRuntimeConfigurationFiles>
     </PropertyGroup>
-
     <ItemGroup>
         <PackageReference Include="Microsoft.Data.Analysis" Version="0.21.1" />
-        <PackageReference Include="Parquet.Net" Version="4.23.0" />
+        <PackageReference Include="Parquet.Net" Version="5.2.0" />
         <PackageReference Include="SharpCompress" Version="0.40.0" />
         <PackageReference Include="System.Text.Json" Version="8.0.5" />
         <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.0" />
@@ -26,5 +27,4 @@
         <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
         <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
     </ItemGroup>
-
 </Project>

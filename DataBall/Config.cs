@@ -1,29 +1,24 @@
-using System.Text.Json.Serialization;
 using System.Collections.Generic;
 
 namespace squalor.DataBall;
 
 /// <summary>
-/// Configuration model for DataBall, loaded from JSON.
-/// Defines metadata, column types, and relationships.
+/// Represents the configuration for a <see cref="DataBall"/> instance, including metadata, column types, and relationships.
 /// </summary>
 public class Config
 {
     /// <summary>
-    /// Initial metadata constants.
+    /// Gets or sets the metadata key-value pairs for the DataBall.
     /// </summary>
-    [JsonPropertyName("metadata")]
     public Dictionary<string, object?>? Metadata { get; set; }
 
     /// <summary>
-    /// Column definitions with expected types.
+    /// Gets or sets the column definitions, mapping column names to their data types.
     /// </summary>
-    [JsonPropertyName("columns")]
-    public Dictionary<string, string>? Columns { get; set; } // Key: column name, Value: type string (int, string, etc.)
+    public Dictionary<string, string>? Columns { get; set; }
 
     /// <summary>
-    /// List of relationships for propagation on row commit.
+    /// Gets or sets the list of relationships for row builder operations.
     /// </summary>
-    [JsonPropertyName("relationships")]
     public List<Relationship>? Relationships { get; set; }
 }

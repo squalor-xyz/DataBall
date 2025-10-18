@@ -1,22 +1,17 @@
-using System.Text.Json.Serialization;
-
 namespace squalor.DataBall;
 
 /// <summary>
-/// Represents a configuration relationship in DataBall.
-/// When the trigger field changes, specified reset fields are cleared to null unless modified explicitly.
+/// Represents a relationship in the row builder pattern, where a change in a trigger field resets dependent fields.
 /// </summary>
 public class Relationship
 {
     /// <summary>
-    /// The trigger field name that, when changed, resets dependents.
+    /// Gets or sets the name of the trigger field that initiates the relationship.
     /// </summary>
-    [JsonPropertyName("trigger")]
     public string Trigger { get; set; } = string.Empty;
 
     /// <summary>
-    /// List of fields to reset if the trigger changes.
+    /// Gets or sets the array of field names to reset when the trigger changes.
     /// </summary>
-    [JsonPropertyName("reset")]
-    public List<string> Reset { get; set; } = new List<string>();
+    public string[] Reset { get; set; } = Array.Empty<string>();
 }
