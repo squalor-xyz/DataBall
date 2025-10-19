@@ -13,10 +13,10 @@ namespace squalor.DataBall
         /// </summary>
         /// <param name="row">The DataFrameRow to convert.</param>
         /// <returns>A string key representing the row values, with values separated by '|'.</returns>
-        public static string ToStringKey(this DataFrameRow row)
+        public static string ToStringKey(this DataFrameRow row, int columnCount)
         {
             var sb = new StringBuilder();
-            for (int i = 0; i < row.Length; i++)
+            for (int i = 0; i < columnCount; i++)
             {
                 sb.Append(row[i]?.ToString() ?? "");
                 sb.Append("|");

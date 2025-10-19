@@ -88,8 +88,9 @@ namespace squalor.DataBall.Export
                     var groupDf = new DataFrame();
                     foreach (var col in df.Columns)
                     {
-                        var groupCol = col.Clone();
-                        groupCol.Length = 0;
+                        var groupCol = col.DataType == typeof(string)
+                            ? new StringDataFrameColumn(col.Name, 0)
+                            : CreatePrimitiveColumn(col.Name, col.DataType, 0);
                         groupDf.Columns.Add(groupCol);
                     }
                     foreach (var row in grouping)
@@ -190,6 +191,15 @@ namespace squalor.DataBall.Export
             if (col is PrimitiveDataFrameColumn<double> doubleCol)
                 return doubleCol.ToArray();
             throw new NotSupportedException($"Column type {col.DataType} not supported");
+        }
+
+        private static DataFrameColumn CreatePrimitiveColumn(string name, Type type, long length)
+        {
+            if (type == typeof(int))
+                return new PrimitiveDataFrameColumn<int>(name, length);
+            if (type == typeof(double))
+                return new PrimitiveDataFrameColumn<double>(name, length);
+            throw new NotSupportedException($"Unsupported primitive type: {type.Name}");
         }
     }
 }

@@ -375,7 +375,7 @@ namespace squalor.DataBall
                         chunk.Append(row, inPlace: true);
                     }
                     var key = ToStringKey(chunk);
-                    var id = uniqueTable.Rows.First(row => row.ToStringKey() == key)["ID"];
+                    var id = uniqueTable.Rows.First(row => row.ToStringKey(cols) == key)["ID"];
                     for (long i = 0; i < rows && i + r < df.Rows.Count; i++)
                         for (int j = 0; j < cols && c + j < df.Columns.Count; j++)
                             df.Columns[c + j][r + i] = id;

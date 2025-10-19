@@ -20,6 +20,11 @@ namespace squalor.DataBall.Backend
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
         private readonly string _path;
 
+        /// <summary>
+        /// Initializes a new instance of the <see cref="ParquetBackend"/> class with the specified file path.
+        /// </summary>
+        /// <param name="path">The path to the Parquet file.</param>
+        /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is null or empty.</exception>
         public ParquetBackend(string path)
         {
             _path = path ?? throw new ArgumentNullException(nameof(path));
@@ -27,6 +32,12 @@ namespace squalor.DataBall.Backend
                 throw new ArgumentException("Path cannot be empty.", nameof(path));
         }
 
+        /// <summary>
+        /// Loads data from the specified Parquet file into a DataFrame asynchronously.
+        /// </summary>
+        /// <param name="path">The path to the Parquet file.</param>
+        /// <returns>A <see cref="Task{DataFrame}"/> containing the loaded data.</returns>
+        /// <exception cref="DataBallException">Thrown when loading the Parquet file fails.</exception>
         public async Task<DataFrame> Load(string path)
         {
             Logger.Info("Loading Parquet from {0}", path);
@@ -62,6 +73,13 @@ namespace squalor.DataBall.Backend
             }
         }
 
+        /// <summary>
+        /// Saves the DataFrame to the specified Parquet file asynchronously.
+        /// </summary>
+        /// <param name="df">The DataFrame to save.</param>
+        /// <param name="path">The path to save the Parquet file to.</param>
+        /// <returns>A <see cref="Task"/> representing the asynchronous save operation.</returns>
+        /// <exception cref="DataBallException">Thrown when saving the Parquet file fails.</exception>
         public async Task Save(DataFrame df, string path)
         {
             Logger.Info("Saving to Parquet at {0}", path);
@@ -88,77 +106,150 @@ namespace squalor.DataBall.Backend
             }
         }
 
+        /// <summary>
+        /// Filters the data based on a predicate.
+        /// </summary>
+        /// <typeparam name="T">The type of the data rows.</typeparam>
+        /// <param name="predicate">The filter predicate.</param>
+        /// <returns>A <see cref="DataFrame"/> containing the filtered data.</returns>
         public DataFrame Filter<T>(Expression<Func<T, bool>> predicate)
         {
-            var df = Load(_path).GetAwaiter().GetResult();
-            var compiled = predicate.Compile();
-            var mask = new PrimitiveDataFrameColumn<bool>("mask", df.Rows.Count);
-            for (long i = 0; i < df.Rows.Count; i++)
+            Logger.Debug("Filtering DataFrame with predicate");
+            try
             {
-                mask[i] = compiled((T)(object)df.Rows[i]);
-            }
-            return df.Filter(mask);
-        }
-
-        public GroupBy GroupBy(params string[] columnNames)
-        {
-            var df = Load(_path).GetAwaiter().GetResult();
-            if (columnNames.Length == 0)
-                throw new ArgumentException("At least one column name is required.", nameof(columnNames));
-            if (columnNames.Length > 1)
-            {
-                var keyColumnName = "TempGroupKey";
-                var keyCol = new StringDataFrameColumn(keyColumnName, df.Rows.Count);
+                var df = Load(_path).GetAwaiter().GetResult();
+                var compiled = predicate.Compile();
+                var mask = new PrimitiveDataFrameColumn<bool>("mask", df.Rows.Count);
                 for (long i = 0; i < df.Rows.Count; i++)
                 {
-                    keyCol[i] = string.Join("_", columnNames.Select(c => df[c][i]?.ToString() ?? ""));
+                    mask[i] = compiled((T)(object)df.Rows[i]);
                 }
-                df.Columns.Add(keyCol);
-                return df.GroupBy(keyColumnName);
+                return df.Filter(mask);
             }
-            return df.GroupBy(columnNames[0]);
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Filter operation failed");
+                throw new DataBallException("Failed to filter DataFrame", ex);
+            }
         }
 
+        /// <summary>
+        /// Groups the data by the specified columns.
+        /// </summary>
+        /// <param name="columnNames">The names of the columns to group by.</param>
+        /// <returns>A <see cref="GroupBy"/> object for further aggregation.</returns>
+        public GroupBy GroupBy(params string[] columnNames)
+        {
+            Logger.Debug("Grouping DataFrame by {0}", string.Join(", ", columnNames));
+            try
+            {
+                var df = Load(_path).GetAwaiter().GetResult();
+                if (columnNames.Length == 0)
+                    throw new ArgumentException("At least one column name is required.", nameof(columnNames));
+                if (columnNames.Length > 1)
+                {
+                    var keyColumnName = "TempGroupKey";
+                    var keyCol = new StringDataFrameColumn(keyColumnName, df.Rows.Count);
+                    for (long i = 0; i < df.Rows.Count; i++)
+                    {
+                        keyCol[i] = string.Join("_", columnNames.Select(c => df[c][i]?.ToString() ?? ""));
+                    }
+                    df.Columns.Add(keyCol);
+                    return df.GroupBy(keyColumnName);
+                }
+                return df.GroupBy(columnNames[0]);
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "GroupBy operation failed");
+                throw new DataBallException("Failed to group DataFrame", ex);
+            }
+        }
+
+        /// <summary>
+        /// Joins the data with another DataFrame on the specified columns.
+        /// </summary>
+        /// <param name="other">The other DataFrame to join with.</param>
+        /// <param name="leftColumns">The key columns in the current DataFrame.</param>
+        /// <param name="rightColumns">The key columns in the other DataFrame.</param>
+        /// <returns>A <see cref="DataFrame"/> containing the joined data.</returns>
         public DataFrame Join(DataFrame other, string[] leftColumns, string[] rightColumns)
         {
-            var df = Load(_path).GetAwaiter().GetResult();
-            if (leftColumns.Length != rightColumns.Length || leftColumns.Length == 0)
-                throw new ArgumentException("Invalid join columns.", nameof(leftColumns));
-            if (leftColumns.Length == 1)
-                return df.Join(other, leftColumns[0], rightColumns[0], JoinAlgorithm.Inner);
-            throw new NotImplementedException("Multi-column joins not supported.");
+            Logger.Debug("Joining DataFrames on left: {0}, right: {1}", string.Join(", ", leftColumns), string.Join(", ", rightColumns));
+            try
+            {
+                var df = Load(_path).GetAwaiter().GetResult();
+                if (leftColumns.Length != rightColumns.Length || leftColumns.Length == 0)
+                    throw new ArgumentException("Invalid join columns.", nameof(leftColumns));
+                if (leftColumns.Length == 1)
+                    return df.Join(other, leftColumns[0], rightColumns[0], JoinAlgorithm.Inner);
+                throw new NotImplementedException("Multi-column joins not supported by Microsoft.Data.Analysis.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Join operation failed");
+                throw new DataBallException("Failed to join DataFrames", ex);
+            }
         }
 
+        /// <summary>
+        /// Sorts the data by the specified columns.
+        /// </summary>
+        /// <param name="columnNames">The names of the columns to sort by.</param>
+        /// <returns>A <see cref="DataFrame"/> sorted by the specified columns.</returns>
         public DataFrame Sort(params string[] columnNames)
         {
-            var df = Load(_path).GetAwaiter().GetResult();
-            if (columnNames.Length == 0)
-                throw new ArgumentException("At least one column name is required.", nameof(columnNames));
-            var result = df;
-            foreach (var col in columnNames)
+            Logger.Debug("Sorting DataFrame by {0}", string.Join(", ", columnNames));
+            try
             {
-                result = result.OrderBy(col);
+                var df = Load(_path).GetAwaiter().GetResult();
+                if (columnNames.Length == 0)
+                    throw new ArgumentException("At least one column name is required.", nameof(columnNames));
+                var result = df;
+                foreach (var col in columnNames)
+                {
+                    result = result.OrderBy(col);
+                }
+                return result;
             }
-            return result;
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Sort operation failed");
+                throw new DataBallException("Failed to sort DataFrame", ex);
+            }
         }
 
+        /// <summary>
+        /// Aggregates the data using the specified aggregation functions.
+        /// </summary>
+        /// <param name="aggregators">A dictionary of column names and their aggregation functions.</param>
+        /// <returns>An object containing the aggregated results.</returns>
         public object Aggregate(Dictionary<string, Func<object[], object>> aggregators)
         {
-            var df = Load(_path).GetAwaiter().GetResult();
-            var results = new Dictionary<string, object>();
-            foreach (var agg in aggregators)
+            Logger.Debug("Aggregating DataFrame");
+            try
             {
-                var colName = agg.Key;
-                var aggregator = agg.Value;
-                var col = df[colName];
-                var values = new object[col.Length];
-                for (long i = 0; i < col.Length; i++)
+                var df = Load(_path).GetAwaiter().GetResult();
+                var results = new Dictionary<string, object>();
+                foreach (var agg in aggregators)
                 {
-                    values[i] = col[i];
+                    var colName = agg.Key;
+                    var aggregator = agg.Value;
+                    var col = df[colName];
+                    var values = new object[col.Length];
+                    for (long i = 0; i < col.Length; i++)
+                    {
+                        values[i] = col[i];
+                    }
+                    results[colName] = aggregator(values);
                 }
-                results[colName] = aggregator(values);
+                return results;
             }
-            return results;
+            catch (Exception ex)
+            {
+                Logger.Error(ex, "Aggregate operation failed");
+                throw new DataBallException("Failed to aggregate DataFrame", ex);
+            }
         }
 
         private Array GetDataArray(DataFrameColumn col)

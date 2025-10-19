@@ -66,7 +66,7 @@ namespace squalor.DataBall.Import
         /// <param name="path">The path to the CSV file.</param>
         /// <param name="chunkSize">The number of rows to read per chunk for large files.</param>
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static async Task ImportFromCsv(DataBall db, string path, int chunkSize = 100000)
+        public static void ImportFromCsv(DataBall db, string path, int chunkSize = 100000)
         {
             Logger.Info("Importing CSV from {0}", path);
             try
@@ -82,8 +82,6 @@ namespace squalor.DataBall.Import
             }
         }
 
-        // Placeholder for other import methods
-
         /// <summary>
         /// Processes a DataFrame column, handling potential null references.
         /// </summary>
@@ -96,7 +94,6 @@ namespace squalor.DataBall.Import
                 return;
             }
             var val = col[0];
-            // Process val
             Logger.Debug("Processed column value: {0}", val);
         }
     }
