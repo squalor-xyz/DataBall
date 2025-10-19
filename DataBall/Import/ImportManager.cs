@@ -71,7 +71,8 @@ namespace squalor.DataBall.Import
             Logger.Info("Importing CSV from {0}", path);
             try
             {
-                var df = DataFrame.LoadCsv(path, numberOfRowsToRead: chunkSize);
+                using var stream = File.OpenRead(path);
+                var df = DataFrame.LoadCsv(stream, numberOfRowsToRead: chunkSize);
                 db.MergeOrAppend(df, true);
                 Logger.Info("CSV import completed");
             }
