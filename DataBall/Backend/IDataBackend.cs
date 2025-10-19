@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq.Expressions;
+using System.Threading.Tasks;
 using Microsoft.Data.Analysis;
 
 namespace squalor.DataBall.Backend;
@@ -12,18 +12,19 @@ namespace squalor.DataBall.Backend;
 public interface IDataBackend
 {
     /// <summary>
-    /// Loads data from the specified path into a DataFrame.
+    /// Loads data from the specified path into a DataFrame asynchronously.
     /// </summary>
     /// <param name="path">The path to the data file.</param>
-    /// <returns>A <see cref="DataFrame"/> containing the loaded data.</returns>
-    DataFrame Load(string path);
+    /// <returns>A <see cref="Task{DataFrame}"/> containing the loaded data.</returns>
+    Task<DataFrame> Load(string path);
 
     /// <summary>
-    /// Saves the DataFrame to the specified path.
+    /// Saves the DataFrame to the specified path asynchronously.
     /// </summary>
     /// <param name="df">The DataFrame to save.</param>
     /// <param name="path">The path to save the data to.</param>
-    void Save(DataFrame df, string path);
+    /// <returns>A <see cref="Task"/> representing the asynchronous save operation.</returns>
+    Task Save(DataFrame df, string path);
 
     /// <summary>
     /// Filters the data based on a predicate.

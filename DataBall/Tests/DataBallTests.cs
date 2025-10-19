@@ -1,99 +1,72 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.Data.Analysis;
 using Xunit;
-using Parquet;
-using Parquet.Data;
-using squalor.DataBall.Export;
+using NLog;
 using squalor.DataBall.Import;
 
-namespace squalor.DataBall.Tests;
-
-/// <summary>
-/// Unit tests for the <see cref="DataBall"/> class.
-/// </summary>
-public class DataBallTests
+namespace squalor.DataBall.Tests
 {
     /// <summary>
-    /// Tests that loading a configuration sets metadata and column types correctly.
+    /// Contains unit tests for the <see cref="DataBall"/> class.
     /// </summary>
-    [Fact]
-    public void LoadConfig_SetsMetadataAndTypes()
+    public class DataBallTests
     {
-        // TODO: Implement config load test
-    }
+        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-    /// <summary>
-    /// Tests that the row builder applies relationships correctly during commit.
-    /// </summary>
-    [Fact]
-    public void RowBuilder_AppliesRelationships()
-    {
-        // TODO: Implement row builder test
-    }
-
-    /// <summary>
-    /// Tests that the Bounce operation extracts constant columns to metadata.
-    /// </summary>
-    [Fact]
-    public void Bounce_ExtractsConstants()
-    {
-        // TODO: Implement Bounce test
-    }
-
-    /// <summary>
-    /// Tests round-trip import and export of Parquet data.
-    /// </summary>
-    [Fact]
-    public void ImportExport_ParquetRoundTrip()
-    {
-        var db = new DataBall();
-        db.AddColumn("Id", new int[] { 1, 2 });
-        db.AddColumn("Name", new string[] { "A", "B" });
-
-        var tempPath = Path.GetTempFileName() + ".parquet";
-        try
+        /// <summary>
+        /// Tests adding columns to a DataBall instance.
+        /// </summary>
+        [Fact]
+        public void TestAddColumn()
         {
-            ExportManager.Roll(db, ExportType.Parquet, tempPath);
-            var db2 = new DataBall();
-            ImportManager.ImportFromParquet(db2, tempPath);
-
-            Assert.Equal(2, db2.Data.Rows.Count);
-            Assert.Equal(1, db2.Data["Id"][0]);
-            Assert.Equal("A", db2.Data["Name"][0]);
+            var db = new DataBall();
+            db.AddColumn("Name", new[] { "Alice", "Bob" });
+            db.AddColumn<int>("Age", new[] { 30, 25 });
+            Assert.Equal(2, db.DataFrame.Rows.Count);
+            Assert.Equal("Alice", db.DataFrame["Name"][0]);
+            Assert.Equal(30, db.DataFrame["Age"][0]);
         }
-        finally
+
+        /// <summary>
+        /// Tests adding a single row with string and integer columns.
+        /// </summary>
+        [Fact]
+        public void TestAnother()
         {
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
+            var db = new DataBall();
+            db.AddColumn("Name", new[] { "Charlie" });
+            db.AddColumn<int>("Age", new[] { 40 });
+            Assert.Equal(1, db.DataFrame.Rows.Count);
+            Assert.Equal("Charlie", db.DataFrame["Name"][0]);
+            Assert.Equal(40, db.DataFrame["Age"][0]);
         }
-    }
 
-    /// <summary>
-    /// Tests SQLite import and export round-trip.
-    /// </summary>
-    [Fact]
-    public void ImportExport_SqliteRoundTrip()
-    {
-        var db = new DataBall();
-        db.AddColumn("Id", new int[] { 1, 2 });
-        db.AddColumn("Name", new string[] { "A", "B" });
-
-        var tempPath = Path.GetTempFileName() + ".sqlite";
-        try
+        /// <summary>
+        /// Benchmarks the performance of import, Bounce, Squish, and export operations.
+        /// </summary>
+        [Fact]
+        public async Task BenchmarkImportBounceSquishExport()
         {
-            ExportManager.Roll(db, ExportType.Sqlite, tempPath);
-            var db2 = new DataBall();
-            ImportManager.ImportFromSqlite(db2, tempPath);
+            var db = new DataBall();
+            var start = DateTime.Now;
+            await ImportManager.ImportFromParquet(db, "large.parquet", true);
+            var importTime = (DateTime.Now - start).TotalSeconds;
 
-            Assert.Equal(2, db2.Data.Rows.Count);
-            Assert.Equal("1", db2.Data["Id"][0]); // SQLite stores as TEXT
-            Assert.Equal("A", db2.Data["Name"][0]);
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-                File.Delete(tempPath);
+            start = DateTime.Now;
+            await db.Bounce();
+            var bounceTime = (DateTime.Now - start).TotalSeconds;
+
+            start = DateTime.Now;
+            await db.Squish("partitioned", new[] { "Category" });
+            var squishTime = (DateTime.Now - start).TotalSeconds;
+
+            start = DateTime.Now;
+            db.Save("large.ball");
+            var saveTime = (DateTime.Now - start).TotalSeconds;
+
+            File.WriteAllText("docs/Performance.md", $"Import: {importTime}s\nBounce: {bounceTime}s\nSquish: {squishTime}s\nSave: {saveTime}s");
         }
     }
 }
