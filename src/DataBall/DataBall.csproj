@@ -5,7 +5,7 @@
     <IsPackable>true</IsPackable>
     <PackageId>squalor.DataBall</PackageId>
     <Version>1.0.0</Version>
-    <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, SQLite, zip/tar, .ball), row builder, Bounce/Squish.</Description>
+    <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, zip/tar, .ball), row builder, Bounce/Squish.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>

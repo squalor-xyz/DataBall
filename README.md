@@ -1,6 +1,6 @@
 # DataBall
 
-MPL-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, SQLite, zip/tar of CSV, and `.ball`.
+MPL-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, zip/tar of CSV, and `.ball`.
 
 ## Engine (DuckDB)
 
@@ -37,7 +37,6 @@ Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward
 |---|---|---|---|
 | CSV | `.csv` | yes | yes |
 | Parquet | `.parquet` | yes | yes (hive partition via Bounce/Squish path+cols) |
-| SQLite | `.db`, `.sqlite`, `.sqlite3` | yes (table `data` by default) | yes |
 | Archive of CSV | `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.xz`, `.txz` | yes | `.zip` / `.tar` / `.tar.gz` / `.tgz` only |
 | `.ball` | `.ball` | yes | yes |
 
@@ -125,7 +124,7 @@ var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
 
 ```
 databall import  <input> -o <output> [--append] [--config]
-databall export  <input> <output> [--format csv|parquet|sqlite|ball|archive]
+databall export  <input> <output> [--format csv|parquet|ball|archive]
 databall bounce  <input> [output]
 databall squish  <input> [output] [--partition col,...]
 databall query   <file> <sql>

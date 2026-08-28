@@ -292,9 +292,6 @@ namespace squalor.DataBall
                     case ExportType.Parquet:
                         _store.ImportParquet(path, append);
                         break;
-                    case ExportType.Sqlite:
-                        ImportManager.ImportFromSqlite(this, path, append, options.TableName);
-                        break;
                     case ExportType.Archive:
                         ImportManager.ImportFromArchive(this, path, append);
                         break;
@@ -318,10 +315,9 @@ namespace squalor.DataBall
         /// </summary>
         /// <param name="path">The destination path.</param>
         /// <param name="type">The export format.</param>
-        /// <param name="options">Optional export settings such as SQLite table name.</param>
         /// <returns>A completed task after the export finishes.</returns>
         /// <exception cref="DataBallException">Thrown when export fails.</exception>
-        public Task ExportAsync(string path, ExportType type, ExportOptions? options = null)
+        public Task ExportAsync(string path, ExportType type)
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
@@ -344,9 +340,6 @@ namespace squalor.DataBall
                         break;
                     case ExportType.Ball:
                         ExportManager.ExportToBall(this, path);
-                        break;
-                    case ExportType.Sqlite:
-                        ExportManager.ExportToSqlite(this, path, options?.TableName);
                         break;
                     default:
                         throw new DataBallException($"Unsupported export type: {type}");
@@ -377,12 +370,11 @@ namespace squalor.DataBall
         /// </summary>
         /// <param name="type">The export format.</param>
         /// <param name="path">The destination path.</param>
-        /// <param name="options">Optional export settings such as SQLite table name.</param>
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
-        public void Roll(ExportType type, string path, ExportOptions? options = null)
+        public void Roll(ExportType type, string path)
         {
             ThrowIfDisposed();
-            ExportAsync(path, type, options).GetAwaiter().GetResult();
+            ExportAsync(path, type).GetAwaiter().GetResult();
         }
 
         /// <summary>

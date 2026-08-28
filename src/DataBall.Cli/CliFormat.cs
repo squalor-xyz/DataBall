@@ -10,23 +10,20 @@ internal static class CliFormat
     [
         ".tar.gz",
         ".tar.xz",
-        ".sqlite3",
         ".parquet",
-        ".sqlite",
         ".tgz",
         ".txz",
         ".tar",
         ".zip",
         ".ball",
         ".csv",
-        ".db",
     ];
 
     internal static ExportType DetectExportType(string path)
     {
         var fileName = Path.GetFileName(path);
         if (string.IsNullOrEmpty(fileName))
-            throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|sqlite|ball|archive.");
+            throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|ball|archive.");
 
         if (EndsWith(fileName, ".tar.gz") || EndsWith(fileName, ".tgz")
             || EndsWith(fileName, ".tar.xz") || EndsWith(fileName, ".txz")
@@ -38,9 +35,7 @@ internal static class CliFormat
             return ExportType.Csv;
         if (EndsWith(fileName, ".parquet"))
             return ExportType.Parquet;
-        if (EndsWith(fileName, ".db") || EndsWith(fileName, ".sqlite") || EndsWith(fileName, ".sqlite3"))
-            return ExportType.Sqlite;
-        throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|sqlite|ball|archive.");
+        throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|ball|archive.");
     }
 
     internal static ExportType ParseFormat(string value)
@@ -49,10 +44,9 @@ internal static class CliFormat
         {
             "csv" => ExportType.Csv,
             "parquet" => ExportType.Parquet,
-            "sqlite" => ExportType.Sqlite,
             "ball" => ExportType.Ball,
             "archive" => ExportType.Archive,
-            _ => throw new DataBallException($"Unknown format '{value}'. Use csv, parquet, sqlite, ball, or archive."),
+            _ => throw new DataBallException($"Unknown format '{value}'. Use csv, parquet, ball, or archive."),
         };
     }
 

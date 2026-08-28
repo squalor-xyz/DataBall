@@ -77,7 +77,7 @@ public static class CommandFactory
         };
         var formatOption = new Option<string?>("--format")
         {
-            Description = "csv, parquet, sqlite, ball, or archive",
+            Description = "csv, parquet, ball, or archive",
         };
 
         var command = new Command("export", "Export a file to another format")

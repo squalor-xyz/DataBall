@@ -67,29 +67,6 @@ namespace squalor.DataBall.Import
         }
 
         /// <summary>
-        /// Imports data from a SQLite database via DuckDB's sqlite extension.
-        /// </summary>
-        /// <param name="db">The DataBall instance to import into.</param>
-        /// <param name="path">The path to the SQLite file.</param>
-        /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
-        /// <param name="tableName">The table to read. Defaults to <c>data</c>.</param>
-        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static void ImportFromSqlite(DataBall db, string path, bool append, string? tableName = null)
-        {
-            Logger.LogInformation("Importing SQLite from {0}, table={1}, append={2}", path, tableName, append);
-            try
-            {
-                db.Store.ImportSqlite(path, append, tableName);
-                Logger.LogInformation("SQLite import completed");
-            }
-            catch (Exception ex) when (ex is not DataBallException)
-            {
-                Logger.LogError(ex, "SQLite import failed");
-                throw new DataBallException("Failed to import SQLite file", ex);
-            }
-        }
-
-        /// <summary>
         /// Imports CSV files from a ZIP, TAR, TAR.GZ, or TAR.XZ archive.
         /// </summary>
         /// <param name="db">The DataBall instance to import into.</param>
@@ -183,8 +160,6 @@ namespace squalor.DataBall.Import
                 return ExportType.Csv;
             if (EndsWith(fileName, ".parquet"))
                 return ExportType.Parquet;
-            if (EndsWith(fileName, ".db") || EndsWith(fileName, ".sqlite") || EndsWith(fileName, ".sqlite3"))
-                return ExportType.Sqlite;
             throw new DataBallException($"Unknown import format for '{path}'");
         }
 

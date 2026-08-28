@@ -180,38 +180,15 @@ namespace squalor.DataBall.Export
         }
 
         /// <summary>
-        /// Exports the DataBall to a SQLite database via DuckDB's sqlite extension.
-        /// </summary>
-        /// <param name="db">The DataBall to export.</param>
-        /// <param name="path">The path to save the SQLite file.</param>
-        /// <param name="tableName">The table to write. Defaults to <c>data</c>.</param>
-        /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
-        public static void ExportToSqlite(DataBall db, string path, string? tableName = null)
-        {
-            Logger.LogInformation("Exporting to SQLite at {0}, table={1}", path, tableName);
-            try
-            {
-                db.Store.ExportSqlite(path, tableName);
-                Logger.LogInformation("SQLite export completed");
-            }
-            catch (Exception ex) when (ex is not DataBallException)
-            {
-                Logger.LogError(ex, "SQLite export failed");
-                throw new DataBallException("Failed to export SQLite", ex);
-            }
-        }
-
-        /// <summary>
         /// Dispatches the export operation based on the specified export type.
         /// </summary>
         /// <param name="db">The DataBall to export.</param>
         /// <param name="type">The export format.</param>
         /// <param name="path">The path to save the exported data.</param>
-        /// <param name="options">Optional export settings such as SQLite table name.</param>
         /// <exception cref="DataBallException">Thrown when the export type is unsupported or the operation fails.</exception>
-        public static void Roll(DataBall db, ExportType type, string path, ExportOptions? options = null)
+        public static void Roll(DataBall db, ExportType type, string path)
         {
-            db.ExportAsync(path, type, options).GetAwaiter().GetResult();
+            db.ExportAsync(path, type).GetAwaiter().GetResult();
         }
 
         private static void EnsureArchiveExportSupported(string path)

@@ -11,13 +11,9 @@ namespace squalor.DataBall
 {
     internal sealed class DuckDbStore : IDisposable
     {
-        private const string SqliteAlias = "_databall_sqlite";
-        private static readonly object SqliteLoadLock = new();
-
         private readonly DuckDBConnection _connection;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
         private bool _disposed;
-        private bool _sqliteLoaded;
 
         internal DuckDbStore()
         {
@@ -444,82 +440,6 @@ namespace squalor.DataBall
             var by = string.Join(", ", resolved.Select(QuoteIdent));
             // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
             Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
-        }
-
-        // DuckDB has no COPY FORMAT SQLITE; read/write via ATTACH (TYPE sqlite).
-        internal void ImportSqlite(string path, bool append, string? tableName)
-        {
-            ThrowIfDisposed();
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DataBallException("Path is required");
-            if (!File.Exists(path))
-                throw new DataBallException($"File not found: {path}");
-
-            var table = ResolveTableName(tableName);
-            EnsureSqliteLoaded();
-            var qAlias = QuoteIdent(SqliteAlias);
-            var qTable = QuoteIdent(table);
-            var attached = false;
-            try
-            {
-                Execute($"ATTACH OR REPLACE {QuotePath(path)} AS {qAlias} (TYPE sqlite)");
-                attached = true;
-                if (!AttachedTableExists(table))
-                    throw new DataBallException($"SQLite table '{table}' was not found");
-
-                Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM {qAlias}.{qTable}");
-                try
-                {
-                    PromoteDateColumns("_staging");
-                    MergeOrAppendFromTable("_staging", append);
-                }
-                finally
-                {
-                    Execute("DROP TABLE IF EXISTS \"_staging\"");
-                }
-
-                if (!table.Equals("meta", StringComparison.OrdinalIgnoreCase))
-                    UpsertMetaFromAttached();
-            }
-            finally
-            {
-                DetachSqlite(attached);
-            }
-        }
-
-        internal void ExportSqlite(string path, string? tableName)
-        {
-            ThrowIfDisposed();
-            if (!DataTableExists())
-                throw new DataBallException("No data to export");
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DataBallException("Path is required");
-
-            var table = ResolveTableName(tableName);
-            EnsureSqliteLoaded();
-            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-
-            var qAlias = QuoteIdent(SqliteAlias);
-            var qTable = QuoteIdent(table);
-            var attached = false;
-            try
-            {
-                Execute($"ATTACH OR REPLACE {QuotePath(path)} AS {qAlias} (TYPE sqlite)");
-                attached = true;
-                Execute($"DROP TABLE IF EXISTS {qAlias}.{qTable}");
-                Execute($"CREATE TABLE {qAlias}.{qTable} AS SELECT * FROM \"data\"");
-                if (!table.Equals("meta", StringComparison.OrdinalIgnoreCase))
-                {
-                    Execute($"DROP TABLE IF EXISTS {qAlias}.\"meta\"");
-                    Execute($"CREATE TABLE {qAlias}.\"meta\" AS SELECT * FROM \"meta\"");
-                }
-            }
-            finally
-            {
-                DetachSqlite(attached);
-            }
         }
 
         public void Dispose()
@@ -969,94 +889,6 @@ namespace squalor.DataBall
         private void ThrowIfDisposed()
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-        }
-
-        private void EnsureSqliteLoaded()
-        {
-            if (_sqliteLoaded)
-                return;
-
-            lock (SqliteLoadLock)
-            {
-                if (_sqliteLoaded)
-                    return;
-                try
-                {
-                    try
-                    {
-                        Execute("LOAD sqlite");
-                    }
-                    catch (Exception)
-                    {
-                        Execute("INSTALL sqlite");
-                        Execute("LOAD sqlite");
-                    }
-                    _sqliteLoaded = true;
-                }
-                catch (Exception ex)
-                {
-                    throw new DataBallException("Failed to load DuckDB sqlite extension", ex);
-                }
-            }
-        }
-
-        private void DetachSqlite(bool attached)
-        {
-            if (!attached)
-                return;
-            try
-            {
-                Execute($"DETACH {QuoteIdent(SqliteAlias)}");
-            }
-            catch (Exception)
-            {
-                // Best-effort; a later ATTACH OR REPLACE recovers a stuck alias.
-            }
-        }
-
-        private bool AttachedTableExists(string tableName)
-        {
-            var result = ExecuteScalar($"""
-                SELECT COUNT(*) FROM duckdb_tables()
-                WHERE database_name = {QuoteString(SqliteAlias)}
-                  AND table_name = {QuoteString(tableName)}
-                """);
-            return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
-        }
-
-        private void UpsertMetaFromAttached()
-        {
-            if (!AttachedTableExists("meta"))
-                return;
-
-            var rows = Query($"SELECT \"key\", \"value\" FROM {QuoteIdent(SqliteAlias)}.\"meta\"");
-            foreach (var row in rows)
-            {
-                var key = Convert.ToString(row["key"], CultureInfo.InvariantCulture);
-                if (string.IsNullOrWhiteSpace(key))
-                    continue;
-
-                object? value = row["value"];
-                if (value is string json)
-                {
-                    try
-                    {
-                        value = Unwrap(JsonSerializer.Deserialize<JsonElement>(json));
-                    }
-                    catch (JsonException)
-                    {
-                        value = json;
-                    }
-                }
-                SetMetadata(key, value);
-            }
-        }
-
-        private static string ResolveTableName(string? tableName)
-        {
-            var table = string.IsNullOrWhiteSpace(tableName) ? "data" : tableName;
-            ValidateName(table, "Table");
-            return table;
         }
     }
 }

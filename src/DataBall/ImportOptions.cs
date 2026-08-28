@@ -10,10 +10,5 @@ namespace squalor.DataBall
         /// Defaults to <c>false</c> (replace existing data).
         /// </summary>
         public bool Append { get; init; }
-
-        /// <summary>
-        /// Gets the SQLite table to read. Defaults to <c>data</c> when unset.
-        /// </summary>
-        public string? TableName { get; init; }
     }
 }

@@ -10,26 +10,6 @@ namespace squalor.DataBall.Tests
     public class ManagerTests
     {
         [Fact]
-        public void ImportFromSqlite_RoundTrip()
-        {
-            var dir = TempDir();
-            try
-            {
-                var path = Path.Combine(dir, "people.sqlite");
-                using (var db = Sample())
-                    ExportManager.ExportToSqlite(db, path);
-
-                using var imported = new DataBall();
-                ImportManager.ImportFromSqlite(imported, path, append: false);
-                AssertPeople(imported);
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
-        [Fact]
         public void ImportFromArchive_ZipRoundTrip()
         {
             var dir = TempDir();
@@ -133,26 +113,6 @@ namespace squalor.DataBall.Tests
 
                 using var imported = new DataBall();
                 await ImportManager.ImportFromParquet(imported, path, append: false);
-                AssertPeople(imported);
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
-        [Fact]
-        public void ExportToSqlite_RoundTrip()
-        {
-            var dir = TempDir();
-            try
-            {
-                var path = Path.Combine(dir, "people.sqlite");
-                using (var db = Sample())
-                    ExportManager.ExportToSqlite(db, path);
-
-                using var imported = new DataBall();
-                ImportManager.ImportFromSqlite(imported, path, append: false);
                 AssertPeople(imported);
             }
             finally

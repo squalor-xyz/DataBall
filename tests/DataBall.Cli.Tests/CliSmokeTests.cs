@@ -227,28 +227,6 @@ public class CliSmokeTests
     }
 
     [Fact]
-    public async Task Export_Sqlite_RoundTripViaQuery()
-    {
-        var dir = TempDir();
-        try
-        {
-            var csv = Path.Combine(dir, "people.csv");
-            var sqlite = Path.Combine(dir, "out.sqlite");
-            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
-
-            Assert.Equal(0, (await Run("export", csv, sqlite)).Exit);
-
-            var queried = await Run("query", sqlite, "SELECT Name FROM data ORDER BY Name");
-            Assert.Equal(0, queried.Exit);
-            Assert.Equal("Name\nAlice\nBob\n", queried.StdOut);
-        }
-        finally
-        {
-            Directory.Delete(dir, true);
-        }
-    }
-
-    [Fact]
     public async Task Export_Ball_ThenInfo()
     {
         var dir = TempDir();

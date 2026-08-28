@@ -125,33 +125,6 @@ namespace squalor.DataBall.Tests
             }
         }
 
-        // AddColumn<int> is INTEGER; sqlite import must not widen it to BIGINT.
-        [Fact]
-        public async Task SqliteRoundTrip_AgeRemainsInt32()
-        {
-            var dir = TempDir();
-            try
-            {
-                var path = Path.Combine(dir, "people.db");
-                using (var db = new DataBall())
-                {
-                    db.AddColumn("Name", new[] { "Alice" });
-                    db.AddColumn<int>("Age", new[] { 30 });
-                    await db.ExportAsync(path, ExportType.Sqlite);
-                }
-
-                using var imported = new DataBall();
-                await imported.ImportAsync(path);
-                var row = Assert.Single(imported.Query("SELECT Name, Age FROM data"));
-                Assert.Equal("Alice", row["Name"]);
-                Assert.Equal(30, Assert.IsType<int>(row["Age"]));
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
         [Fact]
         public async Task BallRoundTrip_AgeRemainsInt32()
         {

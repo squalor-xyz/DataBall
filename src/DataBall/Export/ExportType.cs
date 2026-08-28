@@ -16,11 +16,6 @@ namespace squalor.DataBall.Export
         Parquet,
 
         /// <summary>
-        /// Export as SQLite database.
-        /// </summary>
-        Sqlite,
-
-        /// <summary>
         /// Export as archive (ZIP, TAR.GZ, TAR.XZ).
         /// </summary>
         Archive,
