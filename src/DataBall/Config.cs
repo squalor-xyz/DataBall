@@ -43,5 +43,32 @@ namespace squalor.DataBall
                 throw new DataBallException("Failed to load config", ex);
             }
         }
+
+        /// <summary>
+        /// Maps a config type name to a supported CLR type.
+        /// </summary>
+        /// <param name="name">The type name from configuration.</param>
+        /// <returns>The matching CLR type.</returns>
+        /// <exception cref="DataBallException">Thrown when the type name is unknown.</exception>
+        public static Type ParseColumnType(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new DataBallException("Unknown column type ''");
+
+            var n = name.Trim();
+            return n.ToLowerInvariant() switch
+            {
+                "int" or "int32" or "system.int32" => typeof(int),
+                "long" or "int64" or "system.int64" => typeof(long),
+                "float" or "single" or "system.single" => typeof(float),
+                "double" or "system.double" => typeof(double),
+                "bool" or "boolean" or "system.boolean" => typeof(bool),
+                "datetime" or "date" or "system.datetime" => typeof(DateTime),
+                "string" or "system.string" => typeof(string),
+                _ => Type.GetType(n, throwOnError: false) is { } t
+                    ? t
+                    : throw new DataBallException($"Unknown column type '{name}'")
+            };
+        }
     }
 }
