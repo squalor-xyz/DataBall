@@ -271,6 +271,7 @@ namespace squalor.DataBall
         public Task ImportAsync(string path, ImportOptions? options = null)
         {
             ThrowIfDisposed();
+            ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
 
@@ -323,6 +324,7 @@ namespace squalor.DataBall
         public Task ExportAsync(string path, ExportType type, ExportOptions? options = null)
         {
             ThrowIfDisposed();
+            ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
 

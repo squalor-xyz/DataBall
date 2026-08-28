@@ -277,6 +277,15 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void InitializeRow_BlankInitialKey_Throws()
+        {
+            using var db = new DataBall();
+            var ex = Assert.Throws<DataBallException>(() =>
+                db.InitializeRow(new Dictionary<string, object?> { [" "] = "x" }));
+            Assert.Equal("Field name is required.", ex.Message);
+        }
+
+        [Fact]
         public void CommitRow_QuotedColumnName()
         {
             using var db = new DataBall();
