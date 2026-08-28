@@ -196,7 +196,12 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Performs the Bounce operation, extracting constants, deduplicating rows, and optionally exporting to partitioned Parquet.
+        /// Compacts in-memory data: extracts strict constants (one distinct non-null value and no nulls)
+        /// into metadata, then DISTINCT. The last remaining constant column is extracted too; if that
+        /// leaves no columns, the data table is dropped (DuckDB cannot store a 0-column table).
+        /// Columns named in <paramref name="partitionColumns"/> are not extracted so hive directories
+        /// can still be written. Optionally exports hive-partitioned Parquet when both a path and
+        /// partition columns are supplied.
         /// </summary>
         /// <param name="partitionedParquetPath">The path to export partitioned Parquet files, if any.</param>
         /// <param name="partitionColumns">The columns to partition by, if any.</param>
@@ -214,7 +219,7 @@ namespace squalor.DataBall
                     return Task.CompletedTask;
                 }
 
-                ExtractConstantsToMetadataSql();
+                ExtractConstantsToMetadataSql(partitionColumns);
                 DistinctInPlace();
                 if (!string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns is { Length: > 0 })
                 {
@@ -232,7 +237,8 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Performs the Squish operation, applying full deduplication and partitioning, and optionally exporting to Parquet.
+        /// Performs the Squish operation. Delegates to <see cref="Bounce"/> (same compaction:
+        /// strict no-nulls constant extraction and DISTINCT). Optionally writes hive-partitioned Parquet.
         /// </summary>
         /// <param name="partitionedParquetPath">The path to export partitioned Parquet files, if any.</param>
         /// <param name="partitionColumns">The columns to partition by, if any.</param>
@@ -240,31 +246,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when the Squish operation fails.</exception>
         public Task Squish(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
-            ThrowIfDisposed();
-            _logger.LogInformation("Starting Squish operation");
-            try
-            {
-                if (!_store.DataTableExists())
-                {
-                    _logger.LogDebug("Squish skipped; no data table");
-                    return Task.CompletedTask;
-                }
-
-                ExtractConstantsToMetadataSql();
-                DistinctInPlace();
-                if (!string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns is { Length: > 0 })
-                {
-                    _store.ExportPartitionedParquet(partitionedParquetPath, partitionColumns);
-                    _logger.LogInformation($"Exported to partitioned Parquet at {partitionedParquetPath}");
-                }
-                _logger.LogInformation("Squish operation completed");
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Squish operation failed");
-                throw new DataBallException("Squish operation failed", ex);
-            }
+            return Bounce(partitionedParquetPath, partitionColumns);
         }
 
         /// <summary>
@@ -301,15 +283,23 @@ namespace squalor.DataBall
             GC.SuppressFinalize(this);
         }
 
-        private void ExtractConstantsToMetadataSql()
+        private void ExtractConstantsToMetadataSql(string[]? partitionColumns)
         {
             if (!_store.DataTableExists() || _store.RowCount() == 0)
                 return;
 
+            // Hive PARTITION_BY needs these columns left in the table.
+            HashSet<string>? skip = null;
+            if (partitionColumns is { Length: > 0 })
+                skip = new HashSet<string>(partitionColumns, StringComparer.OrdinalIgnoreCase);
+
             foreach (var (name, _) in _store.GetColumns().ToList())
             {
-                if (_store.GetColumns().Count <= 1)
+                // Last remaining constant column drops "data"; stop rather than query a missing table.
+                if (!_store.DataTableExists())
                     break;
+                if (skip is not null && skip.Contains(name))
+                    continue;
 
                 var q = DuckDbStore.QuoteIdent(name);
                 var rows = _store.Query($"""
@@ -332,6 +322,7 @@ namespace squalor.DataBall
 
         private void DistinctInPlace()
         {
+            // Extracting the last constant column drops "data"; DuckDB cannot DISTINCT a 0-column table.
             if (!_store.DataTableExists())
                 return;
             _store.Execute("CREATE TABLE \"data_new\" AS SELECT DISTINCT * FROM \"data\"");

@@ -246,12 +246,8 @@ namespace squalor.DataBall.Tests
             db.AddColumn<int>("Meas", new[] { 1, 1 });
             await db.Bounce();
             Assert.Equal("A", db.Metadata["Site"]);
-            var count = db.Query("SELECT COUNT(*) AS c FROM \"data\"");
-            Assert.Equal(1, Convert.ToInt32(count[0]["c"]));
-            var rows = db.Query("SELECT * FROM \"data\"");
-            Assert.Single(rows);
-            Assert.False(rows[0].ContainsKey("Site"));
-            Assert.Equal(1, Convert.ToInt32(rows[0]["Meas"]));
+            Assert.Equal(1, Convert.ToInt32(db.Metadata["Meas"]));
+            Assert.Equal(0, CountDataRows(db));
         }
 
         [Fact]
@@ -331,6 +327,18 @@ namespace squalor.DataBall.Tests
             var db = new DataBall();
             db.Dispose();
             Assert.Throws<ObjectDisposedException>(() => db.Query("SELECT 1"));
+        }
+
+        private static long CountDataRows(DataBall db)
+        {
+            var exists = db.Query("""
+                SELECT COUNT(*) AS c FROM information_schema.tables
+                WHERE table_schema = 'main' AND table_name = 'data'
+                """);
+            if (Convert.ToInt32(exists[0]["c"]) == 0)
+                return 0;
+            var count = db.Query("SELECT COUNT(*) AS c FROM \"data\"");
+            return Convert.ToInt64(count[0]["c"]);
         }
 
         private static string TempDir()

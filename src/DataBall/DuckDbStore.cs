@@ -394,13 +394,23 @@ namespace squalor.DataBall
                 throw new DataBallException("No data to export");
             if (partitionColumns is null || partitionColumns.Count == 0)
                 throw new DataBallException("Partition columns are required");
+
+            var cols = GetColumns();
+            var resolved = new List<string>(partitionColumns.Count);
             foreach (var col in partitionColumns)
+            {
                 ValidateName(col, "Column");
+                var match = cols.FirstOrDefault(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    throw new DataBallException($"Partition column '{col}' does not exist");
+                resolved.Add(match.Name);
+            }
 
             Directory.CreateDirectory(directory);
             var qDir = QuotePath(directory);
-            var by = string.Join(", ", partitionColumns.Select(QuoteIdent));
-            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}))");
+            var by = string.Join(", ", resolved.Select(QuoteIdent));
+            // Partitioned COPY refuses an existing directory unless overwrite is enabled.
+            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true)");
         }
 
         public void Dispose()
