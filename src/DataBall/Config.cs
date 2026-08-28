@@ -10,6 +10,11 @@ namespace squalor.DataBall
     /// </summary>
     public class Config
     {
+        private static readonly JsonSerializerOptions LoadOptions = new()
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+
         /// <summary>
         /// Gets or sets the metadata dictionary for storing constant values.
         /// </summary>
@@ -36,7 +41,7 @@ namespace squalor.DataBall
             try
             {
                 var json = File.ReadAllText(path);
-                return JsonSerializer.Deserialize<Config>(json) ?? throw new DataBallException("Failed to deserialize config");
+                return JsonSerializer.Deserialize<Config>(json, LoadOptions) ?? throw new DataBallException("Failed to deserialize config");
             }
             catch (Exception ex)
             {

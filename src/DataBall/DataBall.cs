@@ -13,7 +13,7 @@ namespace squalor.DataBall
     /// <summary>
     /// Represents a versatile data handling class for test executive applications.
     /// </summary>
-    public sealed class DataBall : IDisposable
+    public sealed partial class DataBall : IDisposable
     {
         private readonly ILogger _logger;
         private readonly DuckDbStore _store;
@@ -156,6 +156,7 @@ namespace squalor.DataBall
         public void MergeOrAppend(DataBall other, bool append)
         {
             ThrowIfDisposed();
+            ThrowIfPendingRow();
             ArgumentNullException.ThrowIfNull(other);
             ObjectDisposedException.ThrowIf(other._disposed, other);
 
@@ -205,6 +206,7 @@ namespace squalor.DataBall
         public Task Bounce(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
             ThrowIfDisposed();
+            ThrowIfPendingRow();
             _logger.LogInformation("Starting Bounce operation");
             try
             {
@@ -241,6 +243,7 @@ namespace squalor.DataBall
         public Task Squish(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
             ThrowIfDisposed();
+            ThrowIfPendingRow();
             _logger.LogInformation("Starting Squish operation");
             try
             {
@@ -296,6 +299,8 @@ namespace squalor.DataBall
         {
             if (_disposed)
                 return;
+            if (_pendingRow is not null)
+                _logger.LogWarning("Disposing with an uncommitted pending row; it will be discarded.");
             _store.Dispose();
             _disposed = true;
             GC.SuppressFinalize(this);

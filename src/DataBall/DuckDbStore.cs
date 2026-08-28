@@ -162,6 +162,24 @@ namespace squalor.DataBall
             Execute($"CREATE TABLE \"data\" ({QuoteIdent(firstColumnName)} {duckDbType})");
         }
 
+        internal void EnsureColumn(string name, Type clrType)
+        {
+            ThrowIfDisposed();
+            ValidateName(name, "Column");
+            ArgumentNullException.ThrowIfNull(clrType);
+            var sqlType = ToDuckDbType(clrType);
+            if (!DataTableExists())
+            {
+                Execute($"CREATE TABLE \"data\" ({QuoteIdent(name)} {sqlType})");
+                return;
+            }
+
+            if (GetColumns().Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                return;
+
+            Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(name)} {sqlType}");
+        }
+
         internal void AddColumn<T>(string name, IReadOnlyList<T> values)
         {
             ThrowIfDisposed();
