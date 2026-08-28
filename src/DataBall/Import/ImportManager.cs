@@ -1,7 +1,14 @@
 using System;
+using System.IO;
+using System.IO.Compression;
+using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using SharpCompress.Archives;
+using SharpCompress.Readers;
+using squalor.DataBall.Export;
 
 namespace squalor.DataBall.Import
 {
@@ -57,6 +64,212 @@ namespace squalor.DataBall.Import
                 Logger.LogError(ex, "CSV import failed");
                 throw new DataBallException("Failed to import CSV file", ex);
             }
+        }
+
+        /// <summary>
+        /// Imports data from a SQLite database via DuckDB's sqlite extension.
+        /// </summary>
+        /// <param name="db">The DataBall instance to import into.</param>
+        /// <param name="path">The path to the SQLite file.</param>
+        /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
+        /// <param name="tableName">The table to read. Defaults to <c>data</c>.</param>
+        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
+        public static void ImportFromSqlite(DataBall db, string path, bool append, string? tableName = null)
+        {
+            Logger.LogInformation("Importing SQLite from {0}, table={1}, append={2}", path, tableName, append);
+            try
+            {
+                db.Store.ImportSqlite(path, append, tableName);
+                Logger.LogInformation("SQLite import completed");
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                Logger.LogError(ex, "SQLite import failed");
+                throw new DataBallException("Failed to import SQLite file", ex);
+            }
+        }
+
+        /// <summary>
+        /// Imports CSV files from a ZIP, TAR, TAR.GZ, or TAR.XZ archive.
+        /// </summary>
+        /// <param name="db">The DataBall instance to import into.</param>
+        /// <param name="path">The path to the archive.</param>
+        /// <param name="append">If true, the first CSV is appended; subsequent CSVs always append.</param>
+        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
+        public static void ImportFromArchive(DataBall db, string path, bool append)
+        {
+            Logger.LogInformation("Importing archive from {0}, append={1}", path, append);
+            var dir = Path.Combine(Path.GetTempPath(), "databall-archive-in-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var imported = false;
+                using (var archive = ArchiveFactory.Open(path))
+                {
+                    var csvEntries = archive.Entries
+                        .Where(e => !e.IsDirectory
+                            && e.Key is not null
+                            && e.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                        .OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                        .ToList();
+                    if (csvEntries.Count > 0)
+                    {
+                        var first = true;
+                        foreach (var entry in csvEntries)
+                        {
+                            ExtractAndImportCsv(db, dir, entry.Key!, entry.OpenEntryStream(), first ? append : true);
+                            first = false;
+                        }
+                        imported = true;
+                    }
+                }
+
+                // gzip/xz-wrapped tar is reported as a single compressed stream with no member names
+                if (!imported)
+                {
+                    using var stream = File.OpenRead(path);
+                    using var reader = ReaderFactory.Open(stream);
+                    var first = true;
+                    var anyCsv = false;
+                    while (reader.MoveToNextEntry())
+                    {
+                        var entry = reader.Entry;
+                        if (entry.IsDirectory || entry.Key is null
+                            || !entry.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                            continue;
+                        ExtractAndImportCsv(db, dir, entry.Key, reader.OpenEntryStream(), first ? append : true);
+                        first = false;
+                        anyCsv = true;
+                    }
+                    imported = anyCsv;
+                }
+
+                if (!imported)
+                    throw new DataBallException("Archive contains no CSV files");
+                Logger.LogInformation("Archive import completed");
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                Logger.LogError(ex, "Archive import failed");
+                throw new DataBallException("Failed to import archive", ex);
+            }
+            finally
+            {
+                if (Directory.Exists(dir))
+                    Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>
+        /// Imports a <c>.ball</c> ZIP (parquet + metadata, optional config).
+        /// </summary>
+        /// <param name="db">The DataBall instance to import into.</param>
+        /// <param name="path">The path to the <c>.ball</c> file.</param>
+        /// <param name="append">If true, appends parquet rows; otherwise, replaces existing data.</param>
+        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
+        public static void ImportFromBall(DataBall db, string path, bool append)
+        {
+            Logger.LogInformation("Importing .ball from {0}, append={1}", path, append);
+            var dir = Path.Combine(Path.GetTempPath(), "databall-ball-in-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                ZipFile.ExtractToDirectory(path, dir);
+                var parquet = FindExtractedFile(dir, "data.parquet")
+                    ?? throw new DataBallException("Ball archive is missing data.parquet");
+                db.Store.ImportParquet(parquet, append);
+
+                var metadataPath = FindExtractedFile(dir, "metadata.json");
+                if (metadataPath is not null)
+                    LoadMetadataJson(db, metadataPath);
+
+                var configPath = FindExtractedFile(dir, "config.json");
+                if (configPath is not null)
+                    db.ApplyImportedConfig(Config.LoadConfig(configPath));
+
+                Logger.LogInformation("Ball import completed");
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                Logger.LogError(ex, "Ball import failed");
+                throw new DataBallException("Failed to import .ball file", ex);
+            }
+            finally
+            {
+                if (Directory.Exists(dir))
+                    Directory.Delete(dir, true);
+            }
+        }
+
+        internal static ExportType DetectImportFormat(string path)
+        {
+            var fileName = Path.GetFileName(path);
+            if (string.IsNullOrEmpty(fileName))
+                throw new DataBallException($"Unknown import format for '{path}'");
+
+            if (EndsWith(fileName, ".tar.gz") || EndsWith(fileName, ".tgz")
+                || EndsWith(fileName, ".tar.xz") || EndsWith(fileName, ".txz")
+                || EndsWith(fileName, ".tar") || EndsWith(fileName, ".zip"))
+                return ExportType.Archive;
+            if (EndsWith(fileName, ".ball"))
+                return ExportType.Ball;
+            if (EndsWith(fileName, ".csv"))
+                return ExportType.Csv;
+            if (EndsWith(fileName, ".parquet"))
+                return ExportType.Parquet;
+            if (EndsWith(fileName, ".db") || EndsWith(fileName, ".sqlite") || EndsWith(fileName, ".sqlite3"))
+                return ExportType.Sqlite;
+            throw new DataBallException($"Unknown import format for '{path}'");
+        }
+
+        private static void ExtractAndImportCsv(DataBall db, string dir, string entryKey, Stream entryStream, bool append)
+        {
+            using (entryStream)
+            {
+                var dest = ZipSlipSafePath(dir, entryKey);
+                var destDir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(destDir))
+                    Directory.CreateDirectory(destDir);
+                using (var fileStream = File.Create(dest))
+                    entryStream.CopyTo(fileStream);
+                db.Store.ImportCsv(dest, append);
+            }
+        }
+
+        private static void LoadMetadataJson(DataBall db, string path)
+        {
+            var json = File.ReadAllText(path);
+            var map = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json);
+            if (map is null)
+                return;
+            foreach (var (key, element) in map)
+                db.SetMetadata(key, DuckDbStore.Unwrap(element));
+        }
+
+        private static string? FindExtractedFile(string dir, string fileName)
+        {
+            return Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(f => Path.GetFileName(f).Equals(fileName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string ZipSlipSafePath(string destDir, string entryKey)
+        {
+            var destRoot = Path.GetFullPath(destDir);
+            var relative = entryKey.Replace('\\', '/');
+            while (relative.StartsWith('/'))
+                relative = relative[1..];
+            var combined = Path.GetFullPath(Path.Combine(destRoot, relative.Replace('/', Path.DirectorySeparatorChar)));
+            var prefix = destRoot.EndsWith(Path.DirectorySeparatorChar)
+                ? destRoot
+                : destRoot + Path.DirectorySeparatorChar;
+            if (!combined.StartsWith(prefix, StringComparison.Ordinal))
+                throw new DataBallException("Archive entry path is outside the extraction directory");
+            return combined;
+        }
+
+        private static bool EndsWith(string fileName, string suffix)
+        {
+            return fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
         }
     }
 }
