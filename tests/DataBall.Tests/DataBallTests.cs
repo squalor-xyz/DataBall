@@ -25,7 +25,7 @@ namespace squalor.DataBall.Tests
             var rows = db.Query("SELECT \"Name\", \"Age\" FROM \"data\" ORDER BY \"Age\" DESC");
             Assert.Equal(2, rows.Count);
             Assert.Equal("Alice", rows[0]["Name"]);
-            Assert.Equal(30, Convert.ToInt32(rows[0]["Age"]));
+            Assert.Equal(30, Assert.IsType<int>(rows[0]["Age"]));
         }
 
         /// <summary>
@@ -573,8 +573,9 @@ namespace squalor.DataBall.Tests
                 using var zip = ZipFile.OpenRead(path);
                 var entry = Assert.Single(zip.Entries, e => e.FullName.Replace('\\', '/') == "data.csv");
                 using var reader = new StreamReader(entry.Open());
-                var csv = reader.ReadToEnd();
-                Assert.Contains("Alice", csv, StringComparison.Ordinal);
+                var csv = reader.ReadToEnd().Replace("\r\n", "\n");
+                Assert.Contains("Name,Age", csv, StringComparison.Ordinal);
+                Assert.Contains("Alice,30", csv, StringComparison.Ordinal);
             }
             finally
             {

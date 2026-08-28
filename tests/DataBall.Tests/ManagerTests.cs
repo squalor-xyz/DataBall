@@ -228,7 +228,10 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "people.csv");
                 using var db = Sample();
                 ExportManager.Roll(db, ExportType.Csv, path);
-                Assert.True(File.Exists(path));
+                var text = File.ReadAllText(path).Replace("\r\n", "\n");
+                Assert.Contains("Name,Age", text, StringComparison.Ordinal);
+                Assert.Contains("Alice,30", text, StringComparison.Ordinal);
+                Assert.Contains("Bob,25", text, StringComparison.Ordinal);
             }
             finally
             {

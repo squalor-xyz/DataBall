@@ -69,7 +69,7 @@ public class CliSmokeTests
             var info = await Run("info", ball);
             Assert.Equal(0, info.Exit);
             Assert.Contains("Metadata:", info.StdOut);
-            Assert.Contains("Site", info.StdOut);
+            Assert.Contains("Site: A", info.StdOut);
             Assert.Contains("Columns:", info.StdOut);
             Assert.Contains("Meas", info.StdOut);
 
