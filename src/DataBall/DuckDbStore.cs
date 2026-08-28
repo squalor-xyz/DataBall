@@ -387,13 +387,13 @@ namespace squalor.DataBall
             ExportTo(path, "FORMAT PARQUET");
         }
 
-        internal void ExportPartitionedParquet(string directory, IReadOnlyList<string> partitionColumns)
+        internal IReadOnlyList<string> ResolvePartitionColumns(IReadOnlyList<string> partitionColumns)
         {
             ThrowIfDisposed();
-            if (!DataTableExists())
-                throw new DataBallException("No data to export");
             if (partitionColumns is null || partitionColumns.Count == 0)
                 throw new DataBallException("Partition columns are required");
+            if (!DataTableExists())
+                throw new DataBallException("No data to export");
 
             var cols = GetColumns();
             var resolved = new List<string>(partitionColumns.Count);
@@ -405,12 +405,23 @@ namespace squalor.DataBall
                     throw new DataBallException($"Partition column '{col}' does not exist");
                 resolved.Add(match.Name);
             }
+            return resolved;
+        }
 
+        internal void ExportPartitionedParquet(string directory, IReadOnlyList<string> partitionColumns)
+        {
+            ThrowIfDisposed();
+            var resolved = ResolvePartitionColumns(partitionColumns);
+
+            // OVERWRITE true does not drop stale hive partition directories from a prior key set.
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
             Directory.CreateDirectory(directory);
+
             var qDir = QuotePath(directory);
             var by = string.Join(", ", resolved.Select(QuoteIdent));
-            // Partitioned COPY refuses an existing directory unless overwrite is enabled.
-            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true)");
+            // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
+            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
         }
 
         public void Dispose()

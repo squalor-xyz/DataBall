@@ -219,11 +219,16 @@ namespace squalor.DataBall
                     return Task.CompletedTask;
                 }
 
+                var writePartitioned = !string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns is { Length: > 0 };
+                // Resolve against the pre-extraction schema so a typo names the missing column instead of exporting after DROP TABLE.
+                if (writePartitioned)
+                    _store.ResolvePartitionColumns(partitionColumns!);
+
                 ExtractConstantsToMetadataSql(partitionColumns);
                 DistinctInPlace();
-                if (!string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns is { Length: > 0 })
+                if (writePartitioned)
                 {
-                    _store.ExportPartitionedParquet(partitionedParquetPath, partitionColumns);
+                    _store.ExportPartitionedParquet(partitionedParquetPath!, partitionColumns!);
                     _logger.LogInformation($"Exported to partitioned Parquet at {partitionedParquetPath}");
                 }
                 _logger.LogInformation("Bounce operation completed");

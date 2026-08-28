@@ -203,7 +203,108 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall();
                 db.AddColumn("Site", new[] { "Lab1" });
                 db.AddColumn<int>("Meas", new[] { 1 });
-                await Assert.ThrowsAsync<DataBallException>(() => db.Squish(dir, new[] { "Nope" }));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.Squish(dir, new[] { "Nope" }));
+                Assert.Contains("Nope", ex.ToString(), StringComparison.Ordinal);
+                Assert.DoesNotContain("No data to export", ex.ToString(), StringComparison.Ordinal);
+                Assert.False(db.Metadata.ContainsKey("Site"));
+                Assert.False(db.Metadata.ContainsKey("Meas"));
+                var cols = ColumnNames(db);
+                Assert.Equal(new[] { "Site", "Meas" }, cols);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_MissingPartitionColumn_DoesNotExtractExistingColumns()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall();
+                db.AddColumn("Site", new[] { "Lab1", "Lab1" });
+                db.AddColumn<int>("Meas", new[] { 1, 2 });
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.Squish(dir, new[] { "Nope" }));
+                Assert.Contains("Nope", ex.ToString(), StringComparison.Ordinal);
+                Assert.False(db.Metadata.ContainsKey("Site"));
+                var cols = ColumnNames(db);
+                Assert.Contains("Site", cols);
+                Assert.Contains("Meas", cols);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_WritesHiveDirs_WhenOnlyPartitionColumnRemains()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall();
+                db.AddColumn("Site", new[] { "Lab1", "Lab1", "Lab2" });
+                db.AddColumn<int>("Meas", new[] { 1, 1, 1 });
+                await db.Squish(dir, new[] { "Site" });
+                Assert.Equal(1, Convert.ToInt32(db.Metadata["Meas"]));
+                Assert.False(db.Metadata.ContainsKey("Site"));
+                var rows = db.Query("SELECT \"Site\" FROM \"data\" ORDER BY \"Site\"");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal("Lab1", rows[0]["Site"]);
+                Assert.Equal("Lab2", rows[1]["Site"]);
+                AssertHiveParquet(dir, "Site=Lab1");
+                AssertHiveParquet(dir, "Site=Lab2");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_WritesHiveDirs_OnlyPartitionColumn()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall();
+                db.AddColumn("Site", new[] { "Lab1", "Lab2" });
+                await db.Squish(dir, new[] { "Site" });
+                AssertHiveParquet(dir, "Site=Lab1");
+                AssertHiveParquet(dir, "Site=Lab2");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_ReplacesStaleHivePartitions()
+        {
+            var dir = TempDir();
+            try
+            {
+                using (var first = new DataBall())
+                {
+                    first.AddColumn("Site", new[] { "Lab1", "Lab2" });
+                    first.AddColumn<int>("Meas", new[] { 1, 2 });
+                    await first.Squish(dir, new[] { "Site" });
+                    AssertHiveParquet(dir, "Site=Lab1");
+                    AssertHiveParquet(dir, "Site=Lab2");
+                }
+
+                using var second = new DataBall();
+                second.AddColumn("Site", new[] { "Lab3", "Lab4" });
+                second.AddColumn<int>("Meas", new[] { 3, 4 });
+                await second.Squish(dir, new[] { "Site" });
+                Assert.False(Directory.Exists(Path.Combine(dir, "Site=Lab1")));
+                Assert.False(Directory.Exists(Path.Combine(dir, "Site=Lab2")));
+                AssertHiveParquet(dir, "Site=Lab3");
+                AssertHiveParquet(dir, "Site=Lab4");
             }
             finally
             {
@@ -286,6 +387,22 @@ namespace squalor.DataBall.Tests
             Assert.Equal(2, rows.Count);
             Assert.False(rows[0].ContainsKey("Flag"));
             Assert.False(rows[0].ContainsKey("N"));
+        }
+
+        private static string[] ColumnNames(DataBall db)
+        {
+            return db.Query("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'main' AND table_name = 'data'
+                ORDER BY ordinal_position
+                """).Select(r => Convert.ToString(r["column_name"]) ?? string.Empty).ToArray();
+        }
+
+        private static void AssertHiveParquet(string root, string hiveDir)
+        {
+            var path = Path.Combine(root, hiveDir);
+            Assert.True(Directory.Exists(path), path);
+            Assert.NotEmpty(Directory.GetFiles(path, "*.parquet", SearchOption.AllDirectories));
         }
 
         private static long CountDataRows(DataBall db)
