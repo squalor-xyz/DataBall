@@ -409,20 +409,41 @@ namespace squalor.DataBall
             ExportTo(path, "FORMAT PARQUET");
         }
 
+        internal IReadOnlyList<string> ResolvePartitionColumns(IReadOnlyList<string> partitionColumns)
+        {
+            ThrowIfDisposed();
+            if (partitionColumns is null || partitionColumns.Count == 0)
+                throw new DataBallException("Partition columns are required");
+            if (!DataTableExists())
+                throw new DataBallException("No data to export");
+
+            var cols = GetColumns();
+            var resolved = new List<string>(partitionColumns.Count);
+            foreach (var col in partitionColumns)
+            {
+                ValidateName(col, "Column");
+                var match = cols.FirstOrDefault(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    throw new DataBallException($"Partition column '{col}' does not exist");
+                resolved.Add(match.Name);
+            }
+            return resolved;
+        }
+
         internal void ExportPartitionedParquet(string directory, IReadOnlyList<string> partitionColumns)
         {
             ThrowIfDisposed();
-            if (!DataTableExists())
-                throw new DataBallException("No data to export");
-            if (partitionColumns is null || partitionColumns.Count == 0)
-                throw new DataBallException("Partition columns are required");
-            foreach (var col in partitionColumns)
-                ValidateName(col, "Column");
+            var resolved = ResolvePartitionColumns(partitionColumns);
 
+            // OVERWRITE true does not drop stale hive partition directories from a prior key set.
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, recursive: true);
             Directory.CreateDirectory(directory);
+
             var qDir = QuotePath(directory);
-            var by = string.Join(", ", partitionColumns.Select(QuoteIdent));
-            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}))");
+            var by = string.Join(", ", resolved.Select(QuoteIdent));
+            // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
+            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
         }
 
         // DuckDB has no COPY FORMAT SQLITE; read/write via ATTACH (TYPE sqlite).
