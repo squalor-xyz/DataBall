@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using squalor.DataBall.Export;
+using squalor.DataBall.Import;
 
 namespace squalor.DataBall
 {
@@ -63,6 +64,10 @@ namespace squalor.DataBall
                 return _store;
             }
         }
+
+        internal IReadOnlyDictionary<string, Type> ExpectedColumnTypes => _expectedColumnTypes;
+
+        internal IReadOnlyList<Relationship> Relationships => _relationships;
 
         /// <summary>
         /// Sets a metadata value.
@@ -271,6 +276,128 @@ namespace squalor.DataBall
         }
 
         /// <summary>
+        /// Imports data from a file, detecting the format by extension.
+        /// </summary>
+        /// <param name="path">The path of the file to import.</param>
+        /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c>.</param>
+        /// <returns>A completed task after the import finishes.</returns>
+        /// <exception cref="DataBallException">Thrown when the path is missing, the format is unknown, or import fails.</exception>
+        public Task ImportAsync(string path, ImportOptions? options = null)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DataBallException("Path is required");
+
+            var format = ImportManager.DetectImportFormat(path);
+            if (!File.Exists(path))
+                throw new DataBallException($"File not found: {path}");
+
+            options ??= new ImportOptions();
+            var append = options.Append;
+            _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, append);
+            try
+            {
+                switch (format)
+                {
+                    case ExportType.Csv:
+                        _store.ImportCsv(path, append);
+                        break;
+                    case ExportType.Parquet:
+                        _store.ImportParquet(path, append);
+                        break;
+                    case ExportType.Sqlite:
+                        ImportManager.ImportFromSqlite(this, path, append, options.TableName);
+                        break;
+                    case ExportType.Archive:
+                        ImportManager.ImportFromArchive(this, path, append);
+                        break;
+                    case ExportType.Ball:
+                        ImportManager.ImportFromBall(this, path, append);
+                        break;
+                    default:
+                        throw new DataBallException($"Unknown import format for '{path}'");
+                }
+                return Task.CompletedTask;
+            }
+            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
+            {
+                _logger.LogError(ex, "Import failed");
+                throw new DataBallException("Failed to import", ex);
+            }
+        }
+
+        /// <summary>
+        /// Exports data in the specified format.
+        /// </summary>
+        /// <param name="path">The destination path.</param>
+        /// <param name="type">The export format.</param>
+        /// <param name="options">Optional export settings such as SQLite table name.</param>
+        /// <returns>A completed task after the export finishes.</returns>
+        /// <exception cref="DataBallException">Thrown when export fails.</exception>
+        public Task ExportAsync(string path, ExportType type, ExportOptions? options = null)
+        {
+            ThrowIfDisposed();
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DataBallException("Path is required");
+
+            _logger.LogInformation("Exporting to {Path} as {Type}", path, type);
+            try
+            {
+                switch (type)
+                {
+                    case ExportType.Csv:
+                        _store.ExportCsv(path);
+                        break;
+                    case ExportType.Parquet:
+                        _store.ExportParquet(path);
+                        break;
+                    case ExportType.Archive:
+                        ExportManager.ExportToArchive(this, path);
+                        break;
+                    case ExportType.Ball:
+                        ExportManager.ExportToBall(this, path);
+                        break;
+                    case ExportType.Sqlite:
+                        ExportManager.ExportToSqlite(this, path, options?.TableName);
+                        break;
+                    default:
+                        throw new DataBallException($"Unsupported export type: {type}");
+                }
+                return Task.CompletedTask;
+            }
+            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
+            {
+                _logger.LogError(ex, "Export failed");
+                throw new DataBallException($"Failed to export to {type}", ex);
+            }
+        }
+
+        /// <summary>
+        /// Saves the data to the specified path using the .ball format.
+        /// </summary>
+        /// <param name="path">The path to save the .ball file.</param>
+        /// <returns>A completed task after the save finishes.</returns>
+        /// <exception cref="DataBallException">Thrown when the save operation fails.</exception>
+        public Task SaveAsync(string path)
+        {
+            ThrowIfDisposed();
+            return ExportAsync(path, ExportType.Ball);
+        }
+
+        /// <summary>
+        /// Exports data in the specified format.
+        /// </summary>
+        /// <param name="type">The export format.</param>
+        /// <param name="path">The destination path.</param>
+        /// <param name="options">Optional export settings such as SQLite table name.</param>
+        /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
+        public void Roll(ExportType type, string path, ExportOptions? options = null)
+        {
+            ThrowIfDisposed();
+            ExportAsync(path, type, options).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
         /// Exports the data to an archive (ZIP, TAR.GZ, or TAR.XZ).
         /// </summary>
         /// <param name="path">The path to save the archive.</param>
@@ -278,7 +405,7 @@ namespace squalor.DataBall
         public void ExportToArchive(string path)
         {
             ThrowIfDisposed();
-            ExportManager.ExportToArchive(this, path);
+            ExportAsync(path, ExportType.Archive).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -289,7 +416,7 @@ namespace squalor.DataBall
         public void Save(string path)
         {
             ThrowIfDisposed();
-            ExportManager.Roll(this, ExportType.Ball, path);
+            SaveAsync(path).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -348,6 +475,18 @@ namespace squalor.DataBall
         {
             if (_expectedColumnTypes.TryGetValue(name, out var expected) && expected != actual)
                 throw new DataBallException($"Column '{name}' expected type {expected.Name}, got {actual.Name}");
+        }
+
+        internal void ApplyImportedConfig(Config config)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+            foreach (var col in config.Columns)
+                _expectedColumnTypes[col.Key] = Config.ParseColumnType(col.Value);
+            if (config.Relationships.Count > 0)
+            {
+                _relationships.Clear();
+                _relationships.AddRange(config.Relationships);
+            }
         }
 
         private void ThrowIfDisposed()
