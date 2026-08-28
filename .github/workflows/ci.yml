@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore DataBall.sln
+
+      - name: Build
+        run: dotnet build DataBall.sln -c Release --no-restore
+
+      - name: Test
+        run: dotnet test DataBall.sln -c Release --no-build --no-restore

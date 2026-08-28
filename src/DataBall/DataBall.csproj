@@ -5,12 +5,17 @@
     <IsPackable>true</IsPackable>
     <PackageId>squalor.DataBall</PackageId>
     <Version>1.0.0</Version>
-    <Description>Versatile data handling class for test executive applications, supporting import/export in various formats, data manipulation, metadata, and configuration-based relationships. Supports large datasets via chunked imports and partitioned Parquet exports.</Description>
+    <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, SQLite, zip/tar, .ball), row builder, Bounce/Squish.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <!-- 0.40: NU1902 (GHSA-6c8g-7p36-r338) known; do not bump without re-verifying tar.gz export + tar.xz import. XZ is decompress-only in 0.40. -->
     <PackageReference Include="SharpCompress" Version="0.40.0" />
   </ItemGroup>
 </Project>
