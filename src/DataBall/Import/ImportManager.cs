@@ -127,6 +127,7 @@ namespace squalor.DataBall.Import
 
         /// <summary>
         /// Imports a <c>.ball</c> ZIP (parquet + metadata, optional config).
+        /// <c>data.parquet</c> is optional; metadata-only balls load metadata without a data table.
         /// </summary>
         /// <param name="db">The DataBall instance to import into.</param>
         /// <param name="path">The path to the <c>.ball</c> file.</param>
@@ -140,9 +141,9 @@ namespace squalor.DataBall.Import
             try
             {
                 ZipFile.ExtractToDirectory(path, dir);
-                var parquet = FindExtractedFile(dir, "data.parquet")
-                    ?? throw new DataBallException("Ball archive is missing data.parquet");
-                db.Store.ImportParquet(parquet, append);
+                var parquet = FindExtractedFile(dir, "data.parquet");
+                if (parquet is not null)
+                    db.Store.ImportParquet(parquet, append);
 
                 var metadataPath = FindExtractedFile(dir, "metadata.json");
                 if (metadataPath is not null)

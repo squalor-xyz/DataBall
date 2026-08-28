@@ -85,6 +85,7 @@ public class CliErrorTests
 
             var result = await Run("export", csv, output);
             Assert.NotEqual(0, result.Exit);
+            Assert.Contains("Cannot detect format", result.StdErr);
         }
         finally
         {

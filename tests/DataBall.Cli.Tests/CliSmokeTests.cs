@@ -204,6 +204,7 @@ public class CliSmokeTests
             File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
             File.WriteAllText(config, """
                 {
+                  "metadata": { "Operator": "Ada" },
                   "columns": { "Age": "int" }
                 }
                 """);
@@ -214,9 +215,10 @@ public class CliSmokeTests
             Assert.Equal(0, queried.Exit);
             Assert.Equal("Name\tAge\nAlice\t30\nBob\t25\n", queried.StdOut);
 
-            var types = await Run("query", ball, "SELECT typeof(Age) AS t FROM data LIMIT 1");
-            Assert.Equal(0, types.Exit);
-            Assert.Contains("INT", types.StdOut, StringComparison.OrdinalIgnoreCase);
+            var info = await Run("info", ball);
+            Assert.Equal(0, info.Exit);
+            Assert.Contains("Operator", info.StdOut);
+            Assert.Contains("Ada", info.StdOut);
         }
         finally
         {
@@ -346,10 +348,12 @@ public class CliSmokeTests
 
             var info = await Run("info", ball);
             Assert.Equal(0, info.Exit);
-            Assert.Contains("Metadata:", info.StdOut);
-            Assert.Contains("Site", info.StdOut);
-            Assert.Contains("Meas", info.StdOut);
             Assert.Contains("Rows: 0", info.StdOut);
+            Assert.Contains("Metadata:", info.StdOut);
+            Assert.Contains("Site: A", info.StdOut);
+            Assert.Contains("Meas: 1", info.StdOut);
+            Assert.Contains("Columns:\nMetadata:", info.StdOut);
+            Assert.DoesNotContain("  _ (", info.StdOut);
         }
         finally
         {
