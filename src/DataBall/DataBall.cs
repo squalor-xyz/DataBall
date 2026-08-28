@@ -57,7 +57,7 @@ namespace squalor.DataBall
         /// <summary>
         /// Adds a column of primitive values to the DataFrame.
         /// </summary>
-        /// <typeparam name="T">The type of the column values, which must be a non-nullable value type.</typeparam>
+        /// <typeparam name="T">The type of the column values, which must be an unmanaged (blittable) value type.</typeparam>
         /// <param name="name">The name of the column.</param>
         /// <param name="values">The values for the column.</param>
         public void AddColumn<T>(string name, IEnumerable<T> values) where T : unmanaged
