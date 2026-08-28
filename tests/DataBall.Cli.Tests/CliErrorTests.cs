@@ -35,6 +35,84 @@ public class CliErrorTests
     }
 
     [Fact]
+    public async Task Import_MissingInputFile_NonZero()
+    {
+        var dir = TempDir();
+        try
+        {
+            var missing = Path.Combine(dir, "no-such.csv");
+            var output = Path.Combine(dir, "out.ball");
+
+            var result = await Run("import", missing, "-o", output);
+            Assert.NotEqual(0, result.Exit);
+            Assert.Contains("File not found", result.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Export_UnknownFormat_NonZero()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            var output = Path.Combine(dir, "out.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+
+            var result = await Run("export", csv, output, "--format", "xyz");
+            Assert.NotEqual(0, result.Exit);
+            Assert.Contains("Unknown format", result.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Export_UndetectableExtension_NonZero()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            var output = Path.Combine(dir, "out.dat");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+
+            var result = await Run("export", csv, output);
+            Assert.NotEqual(0, result.Exit);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Squish_EmptyPartition_NonZero()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            var hive = Path.Combine(dir, "hive");
+            File.WriteAllText(csv, "Site,Meas\nLab1,1\n");
+
+            var result = await Run("squish", csv, hive, "--partition", "  ,  ");
+            Assert.NotEqual(0, result.Exit);
+            Assert.Contains("Partition columns are required", result.StdErr);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task Query_BadSql_NonZero()
     {
         var dir = TempDir();

@@ -60,6 +60,7 @@ internal static class CliApp
             await db.ImportAsync(input);
             await db.Bounce();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
+            EnsureExportableTable(db);
             await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
             return 0;
         });
@@ -87,6 +88,7 @@ internal static class CliApp
 
             await db.Squish();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
+            EnsureExportableTable(db);
             await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
             return 0;
         });
@@ -143,6 +145,18 @@ internal static class CliApp
             stderr.WriteLine(ex.Message);
             return 1;
         }
+    }
+
+    // Bounce/Squish drop "data" when the last column is extracted; export still needs a table.
+    private static void EnsureExportableTable(DataBall db)
+    {
+        var exists = db.Query("""
+            SELECT COUNT(*) AS c FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name = 'data'
+            """);
+        if (Convert.ToInt64(exists[0]["c"], CultureInfo.InvariantCulture) > 0)
+            return;
+        db.AddColumn("_", Array.Empty<string?>());
     }
 
     private static void WriteTsv(IReadOnlyList<Dictionary<string, object?>> rows, TextWriter stdout)
