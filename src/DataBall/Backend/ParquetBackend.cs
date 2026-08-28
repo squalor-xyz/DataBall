@@ -8,7 +8,8 @@ using Microsoft.Data.Analysis;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using NLog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace squalor.DataBall.Backend
 {
@@ -17,16 +18,18 @@ namespace squalor.DataBall.Backend
     /// </summary>
     public class ParquetBackend : IDataBackend
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger _logger;
         private readonly string _path;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ParquetBackend"/> class with the specified file path.
         /// </summary>
         /// <param name="path">The path to the Parquet file.</param>
+        /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
         /// <exception cref="ArgumentNullException">Thrown when <paramref name="path"/> is null or empty.</exception>
-        public ParquetBackend(string path)
+        public ParquetBackend(string path, ILogger? logger = null)
         {
+            _logger = logger ?? NullLogger.Instance;
             _path = path ?? throw new ArgumentNullException(nameof(path));
             if (string.IsNullOrEmpty(path))
                 throw new ArgumentException("Path cannot be empty.", nameof(path));
@@ -40,7 +43,7 @@ namespace squalor.DataBall.Backend
         /// <exception cref="DataBallException">Thrown when loading the Parquet file fails.</exception>
         public async Task<DataFrame> Load(string path)
         {
-            Logger.Info("Loading Parquet from {0}", path);
+            _logger.LogInformation("Loading Parquet from {0}", path);
             try
             {
                 var df = new DataFrame();
@@ -49,7 +52,7 @@ namespace squalor.DataBall.Backend
                 for (int rg = 0; rg < reader.RowGroupCount; rg++)
                 {
                     using var rgReader = reader.OpenRowGroupReader(rg);
-                    for (int c = 0; c < schema.DataFields.Count; c++)
+                    for (int c = 0; c < schema.DataFields.Length; c++)
                     {
                         var field = schema.DataFields[c];
                         var colData = await rgReader.ReadColumnAsync(field).ConfigureAwait(false);
@@ -63,12 +66,12 @@ namespace squalor.DataBall.Backend
                             throw new NotSupportedException($"Unsupported Parquet data type: {field.ClrType}");
                     }
                 }
-                Logger.Info("Parquet load completed");
+                _logger.LogInformation("Parquet load completed");
                 return df;
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Parquet load failed");
+                _logger.LogError(ex, "Parquet load failed");
                 throw new DataBallException("Failed to load Parquet file", ex);
             }
         }
@@ -82,7 +85,7 @@ namespace squalor.DataBall.Backend
         /// <exception cref="DataBallException">Thrown when saving the Parquet file fails.</exception>
         public async Task Save(DataFrame df, string path)
         {
-            Logger.Info("Saving to Parquet at {0}", path);
+            _logger.LogInformation("Saving to Parquet at {0}", path);
             try
             {
                 using var stream = File.OpenWrite(path);
@@ -97,11 +100,11 @@ namespace squalor.DataBall.Backend
                     var dataCol = new DataColumn(field, dataArray);
                     await rgWriter.WriteColumnAsync(dataCol).ConfigureAwait(false);
                 }
-                Logger.Info("Parquet save completed");
+                _logger.LogInformation("Parquet save completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Parquet save failed");
+                _logger.LogError(ex, "Parquet save failed");
                 throw new DataBallException("Failed to save Parquet file", ex);
             }
         }
@@ -114,7 +117,7 @@ namespace squalor.DataBall.Backend
         /// <returns>A <see cref="DataFrame"/> containing the filtered data.</returns>
         public DataFrame Filter<T>(Expression<Func<T, bool>> predicate)
         {
-            Logger.Debug("Filtering DataFrame with predicate");
+            _logger.LogDebug("Filtering DataFrame with predicate");
             try
             {
                 var df = Load(_path).GetAwaiter().GetResult();
@@ -128,7 +131,7 @@ namespace squalor.DataBall.Backend
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Filter operation failed");
+                _logger.LogError(ex, "Filter operation failed");
                 throw new DataBallException("Failed to filter DataFrame", ex);
             }
         }
@@ -140,7 +143,7 @@ namespace squalor.DataBall.Backend
         /// <returns>A <see cref="GroupBy"/> object for further aggregation.</returns>
         public GroupBy GroupBy(params string[] columnNames)
         {
-            Logger.Debug("Grouping DataFrame by {0}", string.Join(", ", columnNames));
+            _logger.LogDebug("Grouping DataFrame by {0}", string.Join(", ", columnNames));
             try
             {
                 var df = Load(_path).GetAwaiter().GetResult();
@@ -161,7 +164,7 @@ namespace squalor.DataBall.Backend
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "GroupBy operation failed");
+                _logger.LogError(ex, "GroupBy operation failed");
                 throw new DataBallException("Failed to group DataFrame", ex);
             }
         }
@@ -175,7 +178,7 @@ namespace squalor.DataBall.Backend
         /// <returns>A <see cref="DataFrame"/> containing the joined data.</returns>
         public DataFrame Join(DataFrame other, string[] leftColumns, string[] rightColumns)
         {
-            Logger.Debug("Joining DataFrames on left: {0}, right: {1}", string.Join(", ", leftColumns), string.Join(", ", rightColumns));
+            _logger.LogDebug("Joining DataFrames on left: {0}, right: {1}", string.Join(", ", leftColumns), string.Join(", ", rightColumns));
             try
             {
                 var df = Load(_path).GetAwaiter().GetResult();
@@ -187,7 +190,7 @@ namespace squalor.DataBall.Backend
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Join operation failed");
+                _logger.LogError(ex, "Join operation failed");
                 throw new DataBallException("Failed to join DataFrames", ex);
             }
         }
@@ -199,7 +202,7 @@ namespace squalor.DataBall.Backend
         /// <returns>A <see cref="DataFrame"/> sorted by the specified columns.</returns>
         public DataFrame Sort(params string[] columnNames)
         {
-            Logger.Debug("Sorting DataFrame by {0}", string.Join(", ", columnNames));
+            _logger.LogDebug("Sorting DataFrame by {0}", string.Join(", ", columnNames));
             try
             {
                 var df = Load(_path).GetAwaiter().GetResult();
@@ -214,7 +217,7 @@ namespace squalor.DataBall.Backend
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Sort operation failed");
+                _logger.LogError(ex, "Sort operation failed");
                 throw new DataBallException("Failed to sort DataFrame", ex);
             }
         }
@@ -226,7 +229,7 @@ namespace squalor.DataBall.Backend
         /// <returns>An object containing the aggregated results.</returns>
         public object Aggregate(Dictionary<string, Func<object[], object>> aggregators)
         {
-            Logger.Debug("Aggregating DataFrame");
+            _logger.LogDebug("Aggregating DataFrame");
             try
             {
                 var df = Load(_path).GetAwaiter().GetResult();
@@ -247,7 +250,7 @@ namespace squalor.DataBall.Backend
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Aggregate operation failed");
+                _logger.LogError(ex, "Aggregate operation failed");
                 throw new DataBallException("Failed to aggregate DataFrame", ex);
             }
         }

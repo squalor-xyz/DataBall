@@ -6,7 +6,8 @@ using Microsoft.Data.Analysis;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using NLog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using SharpCompress.Common;
 using SharpCompress.Writers;
 
@@ -17,7 +18,7 @@ namespace squalor.DataBall.Export
     /// </summary>
     public static class ExportManager
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private static readonly ILogger Logger = NullLogger.Instance;
 
         /// <summary>
         /// Exports the DataFrame to a Parquet file asynchronously.
@@ -28,7 +29,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static async Task ExportToParquet(DataFrame df, string path)
         {
-            Logger.Info("Exporting to Parquet at {0}", path);
+            Logger.LogInformation("Exporting to Parquet at {0}", path);
             try
             {
                 using var stream = File.OpenWrite(path);
@@ -43,11 +44,11 @@ namespace squalor.DataBall.Export
                     var dataCol = new DataColumn(field, dataArray);
                     await rgWriter.WriteColumnAsync(dataCol).ConfigureAwait(false);
                 }
-                Logger.Info("Parquet export completed");
+                Logger.LogInformation("Parquet export completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Parquet export failed");
+                Logger.LogError(ex, "Parquet export failed");
                 throw new DataBallException("Failed to export Parquet", ex);
             }
         }
@@ -62,7 +63,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static async Task ExportToPartitionedParquet(DataFrame df, string path, string[] partitionColumns)
         {
-            Logger.Info("Exporting to partitioned Parquet at {0}", path);
+            Logger.LogInformation("Exporting to partitioned Parquet at {0}", path);
             try
             {
                 if (partitionColumns.Length == 0)
@@ -105,11 +106,11 @@ namespace squalor.DataBall.Export
                 {
                     df.Columns.Remove(keyColumnName);
                 }
-                Logger.Info("Partitioned Parquet export completed");
+                Logger.LogInformation("Partitioned Parquet export completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Partitioned Parquet export failed");
+                Logger.LogError(ex, "Partitioned Parquet export failed");
                 throw new DataBallException("Failed to export partitioned Parquet", ex);
             }
         }
@@ -122,7 +123,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static void ExportToArchive(DataFrame df, string path)
         {
-            Logger.Info("Exporting to archive {0}", path);
+            Logger.LogInformation("Exporting to archive {0}", path);
             try
             {
                 var archiveType = path.EndsWith(".tar.gz") ? ArchiveType.Tar : path.EndsWith(".tar.xz") ? ArchiveType.Tar : ArchiveType.Zip;
@@ -133,11 +134,11 @@ namespace squalor.DataBall.Export
                 DataFrame.SaveCsv(df, csvStream);
                 csvStream.Position = 0;
                 writer.Write("data.csv", csvStream);
-                Logger.Info("Archive export completed");
+                Logger.LogInformation("Archive export completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Archive export failed");
+                Logger.LogError(ex, "Archive export failed");
                 throw new DataBallException("Archive export failed", ex);
             }
         }
@@ -151,7 +152,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export type is unsupported or the operation fails.</exception>
         public static void Roll(DataFrame df, ExportType type, string path)
         {
-            Logger.Info("Rolling DataFrame to {0} with type {1}", path, type);
+            Logger.LogInformation("Rolling DataFrame to {0} with type {1}", path, type);
             try
             {
                 switch (type)
@@ -177,7 +178,7 @@ namespace squalor.DataBall.Export
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Roll operation failed");
+                Logger.LogError(ex, "Roll operation failed");
                 throw new DataBallException($"Failed to roll DataFrame to {type}", ex);
             }
         }

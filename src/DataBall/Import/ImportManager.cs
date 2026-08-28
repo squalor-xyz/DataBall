@@ -5,7 +5,8 @@ using Microsoft.Data.Analysis;
 using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using NLog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace squalor.DataBall.Import
 {
@@ -14,7 +15,7 @@ namespace squalor.DataBall.Import
     /// </summary>
     public static class ImportManager
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private static readonly ILogger Logger = NullLogger.Instance;
 
         /// <summary>
         /// Imports data from a Parquet file into the DataBall instance asynchronously.
@@ -26,7 +27,7 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static async Task ImportFromParquet(DataBall db, string path, bool append)
         {
-            Logger.Info("Importing Parquet from {0}, append={1}", path, append);
+            Logger.LogInformation("Importing Parquet from {0}, append={1}", path, append);
             try
             {
                 var df = new DataFrame();
@@ -35,7 +36,7 @@ namespace squalor.DataBall.Import
                 for (int rg = 0; rg < reader.RowGroupCount; rg++)
                 {
                     using var rgReader = reader.OpenRowGroupReader(rg);
-                    for (int c = 0; c < schema.DataFields.Count; c++)
+                    for (int c = 0; c < schema.DataFields.Length; c++)
                     {
                         var field = schema.DataFields[c];
                         var colData = await rgReader.ReadColumnAsync(field).ConfigureAwait(false);
@@ -50,11 +51,11 @@ namespace squalor.DataBall.Import
                     }
                 }
                 db.MergeOrAppend(df, append);
-                Logger.Info("Parquet import completed");
+                Logger.LogInformation("Parquet import completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Parquet import failed");
+                Logger.LogError(ex, "Parquet import failed");
                 throw new DataBallException("Failed to import Parquet file", ex);
             }
         }
@@ -68,17 +69,17 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromCsv(DataBall db, string path, int chunkSize = 100000)
         {
-            Logger.Info("Importing CSV from {0}", path);
+            Logger.LogInformation("Importing CSV from {0}", path);
             try
             {
                 using var stream = File.OpenRead(path);
                 var df = DataFrame.LoadCsv(stream, numberOfRowsToRead: chunkSize);
                 db.MergeOrAppend(df, true);
-                Logger.Info("CSV import completed");
+                Logger.LogInformation("CSV import completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "CSV import failed");
+                Logger.LogError(ex, "CSV import failed");
                 throw new DataBallException("Failed to import CSV file", ex);
             }
         }
@@ -91,11 +92,11 @@ namespace squalor.DataBall.Import
         {
             if (col == null)
             {
-                Logger.Warn("Column is null");
+                Logger.LogWarning("Column is null");
                 return;
             }
             var val = col[0];
-            Logger.Debug("Processed column value: {0}", val);
+            Logger.LogDebug("Processed column value: {0}", val);
         }
     }
 }

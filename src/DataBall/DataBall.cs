@@ -4,7 +4,8 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.Data.Analysis;
-using NLog;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using squalor.DataBall.Backend;
 using squalor.DataBall.Export;
 using squalor.DataBall.Import;
@@ -16,7 +17,7 @@ namespace squalor.DataBall
     /// </summary>
     public class DataBall
     {
-        private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
+        private readonly ILogger _logger;
         private DataFrame Data;
         private readonly Dictionary<string, object?> Metadata;
         private readonly Dictionary<string, Type> ExpectedColumnTypes;
@@ -33,8 +34,10 @@ namespace squalor.DataBall
         /// Initializes a new instance of the <see cref="DataBall"/> class, optionally loading configuration.
         /// </summary>
         /// <param name="configPath">The path to the configuration JSON file, if any.</param>
-        public DataBall(string? configPath = null)
+        /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
+        public DataBall(string? configPath = null, ILogger? logger = null)
         {
+            _logger = logger ?? NullLogger.Instance;
             Data = new DataFrame();
             Metadata = new Dictionary<string, object?>();
             ExpectedColumnTypes = new Dictionary<string, Type>();
@@ -57,7 +60,7 @@ namespace squalor.DataBall
         /// <typeparam name="T">The type of the column values, which must be a non-nullable value type.</typeparam>
         /// <param name="name">The name of the column.</param>
         /// <param name="values">The values for the column.</param>
-        public void AddColumn<T>(string name, IEnumerable<T> values) where T : struct
+        public void AddColumn<T>(string name, IEnumerable<T> values) where T : unmanaged
         {
             Data.Columns.Add(new PrimitiveDataFrameColumn<T>(name, values));
             ExpectedColumnTypes[name] = typeof(T);
@@ -93,7 +96,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when the Bounce operation fails.</exception>
         public async Task Bounce(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
-            Logger.Info("Starting Bounce operation");
+            _logger.LogInformation("Starting Bounce operation");
             try
             {
                 ExtractConstantsToMetadata();
@@ -107,18 +110,18 @@ namespace squalor.DataBall
                     ReplaceWithIDs(Data, uniqueTable, size, size);
                 }
                 Metadata["ChunkMetadataTables"] = metadataTables;
-                Logger.Debug($"Stored {metadataTables.Count} chunk tables");
+                _logger.LogDebug($"Stored {metadataTables.Count} chunk tables");
 
                 if (!string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns != null && partitionColumns.Length > 0)
                 {
                     await ExportManager.ExportToPartitionedParquet(Data, partitionedParquetPath, partitionColumns).ConfigureAwait(false);
-                    Logger.Info($"Exported to partitioned Parquet at {partitionedParquetPath}");
+                    _logger.LogInformation($"Exported to partitioned Parquet at {partitionedParquetPath}");
                 }
-                Logger.Info("Bounce operation completed");
+                _logger.LogInformation("Bounce operation completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Bounce operation failed");
+                _logger.LogError(ex, "Bounce operation failed");
                 throw new DataBallException("Bounce operation failed", ex);
             }
         }
@@ -132,7 +135,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when the Squish operation fails.</exception>
         public async Task Squish(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
-            Logger.Info("Starting Squish operation");
+            _logger.LogInformation("Starting Squish operation");
             try
             {
                 ExtractConstantsToMetadata();
@@ -146,18 +149,18 @@ namespace squalor.DataBall
                     ReplaceWithIDs(Data, uniqueTable, size, size);
                 }
                 Metadata["ChunkMetadataTables"] = metadataTables;
-                Logger.Debug($"Stored {metadataTables.Count} chunk tables");
+                _logger.LogDebug($"Stored {metadataTables.Count} chunk tables");
 
                 if (!string.IsNullOrEmpty(partitionedParquetPath) && partitionColumns != null && partitionColumns.Length > 0)
                 {
                     await ExportManager.ExportToPartitionedParquet(Data, partitionedParquetPath, partitionColumns).ConfigureAwait(false);
-                    Logger.Info($"Exported to partitioned Parquet at {partitionedParquetPath}");
+                    _logger.LogInformation($"Exported to partitioned Parquet at {partitionedParquetPath}");
                 }
-                Logger.Info("Squish operation completed");
+                _logger.LogInformation("Squish operation completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Squish operation failed");
+                _logger.LogError(ex, "Squish operation failed");
                 throw new DataBallException("Squish operation failed", ex);
             }
         }
@@ -189,7 +192,7 @@ namespace squalor.DataBall
         /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
         public void MergeOrAppend(DataFrame df, bool append)
         {
-            Logger.Debug("Merging or appending DataFrame");
+            _logger.LogDebug("Merging or appending DataFrame");
             try
             {
                 if (!append || Data.Rows.Count == 0)
@@ -258,18 +261,18 @@ namespace squalor.DataBall
                     newData.Columns.Add(newCol);
                 }
                 Data = newData;
-                Logger.Debug("Merge/append completed");
+                _logger.LogDebug("Merge/append completed");
             }
             catch (Exception ex)
             {
-                Logger.Error(ex, "Merge/append failed");
+                _logger.LogError(ex, "Merge/append failed");
                 throw new DataBallException("Failed to merge or append DataFrame", ex);
             }
         }
 
         private void ExtractConstantsToMetadata()
         {
-            Logger.Debug("Extracting constant columns to metadata");
+            _logger.LogDebug("Extracting constant columns to metadata");
             var columnsToRemove = new List<string>();
             for (int i = 0; i < Data.Columns.Count; i++)
             {
@@ -278,7 +281,7 @@ namespace squalor.DataBall
                 {
                     Metadata[col.Name] = col[0];
                     columnsToRemove.Add(col.Name);
-                    Logger.Debug($"Moved constant column {col.Name} to metadata");
+                    _logger.LogDebug($"Moved constant column {col.Name} to metadata");
                 }
             }
             foreach (var name in columnsToRemove)
@@ -287,7 +290,7 @@ namespace squalor.DataBall
 
         private DataFrame DeduplicateDataFrame(DataFrame df)
         {
-            Logger.Debug("Dropping duplicate rows");
+            _logger.LogDebug("Dropping duplicate rows");
             var uniqueRows = new HashSet<string>();
             var result = new DataFrame();
             foreach (var col in df.Columns)
@@ -307,7 +310,7 @@ namespace squalor.DataBall
 
         private List<DataFrame> ExtractChunks(DataFrame df, int rows, int cols)
         {
-            Logger.Debug("Extracting chunks of size {0}x{1}", rows, cols);
+            _logger.LogDebug("Extracting chunks of size {0}x{1}", rows, cols);
             var chunks = new List<DataFrame>();
             for (long r = 0; r < df.Rows.Count; r += rows)
             {
@@ -331,7 +334,7 @@ namespace squalor.DataBall
 
         private DataFrame DedupToTable(List<DataFrame> chunks)
         {
-            Logger.Debug("Deduplicating chunks to table");
+            _logger.LogDebug("Deduplicating chunks to table");
             var uniqueTable = new DataFrame();
             uniqueTable.Columns.Add(new PrimitiveDataFrameColumn<long>("ID", 0));
             foreach (var col in chunks[0].Columns)
@@ -359,7 +362,7 @@ namespace squalor.DataBall
 
         private void ReplaceWithIDs(DataFrame df, DataFrame uniqueTable, int rows, int cols)
         {
-            Logger.Debug("Replacing chunks with IDs");
+            _logger.LogDebug("Replacing chunks with IDs");
             for (long r = 0; r < df.Rows.Count; r += rows)
             {
                 for (int c = 0; c < df.Columns.Count; c += cols)
@@ -396,7 +399,7 @@ namespace squalor.DataBall
 
         private void AddConstantColumn(string name, object? value, long length)
         {
-            Logger.Debug("Adding constant column {0}", name);
+            _logger.LogDebug("Adding constant column {0}", name);
             DataFrameColumn col;
             if (value is string)
                 col = new StringDataFrameColumn(name, Enumerable.Repeat((string?)value, (int)length));
@@ -425,12 +428,12 @@ namespace squalor.DataBall
                 try
                 {
                     value = Convert.ChangeType(value.ToString(), targetType);
-                    Logger.Debug($"Converted value for index {index} to {targetType}");
+                    _logger.LogDebug($"Converted value for index {index} to {targetType}");
                 }
                 catch
                 {
                     value = null;
-                    Logger.Warn($"Failed to convert value for index {index}, set to null");
+                    _logger.LogWarning($"Failed to convert value for index {index}, set to null");
                 }
             }
             col[index] = value;

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>squalor.DataBall</RootNamespace>
+    <AssemblyName>DataBall</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>squalor.DataBall</PackageId>
+    <Version>1.0.0</Version>
+    <Description>Versatile data handling class for test executive applications, supporting import/export in various formats, data manipulation, metadata, and configuration-based relationships. Supports large datasets via chunked imports and partitioned Parquet exports.</Description>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Analysis" Version="0.22.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Parquet.Net" Version="5.2.0" />
+    <PackageReference Include="SharpCompress" Version="0.40.0" />
+  </ItemGroup>
+</Project>
