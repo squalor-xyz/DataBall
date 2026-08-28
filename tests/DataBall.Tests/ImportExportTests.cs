@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
@@ -279,6 +280,60 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public async Task Archive_TarXz_Import_FromHandBuiltFile()
+        {
+            var dir = TempDir();
+            try
+            {
+                var tar = Path.Combine(dir, "people.tar");
+                using (var db = Sample())
+                    await db.ExportAsync(tar, ExportType.Archive);
+
+                var xz = Path.Combine(dir, "people.tar.xz");
+                CompressWithXz(tar, xz);
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(xz);
+                AssertPeople(imported);
+
+                var txz = Path.Combine(dir, "people.txz");
+                File.Copy(xz, txz);
+                using var importedTxz = new DataBall();
+                await importedTxz.ImportAsync(txz);
+                AssertPeople(importedTxz);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Archive_TarXz_Export_ThrowsClearDataBallException()
+        {
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "people.tar.xz");
+                using var db = Sample();
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, ExportType.Archive));
+                Assert.Contains("tar.xz", ex.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.Contains("not supported", ex.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.DoesNotContain("InvalidFormatException", ex.ToString(), StringComparison.Ordinal);
+                Assert.False(File.Exists(path));
+
+                var txz = Path.Combine(dir, "people.txz");
+                var exTxz = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(txz, ExportType.Archive));
+                Assert.Contains("txz", exTxz.Message, StringComparison.OrdinalIgnoreCase);
+                Assert.False(File.Exists(txz));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public async Task Archive_Zip_MultipleCsv_Concatenates()
         {
             var dir = TempDir();
@@ -469,6 +524,27 @@ namespace squalor.DataBall.Tests
         private static string EntryName(ZipArchiveEntry entry)
         {
             return entry.FullName.Replace('\\', '/');
+        }
+
+        private static void CompressWithXz(string tarPath, string xzPath)
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "xz",
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            psi.ArgumentList.Add("-c");
+            psi.ArgumentList.Add("--");
+            psi.ArgumentList.Add(tarPath);
+            using var proc = Process.Start(psi)
+                ?? throw new InvalidOperationException("xz is required to build the .tar.xz import fixture");
+            using (var fs = File.Create(xzPath))
+                proc.StandardOutput.BaseStream.CopyTo(fs);
+            proc.WaitForExit();
+            if (proc.ExitCode != 0)
+                throw new InvalidOperationException(proc.StandardError.ReadToEnd());
         }
 
         private static string TempDir()

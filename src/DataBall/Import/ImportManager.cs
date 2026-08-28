@@ -103,46 +103,11 @@ namespace squalor.DataBall.Import
             Directory.CreateDirectory(dir);
             try
             {
-                var imported = false;
-                using (var archive = ArchiveFactory.Open(path))
-                {
-                    var csvEntries = archive.Entries
-                        .Where(e => !e.IsDirectory
-                            && e.Key is not null
-                            && e.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-                        .OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
-                        .ToList();
-                    if (csvEntries.Count > 0)
-                    {
-                        var first = true;
-                        foreach (var entry in csvEntries)
-                        {
-                            ExtractAndImportCsv(db, dir, entry.Key!, entry.OpenEntryStream(), first ? append : true);
-                            first = false;
-                        }
-                        imported = true;
-                    }
-                }
-
-                // gzip/xz-wrapped tar is reported as a single compressed stream with no member names
-                if (!imported)
-                {
-                    using var stream = File.OpenRead(path);
-                    using var reader = ReaderFactory.Open(stream);
-                    var first = true;
-                    var anyCsv = false;
-                    while (reader.MoveToNextEntry())
-                    {
-                        var entry = reader.Entry;
-                        if (entry.IsDirectory || entry.Key is null
-                            || !entry.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
-                            continue;
-                        ExtractAndImportCsv(db, dir, entry.Key, reader.OpenEntryStream(), first ? append : true);
-                        first = false;
-                        anyCsv = true;
-                    }
-                    imported = anyCsv;
-                }
+                // ArchiveFactory.Open cannot identify xz; skip it for those extensions.
+                var imported = IsXzArchivePath(path)
+                    ? ImportArchiveViaReader(db, path, dir, append)
+                    : ImportArchiveViaFactory(db, path, dir, append)
+                        || ImportArchiveViaReader(db, path, dir, append);
 
                 if (!imported)
                     throw new DataBallException("Archive contains no CSV files");
@@ -220,6 +185,62 @@ namespace squalor.DataBall.Import
             if (EndsWith(fileName, ".db") || EndsWith(fileName, ".sqlite") || EndsWith(fileName, ".sqlite3"))
                 return ExportType.Sqlite;
             throw new DataBallException($"Unknown import format for '{path}'");
+        }
+
+        private static bool ImportArchiveViaFactory(DataBall db, string path, string dir, bool append)
+        {
+            try
+            {
+                using var archive = ArchiveFactory.Open(path);
+                var csvEntries = archive.Entries
+                    .Where(e => !e.IsDirectory
+                        && e.Key is not null
+                        && e.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                if (csvEntries.Count == 0)
+                    return false;
+
+                var first = true;
+                foreach (var entry in csvEntries)
+                {
+                    ExtractAndImportCsv(db, dir, entry.Key!, entry.OpenEntryStream(), first ? append : true);
+                    first = false;
+                }
+                return true;
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                // Unrecognized stream (e.g. some compressed tars); ReaderFactory is the fallback.
+                return false;
+            }
+        }
+
+        private static bool ImportArchiveViaReader(DataBall db, string path, string dir, bool append)
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = ReaderFactory.Open(stream);
+            var first = true;
+            var anyCsv = false;
+            while (reader.MoveToNextEntry())
+            {
+                var entry = reader.Entry;
+                if (entry.IsDirectory || entry.Key is null
+                    || !entry.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                ExtractAndImportCsv(db, dir, entry.Key, reader.OpenEntryStream(), first ? append : true);
+                first = false;
+                anyCsv = true;
+            }
+            return anyCsv;
+        }
+
+        private static bool IsXzArchivePath(string path)
+        {
+            var name = Path.GetFileName(path);
+            return name.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".xz", StringComparison.OrdinalIgnoreCase);
         }
 
         private static void ExtractAndImportCsv(DataBall db, string dir, string entryKey, Stream entryStream, bool append)

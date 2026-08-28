@@ -85,6 +85,7 @@ namespace squalor.DataBall.Export
             Directory.CreateDirectory(dir);
             try
             {
+                EnsureArchiveExportSupported(path);
                 var csvPath = Path.Combine(dir, "data.csv");
                 db.Store.ExportCsv(csvPath);
                 var (archiveType, compressionType) = GetArchiveFormat(path);
@@ -97,7 +98,7 @@ namespace squalor.DataBall.Export
                 writer.Write("data.csv", csvStream);
                 Logger.LogInformation("Archive export completed");
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not DataBallException)
             {
                 Logger.LogError(ex, "Archive export failed");
                 throw new DataBallException("Archive export failed", ex);
@@ -203,6 +204,17 @@ namespace squalor.DataBall.Export
             db.ExportAsync(path, type, options).GetAwaiter().GetResult();
         }
 
+        private static void EnsureArchiveExportSupported(string path)
+        {
+            var name = Path.GetFileName(path);
+            if (name.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase)
+                || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new DataBallException(
+                    "Export to .tar.xz/.txz is not supported with SharpCompress 0.40 (XZ is decompress-only). Import of .tar.xz is supported.");
+            }
+        }
+
         private static (ArchiveType Type, CompressionType Compression) GetArchiveFormat(string path)
         {
             var name = Path.GetFileName(path);
@@ -211,7 +223,10 @@ namespace squalor.DataBall.Export
                 return (ArchiveType.Tar, CompressionType.GZip);
             if (name.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase)
                 || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
-                return (ArchiveType.Tar, CompressionType.Xz);
+            {
+                throw new DataBallException(
+                    "Export to .tar.xz/.txz is not supported with SharpCompress 0.40 (XZ is decompress-only). Import of .tar.xz is supported.");
+            }
             if (name.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
                 return (ArchiveType.Tar, CompressionType.None);
             return (ArchiveType.Zip, CompressionType.Deflate);
