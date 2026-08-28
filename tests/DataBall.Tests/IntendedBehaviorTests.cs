@@ -78,6 +78,86 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void CsvImport_WithConfigBoolFloatDateTime_ValuesAreExactClrTypes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = Path.Combine(dir, "config.json");
+                File.WriteAllText(config, """{ "columns": { "Flag": "bool", "Score": "float", "When": "datetime" } }""");
+                var csv = Path.Combine(dir, "typed.csv");
+                File.WriteAllText(csv, "Flag,Score,When\ntrue,1.25,2020-05-06 07:08:09\n");
+
+                using var db = new DataBall(config);
+                ImportManager.ImportFromCsv(db, csv);
+                var row = Assert.Single(db.Query("SELECT Flag, Score, \"When\" FROM data"));
+                Assert.True(Assert.IsType<bool>(row["Flag"]));
+                Assert.Equal(1.25f, Assert.IsType<float>(row["Score"]));
+                var when = Assert.IsType<DateTime>(row["When"]);
+                Assert.Equal(new DateTime(2020, 5, 6, 7, 8, 9), when);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_CsvWithConfigAgeInt_ValuesAreInt32()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = Path.Combine(dir, "config.json");
+                File.WriteAllText(config, """{ "columns": { "Name": "string", "Age": "int" } }""");
+                var csv = Path.Combine(dir, "people.csv");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal("Alice", rows[0]["Name"]);
+                Assert.Equal(30, Assert.IsType<int>(rows[0]["Age"]));
+                Assert.Equal("Bob", rows[1]["Name"]);
+                Assert.Equal(25, Assert.IsType<int>(rows[1]["Age"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void ArchiveImport_ZipCsvWithConfigAgeInt_ValuesAreInt32()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = Path.Combine(dir, "config.json");
+                File.WriteAllText(config, """{ "columns": { "Name": "string", "Age": "int" } }""");
+                var csv = Path.Combine(dir, "people.csv");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+                var zip = Path.Combine(dir, "people.zip");
+                using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
+                    archive.CreateEntryFromFile(csv, "people.csv");
+
+                using var db = new DataBall(config);
+                ImportManager.ImportFromArchive(db, zip, append: false);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal("Alice", rows[0]["Name"]);
+                Assert.Equal(30, Assert.IsType<int>(rows[0]["Age"]));
+                Assert.Equal("Bob", rows[1]["Name"]);
+                Assert.Equal(25, Assert.IsType<int>(rows[1]["Age"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public void ImportCsv_ChunkSizeOne_StillLoadsEveryRow()
         {
             var dir = TempDir();

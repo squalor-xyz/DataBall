@@ -287,7 +287,7 @@ namespace squalor.DataBall
                 switch (format)
                 {
                     case ExportType.Csv:
-                        _store.ImportCsv(path, append);
+                        _store.ImportCsv(path, append, _expectedColumnTypes);
                         break;
                     case ExportType.Parquet:
                         _store.ImportParquet(path, append);

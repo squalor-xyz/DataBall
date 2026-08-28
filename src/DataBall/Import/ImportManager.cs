@@ -56,7 +56,7 @@ namespace squalor.DataBall.Import
             Logger.LogInformation("Importing CSV from {0}", path);
             try
             {
-                db.Store.ImportCsv(path, append: true);
+                db.Store.ImportCsv(path, append: true, db.ExpectedColumnTypes);
                 Logger.LogInformation("CSV import completed");
             }
             catch (Exception ex)
@@ -229,7 +229,7 @@ namespace squalor.DataBall.Import
                     Directory.CreateDirectory(destDir);
                 using (var fileStream = File.Create(dest))
                     entryStream.CopyTo(fileStream);
-                db.Store.ImportCsv(dest, append);
+                db.Store.ImportCsv(dest, append, db.ExpectedColumnTypes);
             }
         }
 

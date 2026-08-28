@@ -385,9 +385,9 @@ namespace squalor.DataBall
             Execute($"INSERT INTO \"data\" BY NAME SELECT {string.Join(", ", selectParts)} FROM {qSrc}");
         }
 
-        internal void ImportCsv(string path, bool append)
+        internal void ImportCsv(string path, bool append, IReadOnlyDictionary<string, Type>? expectedTypes = null)
         {
-            ImportFromFunction(path, append, "read_csv_auto", ", header=true");
+            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes);
         }
 
         internal void ImportParquet(string path, bool append)
@@ -450,7 +450,12 @@ namespace squalor.DataBall
             _disposed = true;
         }
 
-        private void ImportFromFunction(string path, bool append, string function, string extraArgs)
+        private void ImportFromFunction(
+            string path,
+            bool append,
+            string function,
+            string extraArgs,
+            IReadOnlyDictionary<string, Type>? expectedTypes = null)
         {
             ThrowIfDisposed();
             if (string.IsNullOrWhiteSpace(path))
@@ -460,6 +465,7 @@ namespace squalor.DataBall
             try
             {
                 PromoteDateColumns("_staging");
+                CoerceStagingColumns("_staging", expectedTypes);
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
@@ -542,6 +548,33 @@ namespace squalor.DataBall
             {
                 var q = QuoteIdent(c.Name);
                 return IsDateType(c.DuckDbType) ? $"CAST({q} AS TIMESTAMP) AS {q}" : q;
+            }));
+            Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
+        }
+
+        private void CoerceStagingColumns(string tableName, IReadOnlyDictionary<string, Type>? expected)
+        {
+            if (expected is null || expected.Count == 0)
+                return;
+
+            var cols = GetColumnsOf(tableName);
+            if (cols.Count == 0)
+                return;
+
+            var byName = new Dictionary<string, Type>(expected.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in expected)
+                byName[pair.Key] = pair.Value;
+
+            if (!cols.Any(c => byName.ContainsKey(c.Name)))
+                return;
+
+            var qTable = QuoteIdent(tableName);
+            var select = string.Join(", ", cols.Select(c =>
+            {
+                var q = QuoteIdent(c.Name);
+                return byName.TryGetValue(c.Name, out var clr)
+                    ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
+                    : q;
             }));
             Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
         }
