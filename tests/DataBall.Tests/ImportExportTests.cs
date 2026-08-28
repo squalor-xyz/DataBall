@@ -115,6 +115,46 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public async Task Ball_MetadataOnly_NoParquet_RoundTrips()
+        {
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "meta.ball");
+                using (var db = new DataBall())
+                {
+                    db.SetMetadata("Site", "A");
+                    await db.SaveAsync(path);
+                }
+
+                using (var zip = ZipFile.OpenRead(path))
+                {
+                    Assert.Contains(zip.Entries, e => EntryName(e) == "metadata.json");
+                    Assert.DoesNotContain(zip.Entries, e => EntryName(e) == "data.parquet");
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(path);
+                Assert.Equal("A", imported.Metadata["Site"]);
+                var exists = imported.Query("""
+                    SELECT COUNT(*) AS c FROM information_schema.tables
+                    WHERE table_schema = 'main' AND table_name = 'data'
+                    """);
+                Assert.Equal(0, Convert.ToInt64(exists[0]["c"]));
+                var columns = imported.Query("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'main' AND table_name = 'data'
+                    """);
+                Assert.Empty(columns);
+                Assert.DoesNotContain(columns, r => Convert.ToString(r["column_name"]) == "_");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public async Task Ball_ImportMissingMetadataJson_StillLoadsParquet()
         {
             var dir = TempDir();

@@ -193,6 +193,175 @@ public class CliSmokeTests
     }
 
     [Fact]
+    public async Task Import_WithConfig_AppliesColumnType()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            var config = Path.Combine(dir, "config.json");
+            var ball = Path.Combine(dir, "out.ball");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+            File.WriteAllText(config, """
+                {
+                  "metadata": { "Operator": "Ada" },
+                  "columns": { "Age": "int" }
+                }
+                """);
+
+            Assert.Equal(0, (await Run("import", csv, "-c", config, "-o", ball)).Exit);
+
+            var queried = await Run("query", ball, "SELECT Name, Age FROM data ORDER BY Name");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal("Name\tAge\nAlice\t30\nBob\t25\n", queried.StdOut);
+
+            var info = await Run("info", ball);
+            Assert.Equal(0, info.Exit);
+            Assert.Contains("Operator", info.StdOut);
+            Assert.Contains("Ada", info.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Export_Sqlite_RoundTripViaQuery()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            var sqlite = Path.Combine(dir, "out.sqlite");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+            Assert.Equal(0, (await Run("export", csv, sqlite)).Exit);
+
+            var queried = await Run("query", sqlite, "SELECT Name FROM data ORDER BY Name");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal("Name\nAlice\nBob\n", queried.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Export_Ball_ThenInfo()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            var ball = Path.Combine(dir, "out.ball");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+            Assert.Equal(0, (await Run("export", csv, ball)).Exit);
+
+            var info = await Run("info", ball);
+            Assert.Equal(0, info.Exit);
+            Assert.Contains("Format: Ball", info.StdOut);
+            Assert.Contains("Rows: 2", info.StdOut);
+            Assert.Contains("Name", info.StdOut);
+            Assert.Contains("Age", info.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Squish_WithoutPartition_WritesSiblingBall()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+            Assert.Equal(0, (await Run("squish", csv)).Exit);
+            var ball = Path.Combine(dir, "in.ball");
+            Assert.True(File.Exists(ball), ball);
+
+            var queried = await Run("query", ball, "SELECT Name FROM data ORDER BY Name");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal("Name\nAlice\nBob\n", queried.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Query_ZeroRows_PrintsNothing()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+            var queried = await Run("query", csv, "SELECT Name FROM data WHERE 1=0");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal(string.Empty, queried.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Query_NullCell_EmptyTsvField()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            File.WriteAllText(csv, "Name,Age,City\nAlice,30,NYC\nBob,,LA\n");
+
+            var queried = await Run("query", csv, "SELECT Name, Age, City FROM data ORDER BY Name");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal("Name\tAge\tCity\nAlice\t30\tNYC\nBob\t\tLA\n", queried.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Info_AfterExtractingAllConstants()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "meas.csv");
+            var ball = Path.Combine(dir, "out.ball");
+            File.WriteAllText(csv, "Site,Meas\nA,1\n");
+
+            Assert.Equal(0, (await Run("bounce", csv, ball)).Exit);
+
+            var info = await Run("info", ball);
+            Assert.Equal(0, info.Exit);
+            Assert.Contains("Rows: 0", info.StdOut);
+            Assert.Contains("Metadata:", info.StdOut);
+            Assert.Contains("Site: A", info.StdOut);
+            Assert.Contains("Meas: 1", info.StdOut);
+            Assert.Contains("Columns:\nMetadata:", info.StdOut);
+            Assert.DoesNotContain("  _ (", info.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task Export_FormatOption_Csv()
     {
         var dir = TempDir();

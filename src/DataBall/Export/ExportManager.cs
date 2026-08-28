@@ -112,6 +112,7 @@ namespace squalor.DataBall.Export
 
         /// <summary>
         /// Exports the DataBall as a <c>.ball</c> ZIP of parquet plus metadata.
+        /// Parquet is omitted when there is no data table; metadata-only balls are allowed.
         /// </summary>
         /// <param name="db">The DataBall to export.</param>
         /// <param name="path">The path to save the <c>.ball</c> file.</param>
@@ -123,8 +124,16 @@ namespace squalor.DataBall.Export
             Directory.CreateDirectory(dir);
             try
             {
-                var parquetPath = Path.Combine(dir, "data.parquet");
-                db.Store.ExportParquet(parquetPath);
+                var hasTable = db.Store.DataTableExists();
+                if (!hasTable && db.Metadata.Count == 0)
+                    throw new DataBallException("No data to export");
+
+                string? parquetPath = null;
+                if (hasTable)
+                {
+                    parquetPath = Path.Combine(dir, "data.parquet");
+                    db.Store.ExportParquet(parquetPath);
+                }
 
                 var metadataPath = Path.Combine(dir, "metadata.json");
                 File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>(db.Metadata)));
@@ -150,7 +159,8 @@ namespace squalor.DataBall.Export
 
                 using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
                 {
-                    zip.CreateEntryFromFile(parquetPath, "data.parquet");
+                    if (parquetPath is not null)
+                        zip.CreateEntryFromFile(parquetPath, "data.parquet");
                     zip.CreateEntryFromFile(metadataPath, "metadata.json");
                     if (configPath is not null)
                         zip.CreateEntryFromFile(configPath, "config.json");
