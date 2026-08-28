@@ -71,6 +71,7 @@ namespace squalor.DataBall
                 double => typeof(double),
                 bool => typeof(bool),
                 DateTime => typeof(DateTime),
+                DateOnly => typeof(DateTime),
                 string => typeof(string),
                 _ => throw new DataBallException($"Unsupported value type: {value.GetType().Name}")
             };
@@ -235,7 +236,9 @@ namespace squalor.DataBall
                 Execute($"ALTER TABLE \"data\" DROP COLUMN {QuoteIdent(match.Name)}");
         }
 
-        internal void AddRow(IReadOnlyDictionary<string, object?> values)
+        internal void AddRow(
+            IReadOnlyDictionary<string, object?> values,
+            IReadOnlyDictionary<string, Type>? expectedTypes = null)
         {
             ThrowIfDisposed();
             if (values is null)
@@ -256,7 +259,7 @@ namespace squalor.DataBall
 
                 var parts = new List<string>(values.Count);
                 foreach (var key in values.Keys)
-                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ClrTypeOf(values[key]))}");
+                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
                 Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
                 InsertAppenderRow(GetColumns(), values);
                 return;
@@ -267,7 +270,7 @@ namespace squalor.DataBall
             {
                 if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
                     continue;
-                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ClrTypeOf(values[key]))}");
+                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
             }
 
             InsertAppenderRow(GetColumns(), values);
@@ -325,6 +328,7 @@ namespace squalor.DataBall
                 return;
             }
 
+            var sourceRowCount = RowCountOf(sourceTable);
             ApplyMetadataAgainstSource(sourceTable);
 
             var srcCols = GetColumnsOf(sourceTable);
@@ -340,7 +344,10 @@ namespace squalor.DataBall
             }
 
             if (srcCols.Count == 0)
+            {
+                InsertNullRows(sourceRowCount);
                 return;
+            }
 
             var selectParts = new List<string>(srcCols.Count);
             foreach (var (srcName, srcType) in srcCols)
@@ -413,6 +420,7 @@ namespace squalor.DataBall
             Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM {function}({qpath}{extraArgs})");
             try
             {
+                PromoteDateColumns("_staging");
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
@@ -436,8 +444,6 @@ namespace squalor.DataBall
 
         private void ApplyMetadataAgainstSource(string sourceTable)
         {
-            var srcCols = GetColumnsOf(sourceTable);
-            var srcByName = srcCols.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
             var dstNames = new HashSet<string>(GetColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
             var qSrc = QuoteIdent(sourceTable);
 
@@ -445,7 +451,13 @@ namespace squalor.DataBall
             {
                 if (dstNames.Contains(pair.Key))
                     continue;
-                if (!srcByName.TryGetValue(pair.Key, out var srcCol))
+
+                var srcCols = GetColumnsOf(sourceTable);
+                if (srcCols.Count == 0)
+                    break;
+
+                var srcCol = srcCols.FirstOrDefault(c => c.Name.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+                if (srcCol.Name is null)
                     continue;
 
                 var qK = QuoteIdent(srcCol.Name);
@@ -457,7 +469,7 @@ namespace squalor.DataBall
 
                 if (distinctCount == 0)
                 {
-                    Execute($"ALTER TABLE {qSrc} DROP COLUMN {qK}");
+                    DropColumnFromTable(sourceTable, srcCol.Name);
                     continue;
                 }
 
@@ -465,6 +477,66 @@ namespace squalor.DataBall
                 ExecuteParameterized($"UPDATE \"data\" SET {qK} = $v", Param("v", pair.Value));
                 dstNames.Add(srcCol.Name);
                 RemoveMetadata(pair.Key);
+            }
+        }
+
+        private void DropColumnFromTable(string tableName, string columnName)
+        {
+            var cols = GetColumnsOf(tableName);
+            var match = cols.FirstOrDefault(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
+            if (match.Name is null)
+                return;
+            if (cols.Count == 1)
+                Execute($"DROP TABLE {QuoteIdent(tableName)}");
+            else
+                Execute($"ALTER TABLE {QuoteIdent(tableName)} DROP COLUMN {QuoteIdent(match.Name)}");
+        }
+
+        private void PromoteDateColumns(string tableName)
+        {
+            var cols = GetColumnsOf(tableName);
+            if (cols.Count == 0 || cols.All(c => !IsDateType(c.DuckDbType)))
+                return;
+
+            var qTable = QuoteIdent(tableName);
+            var select = string.Join(", ", cols.Select(c =>
+            {
+                var q = QuoteIdent(c.Name);
+                return IsDateType(c.DuckDbType) ? $"CAST({q} AS TIMESTAMP) AS {q}" : q;
+            }));
+            Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
+        }
+
+        private long RowCountOf(string tableName)
+        {
+            if (!TableExists(tableName))
+                return 0;
+            var result = ExecuteScalar($"SELECT COUNT(*) FROM {QuoteIdent(tableName)}");
+            return Convert.ToInt64(result, CultureInfo.InvariantCulture);
+        }
+
+        private bool TableExists(string tableName)
+        {
+            var result = ExecuteScalar($"""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_name = {QuoteString(tableName)}
+                  AND table_schema IN ('main', 'temp')
+                """);
+            return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
+        }
+
+        private void InsertNullRows(long count)
+        {
+            if (count <= 0 || !DataTableExists())
+                return;
+            var columns = GetColumns();
+            using var appender = _connection.CreateAppender("data");
+            for (long i = 0; i < count; i++)
+            {
+                var row = appender.CreateRow();
+                for (int c = 0; c < columns.Count; c++)
+                    row.AppendNullValue();
+                row.EndRow();
             }
         }
 
@@ -580,6 +652,8 @@ namespace squalor.DataBall
                     object? value = reader.IsDBNull(i) ? null : reader.GetValue(i);
                     if (value is DBNull)
                         value = null;
+                    if (value is DateOnly dateOnly)
+                        value = dateOnly.ToDateTime(TimeOnly.MinValue);
                     row[reader.GetName(i)] = value;
                 }
                 rows.Add(row);
@@ -651,6 +725,9 @@ namespace squalor.DataBall
                 case DateTime dt:
                     row.AppendValue(dt);
                     break;
+                case DateOnly dateOnly:
+                    row.AppendValue(dateOnly.ToDateTime(TimeOnly.MinValue));
+                    break;
                 case string s:
                     row.AppendValue(s);
                     break;
@@ -664,6 +741,8 @@ namespace squalor.DataBall
             if (value is null)
                 return null;
             var t = Nullable.GetUnderlyingType(target) ?? target;
+            if (value is DateOnly dateOnly && t == typeof(DateTime))
+                return dateOnly.ToDateTime(TimeOnly.MinValue);
             if (t.IsInstanceOfType(value))
                 return value;
             try
@@ -686,6 +765,7 @@ namespace squalor.DataBall
                 "DOUBLE" => typeof(double),
                 "BOOLEAN" => typeof(bool),
                 "TIMESTAMP" => typeof(DateTime),
+                "DATE" => typeof(DateTime),
                 "VARCHAR" => typeof(string),
                 _ => throw new DataBallException($"Unsupported column type: {duckDbType}")
             };
@@ -703,9 +783,25 @@ namespace squalor.DataBall
                 "REAL" or "FLOAT" or "FLOAT4" => "FLOAT",
                 "DOUBLE" or "FLOAT8" or "DOUBLE PRECISION" => "DOUBLE",
                 "BOOLEAN" or "BOOL" => "BOOLEAN",
+                "DATE" => "DATE",
                 "VARCHAR" or "TEXT" or "STRING" => "VARCHAR",
                 _ => t
             };
+        }
+
+        private static bool IsDateType(string duckDbType)
+        {
+            return NormalizeType(duckDbType) == "DATE";
+        }
+
+        private static Type ResolveColumnType(
+            string name,
+            object? value,
+            IReadOnlyDictionary<string, Type>? expectedTypes)
+        {
+            if (expectedTypes is not null && expectedTypes.TryGetValue(name, out var expected))
+                return expected;
+            return ClrTypeOf(value);
         }
 
         private static object? UnwrapJson(JsonElement element)

@@ -255,6 +255,77 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void MergeOrAppend_IncomingColumnMatchesMetadata_DoesNotThrow()
+        {
+            using var dest = new DataBall();
+            dest.SetMetadata("Site", "A");
+            dest.AddColumn<int>("Meas", new[] { 1 });
+            using var src = new DataBall();
+            src.AddColumn("Site", new[] { "A" });
+            dest.MergeOrAppend(src, append: true);
+            Assert.Equal("A", dest.Metadata["Site"]);
+            var rows = dest.Query("SELECT * FROM \"data\"");
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(1, Convert.ToInt32(rows[0]["Meas"]));
+            Assert.Null(rows[1]["Meas"]);
+            Assert.False(rows[0].ContainsKey("Site"));
+            Assert.False(rows[1].ContainsKey("Site"));
+        }
+
+        [Fact]
+        public void ImportCsv_IncomingColumnMatchesMetadata_DoesNotThrow()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var dest = new DataBall();
+                dest.SetMetadata("Site", "A");
+                dest.AddColumn<int>("Meas", new[] { 1 });
+                var path = Path.Combine(dir, "data.csv");
+                File.WriteAllText(path, "Site\nA\n");
+                ImportManager.ImportFromCsv(dest, path);
+                Assert.Equal("A", dest.Metadata["Site"]);
+                var rows = dest.Query("SELECT * FROM \"data\"");
+                Assert.Equal(2, rows.Count);
+                Assert.Null(rows[1]["Meas"]);
+                Assert.False(rows[0].ContainsKey("Site"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void ImportCsv_DateColumn_ThenAddRow_DoesNotThrow()
+        {
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "data.csv");
+                File.WriteAllText(path, "When,N\n2020-01-02,1\n");
+                using var db = new DataBall();
+                ImportManager.ImportFromCsv(db, path);
+                var rows = db.Query("SELECT * FROM \"data\"");
+                Assert.Single(rows);
+                var when = Assert.IsType<DateTime>(rows[0]["When"]);
+                Assert.Equal(2020, when.Year);
+                Assert.Equal(1, when.Month);
+                Assert.Equal(2, when.Day);
+                db.AddRow(new Dictionary<string, object?>
+                {
+                    ["When"] = new DateTime(2020, 1, 3),
+                    ["N"] = 2
+                });
+                Assert.Equal(2, db.Query("SELECT * FROM \"data\"").Count);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public void Dispose_ThenQuery_Throws()
         {
             var db = new DataBall();

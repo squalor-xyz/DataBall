@@ -124,7 +124,7 @@ namespace squalor.DataBall
         public void AddRow(IReadOnlyDictionary<string, object?> values)
         {
             ThrowIfDisposed();
-            _store.AddRow(values);
+            _store.AddRow(values, _expectedColumnTypes);
         }
 
         /// <summary>
