@@ -1,6 +1,10 @@
 # DataBall roadmap
 
-Engineering leftovers from the DuckDB rebuild review. **ATE spirit:** sequential test-executive tables, DuckDB as the only SQL engine, interchange via CSV / Parquet / `.ball` / zip-tar.gz. SQLite, DataFrame, and matrix Bounce are gone and stay gone.
+Engineering leftovers from the DuckDB rebuild review, plus the suite-driven Open/handler track. **ATE spirit:** sequential test-executive tables, DuckDB as the only SQL engine, interchange via CSV / Parquet / `.ball` / zip-tar.gz. SQLite, DataFrame, and matrix Bounce are gone and stay gone.
+
+DataBall is WIP and co-developed with `squalor-xyz/suite`. It is the cross-app utility: configurable schema, Open (detect + `IFormatHandler` → session), batch/row insert, query, session filter.
+
+License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Do not nuget-push or git-push from this list unless the owner asks.
 
@@ -8,7 +12,21 @@ Do not nuget-push or git-push from this list unless the owner asks.
 
 ---
 
-## Order
+## Suite-driven (do with squalor-xyz/suite)
+
+| # | Item | Kind |
+|---|---|---|
+| S1 | Schema roles on config (`identity` / `stimulus` / `meas` / `bin`) + source maps as data | Feature |
+| S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature |
+| S3 | First lab handler project (not in `DuckDbStore`) | Feature |
+| S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature |
+| S5 | Batch insert path that does not row-loop | Feature |
+
+Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
+
+---
+
+## Order (hygiene)
 
 | # | Item | Kind |
 |---|---|---|

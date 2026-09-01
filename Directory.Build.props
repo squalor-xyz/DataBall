@@ -8,7 +8,7 @@
     <RepositoryUrl>https://github.com/squalor-xyz/DataBall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageProjectUrl>https://github.com/squalor-xyz/DataBall</PackageProjectUrl>
-    <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 </Project>

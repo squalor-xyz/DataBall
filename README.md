@@ -1,6 +1,6 @@
 # DataBall
 
-MPL-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, zip/tar of CSV, and `.ball`.
+Apache-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, zip/tar of CSV, and `.ball`.
 
 ## Engine (DuckDB)
 
@@ -163,7 +163,7 @@ SharpCompress 0.40: stay on this version so tar.gz export keeps working. `.tar.x
 
 ## License
 
-Mozilla Public License Version 2.0 (MPL-2.0). See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details. (1.0.0 was MPL-2.0; this tree is 1.1.0 Apache-2.0.)
 
 ## Repository
 

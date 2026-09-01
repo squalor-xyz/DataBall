@@ -8,7 +8,7 @@
     <ToolCommandName>databall</ToolCommandName>
     <PackageId>squalor.DataBall.Cli</PackageId>
     <IsPackable>true</IsPackable>
-    <Version>1.0.0</Version>
+    <Version>1.1.0</Version>
     <Description>Command-line tool for squalor.DataBall.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
