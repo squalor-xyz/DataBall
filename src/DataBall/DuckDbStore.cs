@@ -390,6 +390,46 @@ namespace squalor.DataBall
             ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes);
         }
 
+        internal void RenameColumn(string from, string to)
+        {
+            ThrowIfDisposed();
+            ValidateName(from, "Column");
+            ValidateName(to, "Column");
+            if (!DataTableExists())
+                throw new DataBallException($"Column '{from}' does not exist");
+            if (from.Equals(to, StringComparison.OrdinalIgnoreCase))
+                return;
+            var cols = GetColumns();
+            if (!cols.Any(c => c.Name.Equals(from, StringComparison.OrdinalIgnoreCase)))
+                throw new DataBallException($"Column '{from}' does not exist");
+            if (cols.Any(c => c.Name.Equals(to, StringComparison.OrdinalIgnoreCase)))
+                throw new DataBallException($"Column '{to}' already exists");
+            Execute($"ALTER TABLE \"data\" RENAME COLUMN {QuoteIdent(from)} TO {QuoteIdent(to)}");
+        }
+
+        internal void CoerceDataColumns(IReadOnlyDictionary<string, Type> expectedTypes)
+        {
+            ThrowIfDisposed();
+            if (!DataTableExists() || expectedTypes is null || expectedTypes.Count == 0)
+                return;
+            var cols = GetColumns();
+            var byName = new Dictionary<string, Type>(expectedTypes.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in expectedTypes)
+                byName[pair.Key] = pair.Value;
+            if (!cols.Any(c => byName.ContainsKey(c.Name)))
+                return;
+            var select = string.Join(", ", cols.Select(c =>
+            {
+                var q = QuoteIdent(c.Name);
+                return byName.TryGetValue(c.Name, out var clr)
+                    ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
+                    : q;
+            }));
+            Execute($"CREATE TABLE \"data_new\" AS SELECT {select} FROM \"data\"");
+            Execute("DROP TABLE \"data\"");
+            Execute("ALTER TABLE \"data_new\" RENAME TO \"data\"");
+        }
+
         internal void ImportParquet(string path, bool append)
         {
             ImportFromFunction(path, append, "read_parquet", "");

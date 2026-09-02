@@ -16,7 +16,7 @@ Do not nuget-push or git-push from this list unless the owner asks.
 
 | # | Item | Kind |
 |---|---|---|
-| S1 | Schema roles on config (`identity` / `stimulus` / `meas` / `bin`) + source maps as data | Feature |
+| S1 | Native default profile + overlay config: header patterns, unit→type, roles, metadataFields | Feature (in progress) |
 | S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature |
 | S3 | First lab handler project (not in `DuckDbStore`) | Feature |
 | S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature |

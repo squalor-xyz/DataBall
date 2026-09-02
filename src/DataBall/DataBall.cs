@@ -20,6 +20,7 @@ namespace squalor.DataBall
         private readonly DuckDbStore _store;
         private readonly Dictionary<string, Type> _expectedColumnTypes;
         private readonly List<Relationship> _relationships;
+        private Config _config;
         private bool _disposed;
 
         /// <summary>
@@ -33,15 +34,10 @@ namespace squalor.DataBall
             _store = new DuckDbStore();
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
-            if (!string.IsNullOrEmpty(configPath))
-            {
-                var config = Config.LoadConfig(configPath);
-                foreach (var (key, value) in config.Metadata)
-                    _store.SetMetadata(key, DuckDbStore.Unwrap(value));
-                foreach (var col in config.Columns)
-                    _expectedColumnTypes[col.Key] = Config.ParseColumnType(col.Value);
-                _relationships = config.Relationships;
-            }
+            _config = string.IsNullOrEmpty(configPath)
+                ? Config.CreateDefaults()
+                : Config.LoadMerged(configPath);
+            ApplyConfig(_config);
         }
 
         /// <summary>
@@ -68,6 +64,11 @@ namespace squalor.DataBall
         internal IReadOnlyDictionary<string, Type> ExpectedColumnTypes => _expectedColumnTypes;
 
         internal IReadOnlyList<Relationship> Relationships => _relationships;
+
+        /// <summary>
+        /// Gets the merged schema config (native defaults plus any overlay file).
+        /// </summary>
+        public Config Schema => _config;
 
         /// <summary>
         /// Sets a metadata value.
@@ -288,6 +289,7 @@ namespace squalor.DataBall
                 {
                     case ExportType.Csv:
                         _store.ImportCsv(path, append, _expectedColumnTypes);
+                        ApplyCsvSchema(path);
                         break;
                     case ExportType.Parquet:
                         _store.ImportParquet(path, append);
@@ -469,6 +471,42 @@ namespace squalor.DataBall
         internal void ApplyImportedConfig(Config config)
         {
             ArgumentNullException.ThrowIfNull(config);
+            _config = Config.Merge(_config, config);
+            ApplyConfig(_config);
+        }
+
+        internal void ApplyCsvSchema(string csvPath)
+        {
+            if (!_store.DataTableExists())
+                return;
+
+            var headers = ReadCsvHeaders(csvPath);
+            if (headers.Count == 0)
+                return;
+
+            var parsed = SchemaResolver.ResolveAll(headers, _config);
+            var tableCols = _store.GetColumns();
+            foreach (var col in parsed)
+            {
+                if (col.ClrType is not null)
+                    _expectedColumnTypes[col.Name] = col.ClrType;
+                var match = tableCols.FirstOrDefault(c => c.Name.Equals(col.Raw, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    match = tableCols.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    continue;
+                if (!match.Name.Equals(col.Name, StringComparison.Ordinal))
+                    _store.RenameColumn(match.Name, col.Name);
+            }
+
+            _store.CoerceDataColumns(_expectedColumnTypes);
+            ExtractConfiguredMetadata();
+        }
+
+        private void ApplyConfig(Config config)
+        {
+            foreach (var (key, value) in config.Metadata)
+                _store.SetMetadata(key, DuckDbStore.Unwrap(value));
             foreach (var col in config.Columns)
                 _expectedColumnTypes[col.Key] = Config.ParseColumnType(col.Value);
             if (config.Relationships.Count > 0)
@@ -476,6 +514,104 @@ namespace squalor.DataBall
                 _relationships.Clear();
                 _relationships.AddRange(config.Relationships);
             }
+        }
+
+        private void ExtractConfiguredMetadata()
+        {
+            if (!_store.DataTableExists() || _config.MetadataFields.Count == 0)
+                return;
+
+            var policy = _config.MetadataPolicy ?? "requireConstant";
+            foreach (var field in _config.MetadataFields.ToList())
+            {
+                var cols = _store.GetColumns();
+                var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    continue;
+
+                var q = DuckDbStore.QuoteIdent(match.Name);
+                var rows = _store.Query($"""
+                    SELECT
+                      COUNT(DISTINCT {q}) FILTER (WHERE {q} IS NOT NULL) AS d,
+                      COUNT(*) FILTER (WHERE {q} IS NULL) AS n,
+                      any_value({q}) AS v
+                    FROM "data"
+                    """);
+                var distinct = Convert.ToInt64(rows[0]["d"], CultureInfo.InvariantCulture);
+                var nulls = Convert.ToInt64(rows[0]["n"], CultureInfo.InvariantCulture);
+                var value = rows[0]["v"];
+
+                if (policy.Equals("first", StringComparison.OrdinalIgnoreCase))
+                {
+                    var first = _store.Query($"SELECT {q} FROM \"data\" WHERE {q} IS NOT NULL LIMIT 1");
+                    if (first.Count > 0)
+                        _store.SetMetadata(match.Name, first[0][match.Name]);
+                    _store.RemoveColumn(match.Name);
+                    _expectedColumnTypes.Remove(match.Name);
+                    continue;
+                }
+
+                if (distinct == 1 && (nulls == 0 || policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) is false))
+                {
+                    if (policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) && nulls > 0)
+                        continue;
+                    _store.SetMetadata(match.Name, value);
+                    _store.RemoveColumn(match.Name);
+                    _expectedColumnTypes.Remove(match.Name);
+                    continue;
+                }
+
+                if (policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase) && distinct > 1)
+                    throw new DataBallException($"Metadata field '{match.Name}' is not constant");
+            }
+        }
+
+        private static IReadOnlyList<string> ReadCsvHeaders(string path)
+        {
+            using var reader = new StreamReader(path);
+            var line = reader.ReadLine();
+            if (string.IsNullOrWhiteSpace(line))
+                return Array.Empty<string>();
+            if (line.Length > 0 && line[0] == '\uFEFF')
+                line = line[1..];
+            return SplitCsvLine(line);
+        }
+
+        private static List<string> SplitCsvLine(string line)
+        {
+            var result = new List<string>();
+            var current = new System.Text.StringBuilder();
+            var inQuotes = false;
+            for (var i = 0; i < line.Length; i++)
+            {
+                var ch = line[i];
+                if (inQuotes)
+                {
+                    if (ch == '"')
+                    {
+                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        {
+                            current.Append('"');
+                            i++;
+                        }
+                        else
+                            inQuotes = false;
+                    }
+                    else
+                        current.Append(ch);
+                }
+                else if (ch == '"')
+                    inQuotes = true;
+                else if (ch == ',')
+                {
+                    result.Add(current.ToString().Trim());
+                    current.Clear();
+                }
+                else
+                    current.Append(ch);
+            }
+            result.Add(current.ToString().Trim());
+            return result;
         }
 
         private void ThrowIfDisposed()
