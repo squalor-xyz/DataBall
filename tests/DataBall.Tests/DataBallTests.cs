@@ -182,7 +182,7 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, path);
+                ImportManager.ImportFromCsv(db, path, append: false);
                 var rows = db.Query("SELECT \"Name\", \"Age\" FROM \"data\" ORDER BY \"Name\"");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -280,7 +280,7 @@ namespace squalor.DataBall.Tests
                 dest.AddColumn<int>("Meas", new[] { 1 });
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "Site\nA\n");
-                ImportManager.ImportFromCsv(dest, path);
+                ImportManager.ImportFromCsv(dest, path, append: true);
                 Assert.Equal("A", dest.Metadata["Site"]);
                 var rows = dest.Query("SELECT * FROM \"data\"");
                 Assert.Equal(2, rows.Count);
@@ -302,7 +302,7 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "When,N\n2020-01-02,1\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, path);
+                ImportManager.ImportFromCsv(db, path, append: false);
                 var rows = db.Query("SELECT * FROM \"data\"");
                 Assert.Single(rows);
                 var when = Assert.IsType<DateTime>(rows[0]["When"]);

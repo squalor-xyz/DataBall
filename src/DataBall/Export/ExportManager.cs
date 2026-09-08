@@ -87,7 +87,7 @@ namespace squalor.DataBall.Export
             {
                 EnsureArchiveExportSupported(path);
                 var csvPath = Path.Combine(dir, "data.csv");
-                db.Store.ExportCsv(csvPath);
+                db.Store.ExportCsv(csvPath, db.FilteredSelectOrNull());
                 var (archiveType, compressionType) = GetArchiveFormat(path);
                 var destDir = Path.GetDirectoryName(Path.GetFullPath(path));
                 if (!string.IsNullOrEmpty(destDir))
@@ -132,7 +132,7 @@ namespace squalor.DataBall.Export
                 if (hasTable)
                 {
                     parquetPath = Path.Combine(dir, "data.parquet");
-                    db.Store.ExportParquet(parquetPath);
+                    db.Store.ExportParquet(parquetPath, db.FilteredSelectOrNull());
                 }
 
                 var metadataPath = Path.Combine(dir, "metadata.json");

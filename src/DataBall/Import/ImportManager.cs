@@ -45,18 +45,18 @@ namespace squalor.DataBall.Import
 
         /// <summary>
         /// Imports data from a CSV file into the DataBall instance.
+        /// Column types come from config or <c>AddColumn</c>. Untyped CSV integers stay DuckDB BIGINT / <c>long</c>.
         /// </summary>
         /// <param name="db">The DataBall instance to import into.</param>
         /// <param name="path">The path to the CSV file.</param>
-        /// <param name="chunkSize">Ignored; DuckDB streams the file.</param>
+        /// <param name="append">If true, appends data; otherwise, replaces existing data. Empty dest treats append as replace.</param>
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static void ImportFromCsv(DataBall db, string path, int chunkSize = 100000)
+        public static void ImportFromCsv(DataBall db, string path, bool append)
         {
-            _ = chunkSize;
-            Logger.LogInformation("Importing CSV from {0}", path);
+            Logger.LogInformation("Importing CSV from {0}, append={1}", path, append);
             try
             {
-                db.Store.ImportCsv(path, append: true, db.ExpectedColumnTypes);
+                db.Store.ImportCsv(path, append, db.ExpectedColumnTypes);
                 db.ApplyCsvSchema(path);
                 Logger.LogInformation("CSV import completed");
             }

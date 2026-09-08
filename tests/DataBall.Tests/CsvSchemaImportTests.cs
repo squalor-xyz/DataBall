@@ -16,7 +16,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "EVM(dB),I_Total(A)\n1.5,0.02\n2.25,0.03\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv);
+                ImportManager.ImportFromCsv(db, csv, append: false);
                 var rows = db.Query("SELECT EVM, I_Total FROM data ORDER BY EVM");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal(1.5, Assert.IsType<double>(rows[0]["EVM"]), 3);
@@ -37,7 +37,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "Lot,EVM(dB)\nL1,1.5\nL1,2.0\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv);
+                ImportManager.ImportFromCsv(db, csv, append: false);
                 Assert.Equal("L1", db.Metadata["Lot"]?.ToString());
                 var cols = db.Query("SELECT * FROM data LIMIT 1")[0];
                 Assert.False(cols.ContainsKey("Lot"));
@@ -58,7 +58,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "Lot,EVM(dB)\nL1,1.5\nL2,2.0\n");
                 using var db = new DataBall();
-                var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, csv));
+                var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, csv, append: false));
                 var msg = (ex.InnerException ?? ex).Message;
                 Assert.Contains("Lot", msg, StringComparison.Ordinal);
             }

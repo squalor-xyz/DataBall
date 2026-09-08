@@ -15,4 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataBall\DataBall.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

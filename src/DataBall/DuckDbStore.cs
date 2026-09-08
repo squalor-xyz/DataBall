@@ -435,14 +435,14 @@ namespace squalor.DataBall
             ImportFromFunction(path, append, "read_parquet", "");
         }
 
-        internal void ExportCsv(string path)
+        internal void ExportCsv(string path, string? selectSql = null)
         {
-            ExportTo(path, "FORMAT CSV, HEADER true");
+            ExportTo(path, "FORMAT CSV, HEADER true", selectSql);
         }
 
-        internal void ExportParquet(string path)
+        internal void ExportParquet(string path, string? selectSql = null)
         {
-            ExportTo(path, "FORMAT PARQUET");
+            ExportTo(path, "FORMAT PARQUET", selectSql);
         }
 
         internal IReadOnlyList<string> ResolvePartitionColumns(IReadOnlyList<string> partitionColumns)
@@ -514,7 +514,7 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExportTo(string path, string copyOptions)
+        private void ExportTo(string path, string copyOptions, string? selectSql = null)
         {
             ThrowIfDisposed();
             if (!DataTableExists())
@@ -524,7 +524,8 @@ namespace squalor.DataBall
             var dir = Path.GetDirectoryName(Path.GetFullPath(path));
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
-            Execute($"COPY \"data\" TO {QuotePath(path)} ({copyOptions})");
+            var source = string.IsNullOrEmpty(selectSql) ? "\"data\"" : "(" + selectSql + ")";
+            Execute($"COPY {source} TO {QuotePath(path)} ({copyOptions})");
         }
 
         private void ApplyMetadataAgainstSource(string sourceTable)

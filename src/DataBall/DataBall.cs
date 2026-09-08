@@ -264,6 +264,7 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Imports data from a file, detecting the format by extension.
+        /// Column types come from config or <c>AddColumn</c>. Untyped CSV integers stay DuckDB BIGINT / <c>long</c>.
         /// </summary>
         /// <param name="path">The path of the file to import.</param>
         /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c>.</param>
@@ -332,10 +333,10 @@ namespace squalor.DataBall
                 switch (type)
                 {
                     case ExportType.Csv:
-                        _store.ExportCsv(path);
+                        _store.ExportCsv(path, FilteredSelectOrNull());
                         break;
                     case ExportType.Parquet:
-                        _store.ExportParquet(path);
+                        _store.ExportParquet(path, FilteredSelectOrNull());
                         break;
                     case ExportType.Archive:
                         ExportManager.ExportToArchive(this, path);

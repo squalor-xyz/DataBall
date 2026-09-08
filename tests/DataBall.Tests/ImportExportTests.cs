@@ -440,7 +440,7 @@ namespace squalor.DataBall.Tests
                 }
 
                 using var fromCsv = new DataBall();
-                ImportManager.ImportFromCsv(fromCsv, csv);
+                ImportManager.ImportFromCsv(fromCsv, csv, append: false);
                 AssertPeople(fromCsv);
 
                 using var fromParquet = new DataBall();

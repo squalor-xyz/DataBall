@@ -63,7 +63,7 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
 
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv);
+                ImportManager.ImportFromCsv(db, csv, append: false);
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -89,7 +89,7 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(csv, "Flag,Score,When\ntrue,1.25,2020-05-06 07:08:09\n");
 
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv);
+                ImportManager.ImportFromCsv(db, csv, append: false);
                 var row = Assert.Single(db.Query("SELECT Flag, Score, \"When\" FROM data"));
                 Assert.True(Assert.IsType<bool>(row["Flag"]));
                 Assert.Equal(1.25f, Assert.IsType<float>(row["Score"]));
@@ -158,20 +158,133 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_ChunkSizeOne_StillLoadsEveryRow()
+        public void ImportFromCsv_AppendFalse_ReplacesRows()
+        {
+            var dir = TempDir();
+            try
+            {
+                var first = Path.Combine(dir, "a.csv");
+                var second = Path.Combine(dir, "b.csv");
+                File.WriteAllText(first, "Name\nAlice\n");
+                File.WriteAllText(second, "Name\nBob\n");
+                using var db = new DataBall();
+                ImportManager.ImportFromCsv(db, first, append: false);
+                ImportManager.ImportFromCsv(db, second, append: false);
+                var rows = db.Query("SELECT Name FROM data");
+                var names = rows.Select(r => r["Name"]?.ToString()).ToArray();
+                Assert.Equal(new[] { "Bob" }, names);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void ImportFromCsv_AppendTrue_Concatenates()
+        {
+            var dir = TempDir();
+            try
+            {
+                var first = Path.Combine(dir, "a.csv");
+                var second = Path.Combine(dir, "b.csv");
+                File.WriteAllText(first, "Name\nAlice\n");
+                File.WriteAllText(second, "Name\nBob\n");
+                using var db = new DataBall();
+                ImportManager.ImportFromCsv(db, first, append: false);
+                ImportManager.ImportFromCsv(db, second, append: true);
+                var rows = db.Query("SELECT Name FROM data ORDER BY Name");
+                var names = rows.Select(r => r["Name"]?.ToString()).ToArray();
+                Assert.Equal(new[] { "Alice", "Bob" }, names);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void CsvImport_WithoutConfig_AgeValuesAreInt64()
         {
             var dir = TempDir();
             try
             {
                 var csv = Path.Combine(dir, "people.csv");
-                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\nCarol,40\n");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv, chunkSize: 1);
-                var rows = db.Query("SELECT Name FROM data ORDER BY Name");
-                Assert.Equal(3, rows.Count);
+                ImportManager.ImportFromCsv(db, csv, append: false);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
+                Assert.Equal(25L, Assert.IsType<long>(rows[1]["Age"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_CsvWithoutConfig_AgeValuesAreInt64()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "people.csv");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+                using var db = new DataBall();
+                await db.ImportAsync(csv);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
+                Assert.Equal(25L, Assert.IsType<long>(rows[1]["Age"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void CsvImport_WithConfigAgeLong_SmallValuesStayInt64()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = Path.Combine(dir, "config.json");
+                File.WriteAllText(config, """{ "columns": { "Name": "string", "Age": "long" } }""");
+                var csv = Path.Combine(dir, "people.csv");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+                using var db = new DataBall(config);
+                ImportManager.ImportFromCsv(db, csv, append: false);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
+                Assert.Equal(25L, Assert.IsType<long>(rows[1]["Age"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void CsvImport_PartialConfig_UntypedAgeStaysInt64()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = Path.Combine(dir, "config.json");
+                File.WriteAllText(config, """{ "columns": { "Name": "string" } }""");
+                var csv = Path.Combine(dir, "people.csv");
+                File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+                using var db = new DataBall(config);
+                ImportManager.ImportFromCsv(db, csv, append: false);
+                var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+                Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
-                Assert.Equal("Bob", rows[1]["Name"]);
-                Assert.Equal("Carol", rows[2]["Name"]);
+                Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
+                Assert.Equal(25L, Assert.IsType<long>(rows[1]["Age"]));
             }
             finally
             {

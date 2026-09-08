@@ -17,9 +17,9 @@ Do not nuget-push or git-push from this list unless the owner asks.
 | # | Item | Kind |
 |---|---|---|
 | S1 | Native default profile + overlay config: header patterns, unit→type, roles, metadataFields | Feature (in progress) |
-| S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature |
+| S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature (done) |
 | S3 | First lab handler project (not in `DuckDbStore`) | Feature |
-| S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature |
+| S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature (done) |
 | S5 | Batch insert path that does not row-loop | Feature |
 
 Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
@@ -30,8 +30,8 @@ Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
 
 | # | Item | Kind |
 |---|---|---|
-| 1 | Import API consistency | Fix |
-| 2 | Untyped CSV types (document + lock tests) | Fix / docs |
+| 1 | Import API consistency | Fix (done) |
+| 2 | Untyped CSV types (document + lock tests) | Fix / docs (done) |
 | 3 | Hive-partitioned Parquet directory import | Feature |
 | 4 | SharpCompress bump (and tar.xz export only if the library can write XZ) | Hygiene |
 | 5 | File-backed DuckDB | Feature |

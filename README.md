@@ -60,9 +60,15 @@ db.Roll(ExportType.Csv, "output.csv");
 
 await db.ImportAsync("input.csv", new ImportOptions { Append = true });
 await db.SaveAsync("session.ball");
+
+using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(path, "config.json")
 ```
 
 `Metadata` is a snapshot; write with `SetMetadata`. `ImportAsync` detects format by extension (`Append` defaults to `false`). `SaveAsync` writes `ExportType.Ball`. Dispose with `using`; an uncommitted pending row is discarded.
+
+`DataBall.Open(path, schemaPath?)` creates a new session from a file. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). Register a custom parser with `DataBall.RegisterHandler`; first `IFormatHandler.CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
+
+Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` is honored by export/save; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
 
 ### Config
 
@@ -80,7 +86,7 @@ await db.SaveAsync("session.ball");
 }
 ```
 
-Column types: `int`, `long`, `float`, `double`, `bool`, `datetime`, `string`. Relationship JSON uses `"trigger"` / `"reset"` (Pascal `TriggerField` / `ResetFields` also binds). Logging is constructor-injected `ILogger`, default `NullLogger`.
+Column types: `int`, `long`, `float`, `double`, `bool`, `datetime`, `string`. Types come from this config or from `AddColumn`. Untyped CSV integers stay DuckDB BIGINT / `long` — they are not narrowed from value range. Relationship JSON uses `"trigger"` / `"reset"` (Pascal `TriggerField` / `ResetFields` also binds). Logging is constructor-injected `ILogger`, default `NullLogger`.
 
 A config file is an **overlay** on native defaults (`Config.CreateDefaults`). CSV headers are parsed in order `{name}({unit})`, `{name}_{unit}` (only if the suffix is a known unit), then `{name}` — so `EVM(dB)` and `I_Total(A)` become columns `EVM` and `I_Total` with types from the unit table (`dB`/`A` → `double`; `id`/`ID` → `long`). `{name}_{unit}` does not split `I_Total`. Roles: `parameters` or lists `stimulus` / `classification`; default role is `meas`. Names in `metadataFields` (defaults: Lot, Tester, Program) move to the metadata table when constant (`metadataPolicy`: `requireConstant`, `first`, or `bounce`). `columns` still overrides type per canonical name. Overlay JSON may also include `units` (with `aliases`) and `csv.headerPatterns`.
 

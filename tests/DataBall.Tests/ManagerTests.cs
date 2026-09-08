@@ -97,7 +97,7 @@ namespace squalor.DataBall.Tests
         {
             using var db = new DataBall();
             var path = Path.Combine(Path.GetTempPath(), "databall-missing-" + Guid.NewGuid().ToString("N") + ".csv");
-            var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, path));
+            var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, path, append: false));
             Assert.Equal("Failed to import CSV file", ex.Message);
         }
 
