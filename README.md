@@ -4,7 +4,7 @@ Apache-2.0 .NET library and `databall` CLI for **test-executive / ATE measuremen
 
 ## Engine (DuckDB)
 
-The working store is **in-memory DuckDB** via `DuckDB.NET.Data.Full` 1.5.5 (`Data Source=:memory:`). The package ships **native RID binaries** (`libduckdb` / `duckdb.dll`) for win-x64, win-arm64, osx-x64, osx-arm64, linux-x64, and linux-arm64. This is **not** a pure-managed library.
+The working store is DuckDB via `DuckDB.NET.Data.Full` 1.5.5. Default is **in-memory** (`Data Source=:memory:`). Opt-in file-backed: `new DataBall(databasePath: "session.duckdb")` (named argument; the first ctor string is still config JSON). Dispose does not delete the file. Do not open `catalog.duckdb` as a DataBall session. Interchange remains `.ball`. The package ships **native RID binaries** (`libduckdb` / `duckdb.dll`) for win-x64, win-arm64, osx-x64, osx-arm64, linux-x64, and linux-arm64. This is **not** a pure-managed library.
 
 Callers do not need SQL. `Query(string sql)` is an escape hatch against table `"data"`.
 

@@ -34,7 +34,7 @@ Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
 | 2 | Untyped CSV types (document + lock tests) | Fix / docs (done) |
 | 3 | Hive-partitioned Parquet directory import | Feature |
 | 4 | SharpCompress bump (and tar.xz export only if the library can write XZ) | Hygiene |
-| 5 | File-backed DuckDB | Feature |
+| 5 | File-backed DuckDB | Feature (done) |
 | 6 | CI / native RID proof | Verify |
 | 7 | Local pack checklist | Docs only |
 

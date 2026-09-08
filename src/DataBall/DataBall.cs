@@ -25,19 +25,38 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DataBall"/> class, optionally loading configuration.
+        /// Pass <paramref name="databasePath"/> by name for a file-backed session
+        /// (<c>new DataBall(databasePath: "session.duckdb")</c>). The first string is always config JSON.
         /// </summary>
         /// <param name="configPath">The path to the configuration JSON file, if any.</param>
         /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
-        public DataBall(string? configPath = null, ILogger? logger = null)
+        /// <param name="databasePath">Optional DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
+        public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null)
         {
             _logger = logger ?? NullLogger.Instance;
-            _store = new DuckDbStore();
+            _store = new DuckDbStore(ValidateDatabasePath(databasePath));
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
             _config = string.IsNullOrEmpty(configPath)
                 ? Config.CreateDefaults()
                 : Config.LoadMerged(configPath);
             ApplyConfig(_config);
+        }
+
+        private static string? ValidateDatabasePath(string? databasePath)
+        {
+            if (string.IsNullOrEmpty(databasePath)
+                || databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+                return databasePath;
+
+            if (string.IsNullOrWhiteSpace(databasePath))
+                throw new DataBallException("Database path is required");
+
+            var name = Path.GetFileName(databasePath);
+            if (name.Equals("catalog.duckdb", StringComparison.OrdinalIgnoreCase))
+                throw new DataBallException("catalog.duckdb is not a DataBall session file");
+
+            return databasePath;
         }
 
         /// <summary>

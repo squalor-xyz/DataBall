@@ -11,20 +11,93 @@ namespace squalor.DataBall
 {
     internal sealed class DuckDbStore : IDisposable
     {
+        private static readonly object FileGate = new();
+        private static readonly HashSet<string> OpenFiles = new(StringComparer.Ordinal);
+
         private readonly DuckDBConnection _connection;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
+        private readonly string? _exclusivePath;
         private bool _disposed;
 
-        internal DuckDbStore()
+        internal DuckDbStore(string? databasePath = null)
         {
-            _connection = new DuckDBConnection("Data Source=:memory:");
-            _connection.Open();
-            Execute("""
-                CREATE TABLE "meta" (
-                    "key"   VARCHAR PRIMARY KEY,
-                    "value" VARCHAR
-                );
-                """);
+            _exclusivePath = ExclusiveFilePath(databasePath);
+            if (_exclusivePath is not null)
+            {
+                lock (FileGate)
+                {
+                    if (!OpenFiles.Add(_exclusivePath))
+                        throw new DataBallException($"Database file is already open: {_exclusivePath}");
+                }
+            }
+
+            DuckDBConnection? connection = null;
+            try
+            {
+                connection = new DuckDBConnection(BuildConnectionString(databasePath));
+                connection.Open();
+                _connection = connection;
+                Execute("""
+                    CREATE TABLE IF NOT EXISTS "meta" (
+                        "key"   VARCHAR PRIMARY KEY,
+                        "value" VARCHAR
+                    );
+                    """);
+                HydrateMetadata();
+            }
+            catch (Exception ex)
+            {
+                ReleaseExclusivePath();
+                connection?.Dispose();
+                if (ex is DataBallException)
+                    throw;
+                throw new DataBallException("Failed to open database", ex);
+            }
+        }
+
+        private static string? ExclusiveFilePath(string? databasePath)
+        {
+            if (string.IsNullOrEmpty(databasePath)
+                || databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+                return null;
+            return Path.GetFullPath(databasePath);
+        }
+
+        private void ReleaseExclusivePath()
+        {
+            if (_exclusivePath is null)
+                return;
+            lock (FileGate)
+                OpenFiles.Remove(_exclusivePath);
+        }
+
+        private static string BuildConnectionString(string? databasePath)
+        {
+            if (string.IsNullOrEmpty(databasePath)
+                || databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
+                return "Data Source=:memory:";
+
+            var builder = new DuckDBConnectionStringBuilder
+            {
+                DataSource = Path.GetFullPath(databasePath)
+            };
+            return builder.ConnectionString;
+        }
+
+        private void HydrateMetadata()
+        {
+            var rows = Query("SELECT \"key\", \"value\" FROM \"meta\"");
+            foreach (var row in rows)
+            {
+                var key = Convert.ToString(row["key"], CultureInfo.InvariantCulture);
+                if (string.IsNullOrEmpty(key))
+                    continue;
+                var stored = row["value"] as string;
+                object? value = stored is null
+                    ? null
+                    : Unwrap(JsonSerializer.Deserialize<JsonElement>(stored));
+                _metadata[key] = value;
+            }
         }
 
         internal DuckDBConnection Connection
@@ -539,6 +612,7 @@ namespace squalor.DataBall
             if (_disposed)
                 return;
             _connection.Dispose();
+            ReleaseExclusivePath();
             _disposed = true;
         }
 
