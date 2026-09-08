@@ -50,6 +50,10 @@ using var db = new DataBall("config.json");
 
 db.AddColumn("Name", new[] { "Alice", "Bob" });
 db.AddColumn<int>("Age", new[] { 30, 25 });
+db.AddRows(new[]
+{
+    new Dictionary<string, object?> { ["Name"] = "Carol", ["Age"] = 40 },
+});
 
 db.SetMetadata("Source", "TestData");
 
@@ -69,6 +73,8 @@ using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(
 `DataBall.Open(path, schemaPath?)` creates a new session from a file. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). Register a custom parser with `DataBall.RegisterHandler`; first `IFormatHandler.CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
 
 Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` is honored by export/save; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
+
+`AddRows` inserts a batch with one DuckDB appender. It does not apply trigger/reset (`CommitRow` does). Empty input is a no-op.
 
 ### Config
 

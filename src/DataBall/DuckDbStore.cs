@@ -294,6 +294,58 @@ namespace squalor.DataBall
             InsertAppenderRow(GetColumns(), values);
         }
 
+        internal void AddRows(
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+            IReadOnlyDictionary<string, Type>? expectedTypes = null)
+        {
+            ThrowIfDisposed();
+            if (rows.Count == 0)
+                return;
+
+            var keyOrder = new List<string>();
+            var keySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var values in rows)
+            {
+                if (values is null)
+                    throw new DataBallException("Row values are required");
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var key in values.Keys)
+                {
+                    ValidateName(key, "Column");
+                    if (!seen.Add(key))
+                        throw new DataBallException($"Duplicate column name '{key}'");
+                    if (keySet.Add(key))
+                        keyOrder.Add(key);
+                }
+            }
+
+            if (keyOrder.Count == 0)
+                throw new DataBallException("AddRows requires at least one column");
+
+            if (!DataTableExists())
+            {
+                var parts = new List<string>(keyOrder.Count);
+                foreach (var key in keyOrder)
+                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
+            }
+            else
+            {
+                var cols = GetColumns();
+                foreach (var key in keyOrder)
+                {
+                    if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                    Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                }
+            }
+
+            var columns = GetColumns();
+            using var appender = _connection.CreateAppender("data");
+            foreach (var values in rows)
+                WriteAppenderRow(appender, columns, values);
+        }
+
         internal IReadOnlyDictionary<string, object?> SnapshotMetadata()
         {
             ThrowIfDisposed();
@@ -685,11 +737,35 @@ namespace squalor.DataBall
             }
         }
 
+        private static object? FirstValue(
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+            string key)
+        {
+            foreach (var values in rows)
+            {
+                foreach (var pair in values)
+                {
+                    if (pair.Key.Equals(key, StringComparison.OrdinalIgnoreCase) && pair.Value is not null)
+                        return pair.Value;
+                }
+            }
+
+            return null;
+        }
+
         private void InsertAppenderRow(
             IReadOnlyList<(string Name, string DuckDbType)> columns,
             IReadOnlyDictionary<string, object?> values)
         {
             using var appender = _connection.CreateAppender("data");
+            WriteAppenderRow(appender, columns, values);
+        }
+
+        private void WriteAppenderRow(
+            DuckDBAppender appender,
+            IReadOnlyList<(string Name, string DuckDbType)> columns,
+            IReadOnlyDictionary<string, object?> values)
+        {
             var row = appender.CreateRow();
             foreach (var (colName, duckType) in columns)
             {

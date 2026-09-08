@@ -50,8 +50,11 @@ namespace squalor.DataBall
                 var handler = FindHandler(path);
                 if (handler is not null)
                 {
+                    var batch = new List<IReadOnlyDictionary<string, object?>>();
                     foreach (var row in handler.Parse(path).ToBlockingEnumerable())
-                        db.AddRow(row);
+                        batch.Add(row);
+                    if (batch.Count > 0)
+                        db.AddRows(batch);
                     return db;
                 }
 

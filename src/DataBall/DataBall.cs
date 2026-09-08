@@ -134,6 +134,21 @@ namespace squalor.DataBall
         }
 
         /// <summary>
+        /// Inserts many rows with one DuckDB appender. Does not apply trigger/reset (<see cref="CommitRow"/>).
+        /// Empty <paramref name="rows"/> is a no-op.
+        /// </summary>
+        public void AddRows(IEnumerable<IReadOnlyDictionary<string, object?>> rows)
+        {
+            ThrowIfDisposed();
+            if (rows is null)
+                throw new DataBallException("Row values are required");
+            var list = rows as IReadOnlyList<IReadOnlyDictionary<string, object?>> ?? rows.ToList();
+            if (list.Count == 0)
+                return;
+            _store.AddRows(list, _expectedColumnTypes);
+        }
+
+        /// <summary>
         /// Executes SQL against the in-memory store and returns rows as dictionaries.
         /// </summary>
         /// <param name="sql">The SQL to execute.</param>

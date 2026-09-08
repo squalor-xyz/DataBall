@@ -20,7 +20,7 @@ Do not nuget-push or git-push from this list unless the owner asks.
 | S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature (done) |
 | S3 | First lab handler project (not in `DuckDbStore`) | Feature |
 | S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature (done) |
-| S5 | Batch insert path that does not row-loop | Feature |
+| S5 | Batch insert path that does not row-loop | Feature (done) |
 
 Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
 
