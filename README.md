@@ -70,7 +70,9 @@ using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(
 
 `Metadata` is a snapshot; write with `SetMetadata`. `ImportAsync` detects format by extension (`Append` defaults to `false`). `SaveAsync` writes `ExportType.Ball`. Dispose with `using`; an uncommitted pending row is discarded.
 
-`DataBall.Open(path, schemaPath?)` creates a new session from a **file**. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). `ImportAsync` also reads a Squish **hive directory** of parquet (`hive_partitioning=false`; partition columns come from the files). Hive import is not `.ball` and does not restore Bounce metadata. Register a custom parser with `DataBall.RegisterHandler`; first `IFormatHandler.CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
+`DataBall.Open(path, schemaPath?)` creates a new session from a **file**. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). `ImportAsync` also reads a Squish **hive directory** of parquet (`hive_partitioning=false`; partition columns come from the files). Hive import is not `.ball` and does not restore Bounce metadata.
+
+Lab translators live in `squalor.DataBall.Handlers` (not `DuckDbStore`). Primary dialect is **custom CSV** with unit headers (`EVM(dB)`). `LabHandlers.RegisterDefaults()` also registers STDF / Touchstone / production **slots** (Parse throws until a golden file exists). Register with `DataBall.RegisterHandler`; first `CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
 
 Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` is honored by export/save; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
 

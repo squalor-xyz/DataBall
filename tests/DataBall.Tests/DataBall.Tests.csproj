@@ -14,6 +14,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataBall\DataBall.csproj" />
+    <ProjectReference Include="..\..\src\DataBall.Handlers\DataBall.Handlers.csproj" />
   </ItemGroup>
   <ItemGroup>
     <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />

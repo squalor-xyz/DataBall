@@ -18,11 +18,11 @@ Do not nuget-push or git-push from this list unless the owner asks.
 |---|---|---|
 | S1 | Native default profile + overlay config: header patterns, unit→type, roles, metadataFields | Feature (done) |
 | S2 | `IFormatHandler` + `RegisterHandler` + `Open(path, schema)` | Feature (done) |
-| S3 | First lab handler project (not in `DuckDbStore`) | Feature |
+| S3 | First lab handler project (not in `DuckDbStore`) | Feature (done: `DataBall.Handlers`, custom CSV primary; STDF/Touchstone/production slots) |
 | S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature (done) |
 | S5 | Batch insert path that does not row-loop | Feature (done) |
 
-Handlers for production and Touchstone follow S2–S3. No ALC in this slice.
+Handlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.
 
 ---
 
