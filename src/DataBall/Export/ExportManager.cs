@@ -93,7 +93,7 @@ namespace squalor.DataBall.Export
                 if (!string.IsNullOrEmpty(destDir))
                     Directory.CreateDirectory(destDir);
                 using var fs = File.Create(path);
-                using var writer = WriterFactory.Open(fs, archiveType, new WriterOptions(compressionType));
+                using var writer = WriterFactory.OpenWriter(fs, archiveType, new WriterOptions(compressionType));
                 using var csvStream = File.OpenRead(csvPath);
                 writer.Write("data.csv", csvStream);
                 Logger.LogInformation("Archive export completed");
@@ -198,7 +198,7 @@ namespace squalor.DataBall.Export
                 || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
             {
                 throw new DataBallException(
-                    "Export to .tar.xz/.txz is not supported with SharpCompress 0.40 (XZ is decompress-only). Import of .tar.xz is supported.");
+                    "Export to .tar.xz/.txz is not supported (SharpCompress XZ is decompress-only). Import of .tar.xz is supported.");
             }
         }
 
@@ -212,7 +212,7 @@ namespace squalor.DataBall.Export
                 || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
             {
                 throw new DataBallException(
-                    "Export to .tar.xz/.txz is not supported with SharpCompress 0.40 (XZ is decompress-only). Import of .tar.xz is supported.");
+                    "Export to .tar.xz/.txz is not supported (SharpCompress XZ is decompress-only). Import of .tar.xz is supported.");
             }
             if (name.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
                 return (ArchiveType.Tar, CompressionType.None);

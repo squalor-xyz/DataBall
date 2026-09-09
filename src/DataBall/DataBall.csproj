@@ -4,7 +4,7 @@
     <AssemblyName>DataBall</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageId>squalor.DataBall</PackageId>
-    <Version>1.1.0</Version>
+    <Version>1.2.0</Version>
     <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, zip/tar, .ball), row builder, Bounce/Squish. Apache-2.0.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -15,7 +15,7 @@
   <ItemGroup>
     <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
-    <!-- 0.40: NU1902 (GHSA-6c8g-7p36-r338) known; do not bump without re-verifying tar.gz export + tar.xz import. XZ is decompress-only in 0.40. -->
-    <PackageReference Include="SharpCompress" Version="0.40.0" />
+    <!-- 0.50.4: NU1902 on ≤0.47.4. XZ is still decompress-only; tar.gz export must stay working. Never SharpCompress 1.0.0. -->
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>
 </Project>

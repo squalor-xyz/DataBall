@@ -193,6 +193,30 @@ public class CliSmokeTests
     }
 
     [Fact]
+    public async Task Import_HiveDir_ThenQuery()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            var hive = Path.Combine(dir, "hiveDir");
+            var ball = Path.Combine(dir, "out.ball");
+            File.WriteAllText(csv, "Site,Meas\nLab1,1\nLab1,2\nLab2,3\n");
+
+            Assert.Equal(0, (await Run("squish", csv, hive, "--partition", "Site")).Exit);
+            Assert.Equal(0, (await Run("import", hive, "-o", ball)).Exit);
+
+            var queried = await Run("query", ball, "SELECT Site, Meas FROM data ORDER BY Meas");
+            Assert.Equal(0, queried.Exit);
+            Assert.Equal("Site\tMeas\nLab1\t1\nLab1\t2\nLab2\t3\n", queried.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task Import_WithConfig_AppliesColumnType()
     {
         var dir = TempDir();

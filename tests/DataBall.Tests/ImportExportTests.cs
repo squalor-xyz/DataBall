@@ -253,6 +253,9 @@ namespace squalor.DataBall.Tests
         [Fact]
         public async Task Archive_TarXz_Import_FromHandBuiltFile()
         {
+            if (!XzAvailable())
+                return;
+
             var dir = TempDir();
             try
             {
@@ -454,6 +457,171 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public async Task ImportAsync_HiveDir_RoundTripSquishSiteMeas()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using (var db = new DataBall())
+                {
+                    db.AddColumn("Site", new[] { "Lab1", "Lab1", "Lab2" });
+                    db.AddColumn<int>("Meas", new[] { 1, 2, 3 });
+                    await db.Squish(hive, new[] { "Site" });
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(hive);
+                var rows = imported.Query("SELECT \"Site\", \"Meas\" FROM \"data\" ORDER BY \"Meas\"");
+                Assert.Equal(3, rows.Count);
+                Assert.Equal("Lab1", rows[0]["Site"]);
+                Assert.Equal(1, Convert.ToInt32(rows[0]["Meas"]));
+                Assert.IsType<int>(rows[0]["Meas"]);
+                Assert.Equal("Lab2", rows[2]["Site"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_HiveDir_TwoPartitionColumns()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using (var db = new DataBall())
+                {
+                    db.AddColumn("Site", new[] { "A", "A", "B" });
+                    db.AddColumn("Lot", new[] { "1", "2", "1" });
+                    db.AddColumn<int>("Meas", new[] { 10, 20, 30 });
+                    await db.Squish(hive, new[] { "Site", "Lot" });
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(hive);
+                var rows = imported.Query("SELECT \"Site\", \"Lot\", \"Meas\" FROM \"data\" ORDER BY \"Meas\"");
+                Assert.Equal(3, rows.Count);
+                Assert.Equal("A", rows[0]["Site"]);
+                Assert.Equal("1", rows[0]["Lot"]);
+                Assert.Equal(10, Convert.ToInt32(rows[0]["Meas"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_HiveDir_OnlyPartitionColumn()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using (var db = new DataBall())
+                {
+                    db.AddColumn("Site", new[] { "Lab1", "Lab2" });
+                    await db.Squish(hive, new[] { "Site" });
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(hive);
+                var rows = imported.Query("SELECT \"Site\" FROM \"data\" ORDER BY \"Site\"");
+                Assert.Equal(2, rows.Count);
+                Assert.Equal("Lab1", rows[0]["Site"]);
+                Assert.Equal("Lab2", rows[1]["Site"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_HiveDir_AppendTrue_Concatenates()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using (var db = new DataBall())
+                {
+                    db.AddColumn("Site", new[] { "Lab1" });
+                    db.AddColumn<int>("Meas", new[] { 1 });
+                    await db.Squish(hive, new[] { "Site" });
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(hive);
+                await imported.ImportAsync(hive, new ImportOptions { Append = true });
+                Assert.Equal(2, imported.Query("SELECT * FROM \"data\"").Count);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_HiveDir_AppendFalse_Replaces()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using (var db = new DataBall())
+                {
+                    db.AddColumn("Site", new[] { "Lab1" });
+                    db.AddColumn<int>("Meas", new[] { 1 });
+                    await db.Squish(hive, new[] { "Site" });
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(hive);
+                await imported.ImportAsync(hive, new ImportOptions { Append = false });
+                Assert.Single(imported.Query("SELECT * FROM \"data\""));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_EmptyDir_Throws()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall();
+                await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(dir));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task ImportAsync_DirWithNoParquet_Throws()
+        {
+            var dir = TempDir();
+            try
+            {
+                File.WriteAllText(Path.Combine(dir, "notes.txt"), "no parquet");
+                using var db = new DataBall();
+                await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(dir));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public async Task Import_CaseInsensitiveExtensions()
         {
             var dir = TempDir();
@@ -495,6 +663,30 @@ namespace squalor.DataBall.Tests
         private static string EntryName(ZipArchiveEntry entry)
         {
             return entry.FullName.Replace('\\', '/');
+        }
+
+        private static bool XzAvailable()
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "xz",
+                    ArgumentList = { "--version" },
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                };
+                using var proc = Process.Start(psi);
+                if (proc is null)
+                    return false;
+                proc.WaitForExit(2000);
+                return proc.ExitCode == 0;
+            }
+            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
+            {
+                return false;
+            }
         }
 
         private static void CompressWithXz(string tarPath, string xzPath)

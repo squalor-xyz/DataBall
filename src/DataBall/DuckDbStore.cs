@@ -557,7 +557,34 @@ namespace squalor.DataBall
 
         internal void ImportParquet(string path, bool append)
         {
+            if (Directory.Exists(path))
+            {
+                ImportHiveParquet(path, append);
+                return;
+            }
             ImportFromFunction(path, append, "read_parquet", "");
+        }
+
+        private void ImportHiveParquet(string directory, bool append)
+        {
+            ThrowIfDisposed();
+            var files = Directory.GetFiles(directory, "*.parquet", SearchOption.AllDirectories);
+            if (files.Length == 0)
+                throw new DataBallException($"No parquet files in hive directory: {directory}");
+
+            var dir = Path.GetFullPath(directory).Replace('\\', '/').TrimEnd('/');
+            var glob = QuoteString(dir + "/**/*.parquet");
+            Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM read_parquet({glob}, hive_partitioning = false)");
+            try
+            {
+                PromoteDateColumns("_staging");
+                CoerceStagingColumns("_staging", expected: null);
+                MergeOrAppendFromTable("_staging", append);
+            }
+            finally
+            {
+                Execute("DROP TABLE IF EXISTS \"_staging\"");
+            }
         }
 
         internal void ExportCsv(string path, string? selectSql = null)

@@ -36,7 +36,7 @@ Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward
 | Format | Extensions | Import | Export |
 |---|---|---|---|
 | CSV | `.csv` | yes | yes |
-| Parquet | `.parquet` | yes | yes (hive partition via Bounce/Squish path+cols) |
+| Parquet | `.parquet` or hive directory | yes (file or Squish hive dir) | yes (hive partition via Bounce/Squish path+cols) |
 | Archive of CSV | `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.xz`, `.txz` | yes | `.zip` / `.tar` / `.tar.gz` / `.tgz` only |
 | `.ball` | `.ball` | yes | yes |
 
@@ -70,7 +70,7 @@ using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(
 
 `Metadata` is a snapshot; write with `SetMetadata`. `ImportAsync` detects format by extension (`Append` defaults to `false`). `SaveAsync` writes `ExportType.Ball`. Dispose with `using`; an uncommitted pending row is discarded.
 
-`DataBall.Open(path, schemaPath?)` creates a new session from a file. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). Register a custom parser with `DataBall.RegisterHandler`; first `IFormatHandler.CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
+`DataBall.Open(path, schemaPath?)` creates a new session from a **file**. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). `ImportAsync` also reads a Squish **hive directory** of parquet (`hive_partitioning=false`; partition columns come from the files). Hive import is not `.ball` and does not restore Bounce metadata. Register a custom parser with `DataBall.RegisterHandler`; first `IFormatHandler.CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
 
 Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` is honored by export/save; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
 
@@ -151,6 +151,7 @@ databall import more.csv -o session.ball --append
 databall export session.ball people.parquet
 databall bounce session.ball compact.ball
 databall squish session.ball hive --partition Site
+databall import hive -o session.ball
 databall query session.ball "SELECT * FROM data LIMIT 10"
 databall info session.ball
 ```
@@ -169,7 +170,7 @@ Windows (win-x64 required; win-arm64 included) and macOS (osx-x64 / osx-arm64 re
 
 Debugging a process that uses DuckDB.NET can throw `AccessViolationException` because the debugger touches native memory; this is documented upstream (Giorgi/DuckDB.NET “Known Issues”) and is not a DataBall bug.
 
-SharpCompress 0.40: stay on this version so tar.gz export keeps working. `.tar.xz` import works; `.tar.xz` export does not (XZ is decompress-only in 0.40).
+SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ is decompress-only). Do not use SharpCompress 1.0.0.
 
 ## Historical docs
 
@@ -177,7 +178,7 @@ SharpCompress 0.40: stay on this version so tar.gz export keeps working. `.tar.x
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details. (1.0.0 was MPL-2.0; this tree is 1.1.0 Apache-2.0.)
+Apache License 2.0. See [LICENSE](LICENSE) for details. (1.0.0 was MPL-2.0; this tree is 1.2.0 Apache-2.0.)
 
 ## Repository
 

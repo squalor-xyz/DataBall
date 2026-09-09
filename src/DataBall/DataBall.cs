@@ -312,7 +312,7 @@ namespace squalor.DataBall
                 throw new DataBallException("Path is required");
 
             var format = ImportManager.DetectImportFormat(path);
-            if (!File.Exists(path))
+            if (!File.Exists(path) && !Directory.Exists(path))
                 throw new DataBallException($"File not found: {path}");
 
             options ??= new ImportOptions();

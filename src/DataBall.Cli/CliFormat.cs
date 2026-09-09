@@ -21,6 +21,9 @@ internal static class CliFormat
 
     internal static ExportType DetectExportType(string path)
     {
+        if (Directory.Exists(path))
+            return ExportType.Parquet;
+
         var fileName = Path.GetFileName(path);
         if (string.IsNullOrEmpty(fileName))
             throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|ball|archive.");

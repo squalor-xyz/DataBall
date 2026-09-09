@@ -147,6 +147,9 @@ namespace squalor.DataBall.Import
 
         internal static ExportType DetectImportFormat(string path)
         {
+            if (Directory.Exists(path))
+                return ExportType.Parquet;
+
             var fileName = Path.GetFileName(path);
             if (string.IsNullOrEmpty(fileName))
                 throw new DataBallException($"Unknown import format for '{path}'");
@@ -168,7 +171,7 @@ namespace squalor.DataBall.Import
         {
             try
             {
-                using var archive = ArchiveFactory.Open(path);
+                using var archive = ArchiveFactory.OpenArchive(path);
                 var csvEntries = archive.Entries
                     .Where(e => !e.IsDirectory
                         && e.Key is not null
@@ -196,7 +199,7 @@ namespace squalor.DataBall.Import
         private static bool ImportArchiveViaReader(DataBall db, string path, string dir, bool append)
         {
             using var stream = File.OpenRead(path);
-            using var reader = ReaderFactory.Open(stream);
+            using var reader = ReaderFactory.OpenReader(stream);
             var first = true;
             var anyCsv = false;
             while (reader.MoveToNextEntry())
