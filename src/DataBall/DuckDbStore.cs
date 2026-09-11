@@ -624,14 +624,43 @@ namespace squalor.DataBall
             var resolved = ResolvePartitionColumns(partitionColumns);
 
             // OVERWRITE true does not drop stale hive partition directories from a prior key set.
-            if (Directory.Exists(directory))
-                Directory.Delete(directory, recursive: true);
-            Directory.CreateDirectory(directory);
+            ClearHiveTarget(directory);
 
             var qDir = QuotePath(directory);
             var by = string.Join(", ", resolved.Select(QuoteIdent));
             // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
             Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
+        }
+
+        private static void ClearHiveTarget(string directory)
+        {
+            if (Directory.Exists(directory))
+            {
+                foreach (var path in Directory.EnumerateFileSystemEntries(directory, "*", SearchOption.AllDirectories))
+                {
+                    var name = Path.GetFileName(path);
+                    var isDir = (File.GetAttributes(path) & FileAttributes.Directory) != 0;
+                    if (isDir)
+                    {
+                        if (!IsHivePartitionName(name))
+                            throw new DataBallException($"Refusing to overwrite '{directory}': it contains '{name}'.");
+                    }
+                    else if (!name.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase))
+                    {
+                        throw new DataBallException($"Refusing to overwrite '{directory}': it contains '{name}'.");
+                    }
+                }
+
+                Directory.Delete(directory, recursive: true);
+            }
+
+            Directory.CreateDirectory(directory);
+        }
+
+        private static bool IsHivePartitionName(string name)
+        {
+            var eq = name.IndexOf('=');
+            return eq > 0 && eq < name.Length - 1;
         }
 
         public void Dispose()

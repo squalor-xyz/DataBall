@@ -132,6 +132,55 @@ public class CliErrorTests
         }
     }
 
+    [Fact]
+    public async Task Bounce_BallInput_NoOutput_DoesNotOverwriteInput()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            var ball = Path.Combine(dir, "people.ball");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+            Assert.Equal(0, (await Run("bounce", csv, ball)).Exit);
+            var before = File.ReadAllBytes(ball);
+
+            var result = await Run("bounce", ball);
+            Assert.Equal(0, result.Exit);
+            Assert.True(before.SequenceEqual(File.ReadAllBytes(ball)));
+            var sibling = Path.Combine(dir, "people.bounced.ball");
+            Assert.True(File.Exists(sibling), sibling);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Squish_DirectoryInput_NoOutput_Refuses()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            var hive = Path.Combine(dir, "hive");
+            File.WriteAllText(csv, "Site,Meas\nLab1,1\nLab2,2\n");
+            Assert.Equal(0, (await Run("squish", csv, hive, "--partition", "Site")).Exit);
+            Assert.True(Directory.Exists(hive));
+
+            var result = await Run("squish", hive, "--partition", "Site");
+            Assert.NotEqual(0, result.Exit);
+            Assert.Contains("Pass -o explicitly", result.StdErr);
+            Assert.True(Directory.Exists(hive));
+            Assert.True(Directory.Exists(Path.Combine(hive, "Site=Lab1")));
+            Assert.True(Directory.Exists(Path.Combine(hive, "Site=Lab2")));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
     private static async Task<(int Exit, string StdOut, string StdErr)> Run(params string[] args)
     {
         var stdout = new StringWriter();

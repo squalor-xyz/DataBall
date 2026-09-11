@@ -55,12 +55,24 @@ internal static class CliFormat
 
     internal static string DefaultBallPath(string input)
     {
-        return StripKnownSuffix(input) + ".ball";
+        var dest = StripKnownSuffix(input) + ".ball";
+        if (SamePath(dest, input))
+            dest = StripKnownSuffix(input) + ".bounced.ball";
+        return dest;
     }
 
     internal static string DefaultSquishDir(string input)
     {
+        if (Directory.Exists(input))
+            throw new DataBallException("Output path is the input path. Pass -o explicitly.");
         return StripKnownSuffix(input);
+    }
+
+    internal static bool SamePath(string a, string b)
+    {
+        var fa = Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var fb = Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        return fa == fb;
     }
 
     private static string StripKnownSuffix(string input)

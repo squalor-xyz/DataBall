@@ -60,6 +60,7 @@ internal static class CliApp
             await db.ImportAsync(input);
             await db.Bounce();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
+            RejectIfSamePath(input, dest);
             await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
             return 0;
         });
@@ -81,12 +82,14 @@ internal static class CliApp
                 if (cols.Length == 0)
                     throw new DataBallException("Partition columns are required");
                 var dir = string.IsNullOrEmpty(output) ? CliFormat.DefaultSquishDir(input) : output;
+                RejectIfSamePath(input, dir);
                 await db.Squish(dir, cols);
                 return 0;
             }
 
             await db.Squish();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
+            RejectIfSamePath(input, dest);
             await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
             return 0;
         });
@@ -119,6 +122,12 @@ internal static class CliApp
             WriteInfo(file, db, stdout);
             return 0;
         });
+    }
+
+    private static void RejectIfSamePath(string input, string dest)
+    {
+        if (CliFormat.SamePath(input, dest))
+            throw new DataBallException("Output path is the input path. Pass -o explicitly.");
     }
 
     private static async Task<int> RunAsync(TextWriter stderr, Func<Task<int>> action)

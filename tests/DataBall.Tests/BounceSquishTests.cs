@@ -313,6 +313,50 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public async Task Squish_DirectoryContainsForeignFiles_ThrowsAndPreservesThem()
+        {
+            var dir = TempDir();
+            try
+            {
+                var keep = Path.Combine(dir, "DO_NOT_DELETE.txt");
+                File.WriteAllText(keep, "keep");
+                using var db = new DataBall();
+                db.AddColumn("Site", new[] { "Lab1", "Lab2" });
+                db.AddColumn<int>("Meas", new[] { 1, 2 });
+                await Assert.ThrowsAsync<DataBallException>(() => db.Squish(dir, new[] { "Site" }));
+                Assert.True(File.Exists(keep), keep);
+                Assert.Equal("keep", File.ReadAllText(keep));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_DirectoryWithOnlyHivePartitions_Overwrites()
+        {
+            var dir = TempDir();
+            try
+            {
+                var stale = Path.Combine(dir, "Site=A");
+                Directory.CreateDirectory(stale);
+                File.WriteAllText(Path.Combine(stale, "data_0.parquet"), "stale");
+                using var db = new DataBall();
+                db.AddColumn("Site", new[] { "Lab1", "Lab2" });
+                db.AddColumn<int>("Meas", new[] { 1, 2 });
+                await db.Squish(dir, new[] { "Site" });
+                Assert.False(Directory.Exists(stale));
+                AssertHiveParquet(dir, "Site=Lab1");
+                AssertHiveParquet(dir, "Site=Lab2");
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public async Task Squish_PathWithoutPartitionColumns_DoesNotWrite()
         {
             var dir = TempDir();

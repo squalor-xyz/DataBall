@@ -122,6 +122,7 @@ namespace squalor.DataBall.Export
             Logger.LogInformation("Exporting to .ball at {0}", path);
             var dir = Path.Combine(Path.GetTempPath(), "databall-ball-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
+            string? tmp = null;
             try
             {
                 var hasTable = db.Store.DataTableExists();
@@ -154,10 +155,12 @@ namespace squalor.DataBall.Export
                 var destDir = Path.GetDirectoryName(Path.GetFullPath(path));
                 if (!string.IsNullOrEmpty(destDir))
                     Directory.CreateDirectory(destDir);
-                if (File.Exists(path))
-                    File.Delete(path);
 
-                using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+                tmp = path + ".tmp";
+                if (File.Exists(tmp))
+                    File.Delete(tmp);
+
+                using (var zip = ZipFile.Open(tmp, ZipArchiveMode.Create))
                 {
                     if (parquetPath is not null)
                         zip.CreateEntryFromFile(parquetPath, "data.parquet");
@@ -165,6 +168,8 @@ namespace squalor.DataBall.Export
                     if (configPath is not null)
                         zip.CreateEntryFromFile(configPath, "config.json");
                 }
+                File.Move(tmp, path, overwrite: true);
+                tmp = null;
                 Logger.LogInformation("Ball export completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
@@ -174,6 +179,8 @@ namespace squalor.DataBall.Export
             }
             finally
             {
+                if (tmp is not null && File.Exists(tmp))
+                    File.Delete(tmp);
                 if (Directory.Exists(dir))
                     Directory.Delete(dir, true);
             }
