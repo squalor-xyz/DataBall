@@ -520,6 +520,30 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void AddRow_CoercionFailure_LeavesTableUnchanged()
+        {
+            using var db = new DataBall();
+            db.AddColumn<int>("I", new[] { 1, 2 });
+            db.AddColumn("Name", new[] { "a", "b" });
+            Assert.Throws<DataBallException>(() =>
+                db.AddRow(new Dictionary<string, object?> { ["I"] = 3000000000L, ["Name"] = "x" }));
+            Assert.Equal(2, CountDataRows(db));
+        }
+
+        [Fact]
+        public void AddRows_MidBatchFailure_InsertsNothing()
+        {
+            using var db = new DataBall();
+            Assert.Throws<DataBallException>(() => db.AddRows(new[]
+            {
+                new Dictionary<string, object?> { ["I"] = 1, ["Name"] = "a" },
+                new Dictionary<string, object?> { ["I"] = 3000000000L, ["Name"] = "b" },
+                new Dictionary<string, object?> { ["I"] = 3, ["Name"] = "c" },
+            }));
+            Assert.Equal(0, CountDataRows(db));
+        }
+
+        [Fact]
         public async Task SaveAsync_WritesBall()
         {
             var dir = TempDir();

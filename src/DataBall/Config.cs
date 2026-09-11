@@ -283,6 +283,16 @@ namespace squalor.DataBall
 
         private static Config Normalize(Config config)
         {
+            config.Metadata ??= new();
+            config.Columns ??= new();
+            config.Relationships ??= new();
+            config.Csv ??= new();
+            config.Units ??= new();
+            config.Parameters ??= new();
+            config.Stimulus ??= new();
+            config.Classification ??= new();
+            config.MetadataFields ??= new();
+            config.MetadataFieldsAdd ??= new();
             config.Columns = new Dictionary<string, string>(config.Columns, StringComparer.OrdinalIgnoreCase);
             config.Units = new Dictionary<string, UnitSpec>(config.Units, StringComparer.OrdinalIgnoreCase);
             config.Parameters = new Dictionary<string, ParameterSpec>(config.Parameters, StringComparer.OrdinalIgnoreCase);

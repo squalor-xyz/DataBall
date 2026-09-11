@@ -37,10 +37,18 @@ namespace squalor.DataBall
             _store = new DuckDbStore(ValidateDatabasePath(databasePath));
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
-            _config = string.IsNullOrEmpty(configPath)
-                ? Config.CreateDefaults()
-                : Config.LoadMerged(configPath);
-            ApplyConfig(_config);
+            try
+            {
+                _config = string.IsNullOrEmpty(configPath)
+                    ? Config.CreateDefaults()
+                    : Config.LoadMerged(configPath);
+                ApplyConfig(_config);
+            }
+            catch
+            {
+                _store.Dispose();
+                throw;
+            }
         }
 
         private static string? ValidateDatabasePath(string? databasePath)

@@ -84,6 +84,53 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void Ctor_BadConfig_FileCanBeOpenedAgain()
+        {
+            var dir = TempDir();
+            var path = Path.Combine(dir, "session.duckdb");
+            var config = Path.Combine(dir, "bad.json");
+            File.WriteAllText(config, "{");
+            try
+            {
+                Assert.Throws<DataBallException>(() => new DataBall(config, databasePath: path));
+                using var db = new DataBall(databasePath: path);
+                db.AddColumn("Name", new[] { "Alice" });
+                Assert.Equal("Alice", Assert.Single(db.Query("SELECT Name FROM data"))["Name"]);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Theory]
+        [InlineData("""{"csv": null}""")]
+        [InlineData("""{"metadata": null}""")]
+        [InlineData("""{"relationships": null}""")]
+        [InlineData("""{"stimulus": null}""")]
+        [InlineData("""{"metadataFields": null}""")]
+        public void Ctor_ConfigWithExplicitNulls_DoesNotThrowNullReference(string json)
+        {
+            var dir = TempDir();
+            var path = Path.Combine(dir, "session.duckdb");
+            var config = Path.Combine(dir, "overlay.json");
+            File.WriteAllText(config, json);
+            try
+            {
+                using var db = new DataBall(config, databasePath: path);
+                Assert.NotNull(db.Schema.Csv);
+                Assert.NotNull(db.Schema.Metadata);
+                Assert.NotNull(db.Schema.Relationships);
+                Assert.NotNull(db.Schema.Stimulus);
+                Assert.NotNull(db.Schema.MetadataFields);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
         public void Ctor_MissingParentDirectory_Throws()
         {
             var dir = TempDir();

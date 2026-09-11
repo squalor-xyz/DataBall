@@ -414,9 +414,25 @@ namespace squalor.DataBall
             }
 
             var columns = GetColumns();
-            using var appender = _connection.CreateAppender("data");
+            var coercedRows = new List<object?[]>(rows.Count);
             foreach (var values in rows)
-                WriteAppenderRow(appender, columns, values);
+                coercedRows.Add(CoerceAppenderValues(columns, values));
+
+            using var tx = _connection.BeginTransaction();
+            try
+            {
+                using (var appender = _connection.CreateAppender("data"))
+                {
+                    foreach (var coerced in coercedRows)
+                        WriteCoercedAppenderRow(appender, coerced);
+                }
+                tx.Commit();
+            }
+            catch
+            {
+                tx.Rollback();
+                throw;
+            }
         }
 
         internal IReadOnlyDictionary<string, object?> SnapshotMetadata()
@@ -667,9 +683,15 @@ namespace squalor.DataBall
         {
             if (_disposed)
                 return;
-            _connection.Dispose();
-            ReleaseExclusivePath();
             _disposed = true;
+            try
+            {
+                _connection.Dispose();
+            }
+            finally
+            {
+                ReleaseExclusivePath();
+            }
         }
 
         private void ImportFromFunction(
@@ -896,9 +918,17 @@ namespace squalor.DataBall
             IReadOnlyList<(string Name, string DuckDbType)> columns,
             IReadOnlyDictionary<string, object?> values)
         {
-            var row = appender.CreateRow();
-            foreach (var (colName, duckType) in columns)
+            WriteCoercedAppenderRow(appender, CoerceAppenderValues(columns, values));
+        }
+
+        private static object?[] CoerceAppenderValues(
+            IReadOnlyList<(string Name, string DuckDbType)> columns,
+            IReadOnlyDictionary<string, object?> values)
+        {
+            var coerced = new object?[columns.Count];
+            for (var i = 0; i < columns.Count; i++)
             {
+                var (colName, duckType) = columns[i];
                 object? raw = null;
                 var present = false;
                 foreach (var pair in values)
@@ -910,15 +940,17 @@ namespace squalor.DataBall
                     break;
                 }
 
-                if (!present)
-                {
-                    row.AppendNullValue();
-                    continue;
-                }
-
-                var coerced = Coerce(raw, FromDuckDbType(duckType));
-                AppendObject(row, coerced);
+                coerced[i] = present ? Coerce(raw, FromDuckDbType(duckType)) : null;
             }
+
+            return coerced;
+        }
+
+        private static void WriteCoercedAppenderRow(DuckDBAppender appender, object?[] coerced)
+        {
+            var row = appender.CreateRow();
+            foreach (var value in coerced)
+                AppendObject(row, value);
             row.EndRow();
         }
 
