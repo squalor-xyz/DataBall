@@ -55,6 +55,34 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>
+        /// Returns the number of matching rows without materializing dictionaries.
+        /// </summary>
+        public long Count(SessionFilter filter)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(filter);
+            try
+            {
+                if (!_store.DataTableExists())
+                    throw new DataBallException("No data to filter");
+                var tableCols = _store.GetColumns();
+                var parameters = new List<DuckDBParameter>();
+                var where = BuildWhere(filter.Predicates, tableCols, parameters);
+                var sql = new StringBuilder("SELECT COUNT(*) AS c FROM \"data\"");
+                if (where.Length > 0)
+                    sql.Append(" WHERE ").Append(where);
+                var rows = _store.Query(sql.ToString(), parameters.ToArray());
+                if (rows.Count == 0)
+                    return 0;
+                return Convert.ToInt64(rows[0]["c"]);
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException("Filter failed", ex);
+            }
+        }
+
         internal ParameterizedSql? FilteredSelectOrNull()
         {
             return _currentFilter is null ? null : BuildSelectSql(_currentFilter);

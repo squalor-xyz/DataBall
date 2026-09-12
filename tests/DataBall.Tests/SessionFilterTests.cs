@@ -10,6 +10,22 @@ namespace squalor.DataBall.Tests
     public class SessionFilterTests
     {
         [Fact]
+        public void Count_EqualsPredicate_MatchesFilterRowCount()
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "fixtures", "semiconductor-sweep.csv");
+            using var db = DataBall.Open(path);
+            var filter = new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Temp", Op = PredicateOp.Eq, Value = 25.0 }
+                ]
+            };
+            Assert.Equal(db.Filter(filter).Count, db.Count(filter));
+            Assert.Equal(27, db.Count(filter));
+        }
+
+        [Fact]
         public void Filter_Equals_StringColumn()
         {
             using var db = People();
