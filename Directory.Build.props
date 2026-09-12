@@ -10,5 +10,6 @@
     <PackageProjectUrl>https://github.com/squalor-xyz/DataBall</PackageProjectUrl>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile Condition="'$(MSBuildProjectName)' == 'DataBall'">true</GenerateDocumentationFile>
   </PropertyGroup>
 </Project>

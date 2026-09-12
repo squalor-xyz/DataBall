@@ -212,12 +212,6 @@ namespace squalor.DataBall.Export
             if (name.EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase)
                 || name.EndsWith(".tgz", StringComparison.OrdinalIgnoreCase))
                 return (ArchiveType.Tar, CompressionType.GZip);
-            if (name.EndsWith(".tar.xz", StringComparison.OrdinalIgnoreCase)
-                || name.EndsWith(".txz", StringComparison.OrdinalIgnoreCase))
-            {
-                throw new DataBallException(
-                    "Export to .tar.xz/.txz is not supported (SharpCompress XZ is decompress-only). Import of .tar.xz is supported.");
-            }
             if (name.EndsWith(".tar", StringComparison.OrdinalIgnoreCase))
                 return (ArchiveType.Tar, CompressionType.None);
             return (ArchiveType.Zip, CompressionType.Deflate);

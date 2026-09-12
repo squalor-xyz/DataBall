@@ -657,8 +657,6 @@ namespace squalor.DataBall
 
                 if (distinct == 1 && (nulls == 0 || policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) is false))
                 {
-                    if (policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) && nulls > 0)
-                        continue;
                     _store.SetMetadata(match.Name, value);
                     _store.RemoveColumn(match.Name);
                     _expectedColumnTypes.Remove(match.Name);
