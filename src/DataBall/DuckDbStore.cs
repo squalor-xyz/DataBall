@@ -1105,7 +1105,7 @@ namespace squalor.DataBall
             }
         }
 
-        private static object? Coerce(object? value, Type target)
+        internal static object? Coerce(object? value, Type target)
         {
             if (value is null)
                 return null;
@@ -1124,7 +1124,7 @@ namespace squalor.DataBall
             }
         }
 
-        private static Type FromDuckDbType(string duckDbType)
+        internal static Type FromDuckDbType(string duckDbType)
         {
             return NormalizeType(duckDbType) switch
             {
@@ -1140,7 +1140,7 @@ namespace squalor.DataBall
             };
         }
 
-        private static string NormalizeType(string duckDbType)
+        internal static string NormalizeType(string duckDbType)
         {
             var t = duckDbType.Trim().ToUpperInvariant();
             if (t.StartsWith("TIMESTAMP", StringComparison.Ordinal))
@@ -1158,7 +1158,7 @@ namespace squalor.DataBall
             };
         }
 
-        private static bool IsDateType(string duckDbType)
+        internal static bool IsDateType(string duckDbType)
         {
             return NormalizeType(duckDbType) == "DATE";
         }
@@ -1173,7 +1173,7 @@ namespace squalor.DataBall
             return ClrTypeOf(value);
         }
 
-        private static object? UnwrapJson(JsonElement element)
+        internal static object? UnwrapJson(JsonElement element)
         {
             switch (element.ValueKind)
             {

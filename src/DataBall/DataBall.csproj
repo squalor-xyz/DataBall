@@ -18,4 +18,7 @@
     <!-- 0.50.4: NU1902 on ≤0.47.4. XZ is still decompress-only; tar.gz export must stay working. Never SharpCompress 1.0.0. -->
     <PackageReference Include="SharpCompress" Version="0.50.4" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataBall.Tests" />
+  </ItemGroup>
 </Project>
