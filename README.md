@@ -166,7 +166,7 @@ A `.ball` file is a ZIP of `data.parquet` + `metadata.json` (+ optional `config.
 
 ## Platforms
 
-Windows (win-x64 required; win-arm64 included) and macOS (osx-x64 / osx-arm64 required) are supported targets. Linux (linux-x64, linux-arm64) is included and tested in CI.
+Windows (`windows-latest` = win-x64; win-arm64 in the nupkg) and macOS (`macos-latest` = osx-arm64 via the portable `osx` RID) are CI-tested. Linux CI is `ubuntu-latest` = linux-x64; linux-arm64 is in the nupkg, not CI-tested.
 
 ## Troubleshooting
 
