@@ -137,7 +137,7 @@ namespace squalor.DataBall.Export
                 }
 
                 var metadataPath = Path.Combine(dir, "metadata.json");
-                File.WriteAllText(metadataPath, JsonSerializer.Serialize(new Dictionary<string, object?>(db.Metadata)));
+                File.WriteAllText(metadataPath, DuckDbStore.SerializeMetadataMap(db.Metadata));
 
                 string? configPath = null;
                 if (db.ExpectedColumnTypes.Count > 0 || db.Relationships.Count > 0)

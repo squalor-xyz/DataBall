@@ -642,6 +642,68 @@ namespace squalor.DataBall.Tests
             }
         }
 
+        [Fact]
+        public async Task BallRoundTrip_MetadataPreservesClrTypes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var when = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Unspecified);
+                var path = Path.Combine(dir, "types.ball");
+                using (var db = Sample())
+                {
+                    db.SetMetadata("N", 5L);
+                    db.SetMetadata("F", 1.25f);
+                    db.SetMetadata("T", when);
+                    await db.ExportAsync(path, ExportType.Ball);
+                }
+
+                using var imported = new DataBall();
+                await imported.ImportAsync(path);
+                Assert.Equal(5L, Assert.IsType<long>(imported.Metadata["N"]));
+                Assert.Equal(1.25f, Assert.IsType<float>(imported.Metadata["F"]));
+                Assert.Equal(when, Assert.IsType<DateTime>(imported.Metadata["T"]));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void FileBackedRoundTrip_MetadataPreservesClrTypes()
+        {
+            var dir = TempDir();
+            var path = Path.Combine(dir, "session.duckdb");
+            var when = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Unspecified);
+            try
+            {
+                using (var db = new DataBall(databasePath: path))
+                {
+                    db.SetMetadata("N", 5L);
+                    db.SetMetadata("F", 1.25f);
+                    db.SetMetadata("T", when);
+                    db.AddColumn("Name", new[] { "Alice" });
+                }
+
+                using var reopened = new DataBall(databasePath: path);
+                Assert.Equal(5L, Assert.IsType<long>(reopened.Metadata["N"]));
+                Assert.Equal(1.25f, Assert.IsType<float>(reopened.Metadata["F"]));
+                Assert.Equal(when, Assert.IsType<DateTime>(reopened.Metadata["T"]));
+            }
+            finally
+            {
+                try
+                {
+                    if (Directory.Exists(dir))
+                        Directory.Delete(dir, true);
+                }
+                catch (IOException)
+                {
+                }
+            }
+        }
+
         private static DataBall Sample()
         {
             var db = new DataBall();

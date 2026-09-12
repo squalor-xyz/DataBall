@@ -637,6 +637,21 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void AddColumn_AfterRowDeletion_AlignsValuesToRows()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", new[] { "A", "B", "C" });
+            db.Query("DELETE FROM \"data\" WHERE \"Name\" = 'B'");
+            db.AddColumn("Color", new[] { "red", "blue" });
+            var rows = db.Query("SELECT Name, Color FROM data ORDER BY Name");
+            Assert.Equal(2, rows.Count);
+            Assert.Equal("A", rows[0]["Name"]);
+            Assert.Equal("red", rows[0]["Color"]);
+            Assert.Equal("C", rows[1]["Name"]);
+            Assert.Equal("blue", rows[1]["Color"]);
+        }
+
+        [Fact]
         public async Task Roll_Ball_RoundTrips()
         {
             var dir = TempDir();

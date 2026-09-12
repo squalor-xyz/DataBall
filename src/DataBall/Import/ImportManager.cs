@@ -245,7 +245,7 @@ namespace squalor.DataBall.Import
             if (map is null)
                 return;
             foreach (var (key, element) in map)
-                db.SetMetadata(key, DuckDbStore.Unwrap(element));
+                db.SetMetadata(key, DuckDbStore.DeserializeMetadataValue(element));
         }
 
         private static string? FindExtractedFile(string dir, string fileName)

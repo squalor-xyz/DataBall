@@ -433,6 +433,54 @@ namespace squalor.DataBall.Tests
             Assert.False(rows[0].ContainsKey("N"));
         }
 
+        [Fact]
+        public async Task Bounce_WithStaleDataNewTable_SucceedsOrRollsBackCleanly()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Site", new[] { "A", "A", "A" });
+            db.AddColumn<int>("Meas", new[] { 1, 1, 2 });
+            db.Query("CREATE TABLE \"data_new\" AS SELECT 1 AS x");
+            var beforeRows = CountDataRows(db);
+            await db.Bounce();
+            var siteInMetadata = db.Metadata.ContainsKey("Site");
+            var siteStillColumn = ColumnNames(db).Any(n => n.Equals("Site", StringComparison.OrdinalIgnoreCase));
+            var afterRows = CountDataRows(db);
+            Assert.False(siteInMetadata && siteStillColumn);
+            if (siteInMetadata)
+            {
+                Assert.Equal("A", db.Metadata["Site"]);
+                Assert.Equal(2, afterRows);
+                await db.Bounce();
+            }
+            else
+            {
+                Assert.True(siteStillColumn);
+                Assert.Equal(beforeRows, afterRows);
+            }
+        }
+
+        [Fact]
+        public async Task InitializeRow_AfterBounce_CopiesLastCommittedRow()
+        {
+            using var db = new DataBall();
+            foreach (var seq in new[] { 5, 4, 3, 2, 1 })
+            {
+                db.InitializeRow(new Dictionary<string, object?>
+                {
+                    ["Seq"] = seq,
+                    ["Name"] = "r" + seq
+                });
+                db.CommitRow();
+            }
+
+            await db.Bounce();
+            db.InitializeRow();
+            db.ModifyField("Marker", "last");
+            db.CommitRow();
+            var row = Assert.Single(db.Query("SELECT Seq FROM data WHERE Marker = 'last'"));
+            Assert.Equal(1, Convert.ToInt32(row["Seq"]));
+        }
+
         private static string[] ColumnNames(DataBall db)
         {
             return db.Query("""

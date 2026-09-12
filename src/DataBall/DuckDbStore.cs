@@ -1,9 +1,11 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
 using DuckDB.NET.Data;
 
@@ -93,9 +95,7 @@ namespace squalor.DataBall
                 if (string.IsNullOrEmpty(key))
                     continue;
                 var stored = row["value"] as string;
-                object? value = stored is null
-                    ? null
-                    : Unwrap(JsonSerializer.Deserialize<JsonElement>(stored));
+                object? value = stored is null ? null : DeserializeMetadataValue(stored);
                 _metadata[key] = value;
             }
         }
@@ -298,8 +298,13 @@ namespace squalor.DataBall
 
                 Execute($"""
                     UPDATE "data" SET {qname} = "_addcol"."v"
-                    FROM "_addcol"
-                    WHERE "data".rowid = "_addcol"."rid"
+                    FROM "_addcol",
+                    (
+                        SELECT row_number() OVER () - 1 AS "_pos", rowid AS "_rid"
+                        FROM "data"
+                    ) "_ord"
+                    WHERE "data".rowid = "_ord"."_rid"
+                      AND "_addcol"."rid" = "_ord"."_pos"
                     """);
             }
             finally
@@ -447,7 +452,7 @@ namespace squalor.DataBall
             var unwrapped = Unwrap(value);
             _metadata[key] = unwrapped;
             var storedKey = _metadata.Keys.First(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
-            var json = JsonSerializer.Serialize(unwrapped);
+            var json = SerializeMetadataValue(unwrapped);
             ExecuteParameterized(
                 "INSERT OR REPLACE INTO \"meta\" (\"key\", \"value\") VALUES ($key, $value)",
                 Param("key", storedKey),
@@ -565,9 +570,18 @@ namespace squalor.DataBall
                     ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
                     : q;
             }));
-            Execute($"CREATE TABLE \"data_new\" AS SELECT {select} FROM \"data\"");
-            Execute("DROP TABLE \"data\"");
-            Execute("ALTER TABLE \"data_new\" RENAME TO \"data\"");
+            Execute("BEGIN TRANSACTION");
+            try
+            {
+                Execute($"CREATE OR REPLACE TABLE \"data\" AS SELECT {select} FROM \"data\"");
+                Execute("DROP TABLE IF EXISTS \"data_new\"");
+                Execute("COMMIT");
+            }
+            catch
+            {
+                try { Execute("ROLLBACK"); } catch { /* already failed */ }
+                throw;
+            }
         }
 
         internal void ImportParquet(string path, bool append)
@@ -1184,6 +1198,135 @@ namespace squalor.DataBall
                 default:
                     return element.GetRawText();
             }
+        }
+
+        internal void ReloadMetadata()
+        {
+            ThrowIfDisposed();
+            _metadata.Clear();
+            HydrateMetadata();
+        }
+
+        internal static string SerializeMetadataMap(IReadOnlyDictionary<string, object?> map)
+        {
+            ArgumentNullException.ThrowIfNull(map);
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                foreach (var pair in map)
+                {
+                    writer.WritePropertyName(pair.Key);
+                    WriteTagged(writer, Unwrap(pair.Value));
+                }
+                writer.WriteEndObject();
+            }
+
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
+        }
+
+        internal static string SerializeMetadataValue(object? value)
+        {
+            var buffer = new ArrayBufferWriter<byte>();
+            using (var writer = new Utf8JsonWriter(buffer))
+                WriteTagged(writer, Unwrap(value));
+            return Encoding.UTF8.GetString(buffer.WrittenSpan);
+        }
+
+        internal static object? DeserializeMetadataValue(string json)
+        {
+            var element = JsonSerializer.Deserialize<JsonElement>(json);
+            return DeserializeMetadataValue(element);
+        }
+
+        internal static object? DeserializeMetadataValue(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object
+                && element.TryGetProperty("t", out var tagEl)
+                && element.TryGetProperty("v", out var valueEl)
+                && tagEl.ValueKind == JsonValueKind.String)
+            {
+                var tag = tagEl.GetString();
+                return tag switch
+                {
+                    "null" => null,
+                    "i32" => valueEl.GetInt32(),
+                    "i64" => valueEl.GetInt64(),
+                    "f32" => valueEl.GetSingle(),
+                    "f64" => valueEl.GetDouble(),
+                    "bool" => valueEl.GetBoolean(),
+                    "str" => valueEl.GetString(),
+                    "dt" => DateTime.Parse(
+                        valueEl.GetString() ?? throw new DataBallException("DateTime metadata is missing"),
+                        CultureInfo.InvariantCulture,
+                        DateTimeStyles.RoundtripKind),
+                    _ => throw new DataBallException($"Unknown metadata type tag '{tag}'")
+                };
+            }
+
+            return UnwrapJson(element);
+        }
+
+        private static void WriteTagged(Utf8JsonWriter writer, object? value)
+        {
+            if (value is DateOnly dateOnly)
+                value = dateOnly.ToDateTime(TimeOnly.MinValue);
+
+            writer.WriteStartObject();
+            switch (value)
+            {
+                case null:
+                    writer.WriteString("t", "null");
+                    writer.WriteNull("v");
+                    break;
+                case int n:
+                    writer.WriteString("t", "i32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case long n:
+                    writer.WriteString("t", "i64");
+                    writer.WriteNumber("v", n);
+                    break;
+                case short n:
+                    writer.WriteString("t", "i32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case ushort n:
+                    writer.WriteString("t", "i32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case byte n:
+                    writer.WriteString("t", "i32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case sbyte n:
+                    writer.WriteString("t", "i32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case float n:
+                    writer.WriteString("t", "f32");
+                    writer.WriteNumber("v", n);
+                    break;
+                case double n:
+                    writer.WriteString("t", "f64");
+                    writer.WriteNumber("v", n);
+                    break;
+                case bool n:
+                    writer.WriteString("t", "bool");
+                    writer.WriteBoolean("v", n);
+                    break;
+                case string n:
+                    writer.WriteString("t", "str");
+                    writer.WriteString("v", n);
+                    break;
+                case DateTime n:
+                    writer.WriteString("t", "dt");
+                    writer.WriteString("v", n.ToString("o", CultureInfo.InvariantCulture));
+                    break;
+                default:
+                    throw new DataBallException($"Unsupported metadata type: {value.GetType().Name}");
+            }
+            writer.WriteEndObject();
         }
 
         internal static DuckDBParameter Param(string name, object? value)

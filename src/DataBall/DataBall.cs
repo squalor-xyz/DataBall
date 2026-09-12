@@ -122,6 +122,7 @@ namespace squalor.DataBall
             var list = values as IReadOnlyList<T> ?? values.ToList();
             _store.AddColumn(name, list);
             _expectedColumnTypes[name] = typeof(T);
+            RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
 
         /// <summary>
@@ -137,6 +138,7 @@ namespace squalor.DataBall
             var list = values as IReadOnlyList<string?> ?? values.ToList();
             _store.AddColumn(name, list);
             _expectedColumnTypes[name] = typeof(string);
+            RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
 
         /// <summary>
@@ -158,6 +160,7 @@ namespace squalor.DataBall
         {
             ThrowIfDisposed();
             _store.AddRow(values, _expectedColumnTypes);
+            RememberRow(values);
         }
 
         /// <summary>
@@ -173,6 +176,7 @@ namespace squalor.DataBall
             if (list.Count == 0)
                 return;
             _store.AddRows(list, _expectedColumnTypes);
+            RememberRow(list[list.Count - 1]);
         }
 
         /// <summary>
@@ -274,8 +278,32 @@ namespace squalor.DataBall
                 if (writePartitioned)
                     _store.ResolvePartitionColumns(partitionColumns!);
 
-                ExtractConstantsToMetadataSql(partitionColumns);
-                DistinctInPlace();
+                var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
+                try
+                {
+                    _store.Execute("BEGIN TRANSACTION");
+                    try
+                    {
+                        ExtractConstantsToMetadataSql(partitionColumns);
+                        DistinctInPlace();
+                        _store.Execute("COMMIT");
+                    }
+                    catch
+                    {
+                        try { _store.Execute("ROLLBACK"); } catch { /* already failed */ }
+                        throw;
+                    }
+                }
+                catch
+                {
+                    _store.ReloadMetadata();
+                    _expectedColumnTypes.Clear();
+                    foreach (var pair in expectedSnap)
+                        _expectedColumnTypes[pair.Key] = pair.Value;
+                    throw;
+                }
+
+                PruneLastCommittedRow();
                 if (writePartitioned)
                 {
                     _store.ExportPartitionedParquet(partitionedParquetPath!, partitionColumns!);
@@ -500,9 +528,8 @@ namespace squalor.DataBall
             // Extracting the last constant column drops "data"; DuckDB cannot DISTINCT a 0-column table.
             if (!_store.DataTableExists())
                 return;
-            _store.Execute("CREATE TABLE \"data_new\" AS SELECT DISTINCT * FROM \"data\"");
-            _store.Execute("DROP TABLE \"data\"");
-            _store.Execute("ALTER TABLE \"data_new\" RENAME TO \"data\"");
+            _store.Execute("CREATE OR REPLACE TABLE \"data\" AS SELECT DISTINCT * FROM \"data\"");
+            _store.Execute("DROP TABLE IF EXISTS \"data_new\"");
         }
 
         private void EnsureExpectedType(string name, Type actual)

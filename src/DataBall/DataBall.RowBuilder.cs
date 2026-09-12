@@ -10,6 +10,7 @@ namespace squalor.DataBall
         private Dictionary<string, object?>? _pendingRow;
         private Dictionary<string, object?>? _originalRow;
         private HashSet<string>? _modifiedFields;
+        private Dictionary<string, object?>? _lastCommittedRow;
 
         /// <summary>
         /// Starts a new pending row, copying values from the last committed row when one exists.
@@ -80,6 +81,7 @@ namespace squalor.DataBall
 
             EnsurePendingColumns();
             _store.AddRow(_pendingRow, _expectedColumnTypes);
+            RememberRow(_pendingRow);
             ClearPending();
             _logger.LogDebug("Committed row");
         }
@@ -148,11 +150,47 @@ namespace squalor.DataBall
 
         private Dictionary<string, object?>? LoadLastRow()
         {
+            if (_lastCommittedRow is not null)
+                return new Dictionary<string, object?>(_lastCommittedRow, StringComparer.OrdinalIgnoreCase);
             if (!_store.DataTableExists() || _store.RowCount() == 0)
                 return null;
-            var sql = $"SELECT * FROM {DuckDbStore.QuoteIdent("data")} ORDER BY rowid DESC LIMIT 1";
-            var rows = _store.Query(sql);
-            return rows.Count == 0 ? null : rows[0];
+            var rows = _store.Query($"SELECT * FROM {DuckDbStore.QuoteIdent("data")}");
+            return rows.Count == 0 ? null : rows[rows.Count - 1];
+        }
+
+        private void RememberRow(IReadOnlyDictionary<string, object?> row)
+        {
+            _lastCommittedRow = new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void RememberAddedColumn(string name, object? lastValue)
+        {
+            if (_lastCommittedRow is null)
+                return;
+            _lastCommittedRow[name] = lastValue;
+        }
+
+        private void PruneLastCommittedRow()
+        {
+            if (_lastCommittedRow is null)
+                return;
+            if (!_store.DataTableExists())
+            {
+                _lastCommittedRow = null;
+                return;
+            }
+
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, _) in _store.GetColumns())
+                cols.Add(name);
+            var keep = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in _lastCommittedRow)
+            {
+                if (cols.Contains(pair.Key))
+                    keep[pair.Key] = pair.Value;
+            }
+
+            _lastCommittedRow = keep.Count == 0 ? null : keep;
         }
 
         private void ClearPending()
