@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 using System.Globalization;
 using squalor.DataBall;
 using squalor.DataBall.Export;

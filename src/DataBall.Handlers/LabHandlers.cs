@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 namespace squalor.DataBall.Handlers
 {
     /// <summary>

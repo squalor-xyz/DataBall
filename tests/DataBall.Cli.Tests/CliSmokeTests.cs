@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 using System.IO;
 using squalor.DataBall.Cli;
 using Xunit;
