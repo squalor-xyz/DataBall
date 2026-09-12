@@ -29,10 +29,14 @@ namespace squalor.DataBall.Handlers
             return false;
         }
 
+        public bool DelegatesToGenericImport => true;
+
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,
+            Config schema,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            _ = schema;
             using var db = new DataBall();
             await db.ImportAsync(path);
             cancellationToken.ThrowIfCancellationRequested();

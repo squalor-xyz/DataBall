@@ -1,7 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace squalor.DataBall
 {
@@ -33,11 +34,23 @@ namespace squalor.DataBall
         /// <summary>
         /// Opens <paramref name="path"/> into a new session. Overlay schema JSON is optional.
         /// Registered handlers run before generic import.
+        /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
         /// <param name="path">File to open.</param>
         /// <param name="schemaPath">Optional overlay config JSON (merged onto native defaults).</param>
         /// <exception cref="DataBallException">Missing path/file, unknown format, or import failure.</exception>
         public static DataBall Open(string path, string? schemaPath = null)
+        {
+            return Task.Run(() => OpenAsync(path, schemaPath)).GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Async counterpart of <see cref="Open"/>. Prefer this from UI hosts.
+        /// </summary>
+        public static async Task<DataBall> OpenAsync(
+            string path,
+            string? schemaPath = null,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
@@ -48,17 +61,17 @@ namespace squalor.DataBall
             try
             {
                 var handler = FindHandler(path);
-                if (handler is not null)
+                if (handler is not null && !handler.DelegatesToGenericImport)
                 {
                     var batch = new List<IReadOnlyDictionary<string, object?>>();
-                    foreach (var row in handler.Parse(path).ToBlockingEnumerable())
+                    await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
                         batch.Add(row);
                     if (batch.Count > 0)
                         db.AddRows(batch);
                     return db;
                 }
 
-                db.ImportAsync(path).GetAwaiter().GetResult();
+                await db.ImportAsync(path).ConfigureAwait(false);
                 return db;
             }
             catch

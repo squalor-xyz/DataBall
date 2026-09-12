@@ -34,7 +34,7 @@ namespace squalor.DataBall.Tests
         public async Task CustomCsv_Parse_ObfuscatorFixture_RowCount81()
         {
             var rows = 0;
-            await foreach (var row in new CustomCsvHandler().Parse(Fixture()))
+            await foreach (var row in new CustomCsvHandler().Parse(Fixture(), Config.CreateDefaults()))
             {
                 rows++;
                 if (rows == 1)
@@ -52,6 +52,53 @@ namespace squalor.DataBall.Tests
             DataBall.RegisterHandler(new CustomCsvHandler());
             using var db = DataBall.Open(Fixture());
             Assert.Equal(81, db.Query("SELECT * FROM data").Count);
+        }
+
+        [Fact]
+        public void Open_WithHandler_AppliesOverlaySchema()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "databall-h15-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var csv = Path.Combine(dir, "press.csv");
+                File.WriteAllText(csv, "Wafer,Press(Torr),EVM(dB)\nW1,1,2.5\n");
+                var overlay = Path.Combine(dir, "overlay.json");
+                File.WriteAllText(overlay, """{"units":{"Torr":{"type":"double"}},"metadataFieldsAdd":["Wafer"]}""");
+
+                DataBall.RegisterHandler(new CustomCsvHandler());
+                using var withHandler = DataBall.Open(csv, overlay);
+                DataBall.ClearHandlers();
+                using var withoutHandler = DataBall.Open(csv, overlay);
+
+                AssertSameOverlayShape(withHandler, withoutHandler);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void Open_WithHandler_ExtractsConfiguredMetadata()
+        {
+            var dir = Path.Combine(Path.GetTempPath(), "databall-h15-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var csv = Path.Combine(dir, "lot.csv");
+                File.WriteAllText(csv, "Lot,EVM(dB)\nL1,1.5\nL1,2.0\n");
+                DataBall.RegisterHandler(new CustomCsvHandler());
+                using var db = DataBall.Open(csv);
+                Assert.Equal("L1", db.Metadata["Lot"]?.ToString());
+                var cols = db.Query("SELECT * FROM data LIMIT 1")[0];
+                Assert.False(cols.ContainsKey("Lot"));
+                Assert.True(cols.ContainsKey("EVM"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
         }
 
         [Fact]
@@ -88,9 +135,23 @@ namespace squalor.DataBall.Tests
             Assert.Contains("Production", ex.Message, StringComparison.OrdinalIgnoreCase);
         }
 
+        private static void AssertSameOverlayShape(DataBall withHandler, DataBall withoutHandler)
+        {
+            var withRow = Assert.Single(withHandler.Query("SELECT * FROM data"));
+            var withoutRow = Assert.Single(withoutHandler.Query("SELECT * FROM data"));
+            Assert.Equal(withoutRow.Keys.OrderBy(k => k, StringComparer.Ordinal), withRow.Keys.OrderBy(k => k, StringComparer.Ordinal));
+            Assert.False(withRow.ContainsKey("Wafer"));
+            Assert.Equal("W1", withHandler.Metadata["Wafer"]?.ToString());
+            Assert.Equal(withoutHandler.Metadata["Wafer"]?.ToString(), withHandler.Metadata["Wafer"]?.ToString());
+            Assert.IsType<double>(withRow["Press"]);
+            Assert.Equal(withoutRow["Press"]?.GetType(), withRow["Press"]?.GetType());
+            Assert.IsType<double>(withRow["EVM"]);
+            Assert.Equal(withoutRow["EVM"]?.GetType(), withRow["EVM"]?.GetType());
+        }
+
         private static void Drain(IFormatHandler handler, string path)
         {
-            handler.Parse(path).ToBlockingEnumerable().ToList();
+            handler.Parse(path, Config.CreateDefaults()).ToBlockingEnumerable().ToList();
         }
 
         private static string Fixture()

@@ -15,8 +15,10 @@ namespace squalor.DataBall.Handlers
 
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,
+            Config schema,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {
+            _ = schema;
             await Task.Yield();
             cancellationToken.ThrowIfCancellationRequested();
             throw new DataBallException(

@@ -19,10 +19,19 @@ namespace squalor.DataBall
         bool CanHandle(string path, Stream sniff);
 
         /// <summary>
+        /// When true, <see cref="DataBall.Open"/> runs generic <c>ImportAsync</c> on the outer
+        /// session (with overlay schema) instead of draining <see cref="Parse"/>.
+        /// Custom CSV is a sniffer, not a second importer.
+        /// </summary>
+        bool DelegatesToGenericImport => false;
+
+        /// <summary>
         /// Yields canonical session rows (column name → value) for <paramref name="path"/>.
+        /// <paramref name="schema"/> is the overlay-merged config from <see cref="DataBall.Open"/>.
         /// </summary>
         IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,
+            Config schema,
             CancellationToken cancellationToken = default);
     }
 }
