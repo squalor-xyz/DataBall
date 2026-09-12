@@ -185,6 +185,133 @@ namespace squalor.DataBall.Tests
             Assert.Throws<DataBallException>(() => db.Filter(new SessionFilter()));
         }
 
+        [Fact]
+        public void Filter_TimestampWithSubMillisecondPrecision_MatchesStoredRow()
+        {
+            using var db = TimestampSession();
+            var stored = StoredSubMillisecond(db);
+            var rows = db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Ts", Op = PredicateOp.Eq, Value = stored }
+                ]
+            });
+            var row = Assert.Single(rows);
+            Assert.Equal(stored, Assert.IsType<DateTime>(row["Ts"]));
+        }
+
+        [Fact]
+        public void Filter_TimestampInclusiveUpperBound_IncludesRow()
+        {
+            using var db = TimestampSession();
+            var stored = StoredSubMillisecond(db);
+            var rows = db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Ts", Op = PredicateOp.Le, Value = stored }
+                ]
+            });
+            Assert.Contains(rows, r => Equals(r["Ts"], stored));
+            Assert.Equal(2, rows.Count);
+        }
+
+        [Fact]
+        public void Filter_DateOnlyPredicate_FiltersOrThrows()
+        {
+            using var db = new DataBall();
+            db.AddColumn<DateTime>("Day", new[]
+            {
+                new DateTime(2024, 1, 1),
+                new DateTime(2024, 1, 2),
+                new DateTime(2024, 6, 1)
+            });
+            var rows = db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Day", Op = PredicateOp.Ge, Value = new DateOnly(2024, 1, 2) }
+                ]
+            });
+            Assert.Equal(2, rows.Count);
+            var days = rows.Select(r => Assert.IsType<DateTime>(r["Day"]).Date).OrderBy(d => d).ToArray();
+            Assert.Equal(new[] { new DateTime(2024, 1, 2), new DateTime(2024, 6, 1) }, days);
+        }
+
+        [Fact]
+        public void Filter_EqualsNull_MatchesNullRows()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", new string?[] { "Alice", null, "Bob" });
+            var rows = db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Name", Op = PredicateOp.Eq, Value = null }
+                ]
+            });
+            var row = Assert.Single(rows);
+            Assert.Null(row["Name"]);
+        }
+
+        [Fact]
+        public void Filter_NonFiniteDouble_ThrowsDataBallException()
+        {
+            using var db = new DataBall();
+            db.AddColumn<double>("X", new[] { 1.0 });
+            var ex = Assert.Throws<DataBallException>(() => db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "X", Op = PredicateOp.Eq, Value = double.NaN }
+                ]
+            }));
+            Assert.DoesNotContain("Referenced column", ex.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Filter_RangeNullBound_ThrowsDataBallException()
+        {
+            using var db = People();
+            Assert.Throws<DataBallException>(() => db.Filter(new SessionFilter
+            {
+                Predicates =
+                [
+                    new ColumnPredicate { Column = "Age", Op = PredicateOp.Range, Value = 20, ValueTo = null }
+                ]
+            }));
+        }
+
+        [Fact]
+        public async System.Threading.Tasks.Task ApplyFilter_ExportCsv_TimestampFilter_RowCountMatchesFilter()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = TimestampSession();
+                var stored = StoredSubMillisecond(db);
+                var filter = new SessionFilter
+                {
+                    Predicates =
+                    [
+                        new ColumnPredicate { Column = "Ts", Op = PredicateOp.Eq, Value = stored }
+                    ]
+                };
+                var expected = db.Filter(filter).Count;
+                db.ApplyFilter(filter);
+                var csv = Path.Combine(dir, "filtered.csv");
+                await db.ExportAsync(csv, ExportType.Csv);
+                using var opened = DataBall.Open(csv);
+                Assert.Equal(expected, opened.Query("SELECT * FROM data").Count);
+                Assert.Equal(1, expected);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
         private static DataBall People()
         {
             var dir = TempDir();
@@ -198,6 +325,27 @@ namespace squalor.DataBall.Tests
             {
                 Directory.Delete(dir, true);
             }
+        }
+
+        private static DataBall TimestampSession()
+        {
+            var db = new DataBall();
+            db.AddColumn<DateTime>("Ts", new[]
+            {
+                new DateTime(2024, 1, 1),
+                new DateTime(2024, 1, 1).AddTicks(12345)
+            });
+            return db;
+        }
+
+        private static DateTime StoredSubMillisecond(DataBall db)
+        {
+            var values = db.Query("SELECT Ts FROM data ORDER BY Ts")
+                .Select(r => Assert.IsType<DateTime>(r["Ts"]))
+                .ToArray();
+            Assert.Equal(2, values.Length);
+            Assert.NotEqual(values[0], values[1]);
+            return values[1];
         }
 
         private static string TempDir()

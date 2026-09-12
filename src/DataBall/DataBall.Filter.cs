@@ -1,12 +1,14 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text;
+using DuckDB.NET.Data;
 
 namespace squalor.DataBall
 {
+    internal readonly record struct ParameterizedSql(string Sql, DuckDBParameter[] Parameters);
+
     public sealed partial class DataBall
     {
         private SessionFilter? _currentFilter;
@@ -44,7 +46,8 @@ namespace squalor.DataBall
             ArgumentNullException.ThrowIfNull(filter);
             try
             {
-                return _store.Query(BuildSelectSql(filter));
+                var built = BuildSelectSql(filter);
+                return _store.Query(built.Sql, built.Parameters);
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
@@ -52,23 +55,24 @@ namespace squalor.DataBall
             }
         }
 
-        internal string? FilteredSelectOrNull()
+        internal ParameterizedSql? FilteredSelectOrNull()
         {
             return _currentFilter is null ? null : BuildSelectSql(_currentFilter);
         }
 
-        private string BuildSelectSql(SessionFilter filter)
+        private ParameterizedSql BuildSelectSql(SessionFilter filter)
         {
             if (!_store.DataTableExists())
                 throw new DataBallException("No data to filter");
 
             var tableCols = _store.GetColumns();
             var select = BuildSelectList(filter.Columns, tableCols);
-            var where = BuildWhere(filter.Predicates, tableCols);
+            var parameters = new List<DuckDBParameter>();
+            var where = BuildWhere(filter.Predicates, tableCols, parameters);
             var sql = new StringBuilder("SELECT ").Append(select).Append(" FROM \"data\"");
             if (where.Length > 0)
                 sql.Append(" WHERE ").Append(where);
-            return sql.ToString();
+            return new ParameterizedSql(sql.ToString(), parameters.ToArray());
         }
 
         private static string BuildSelectList(
@@ -95,7 +99,8 @@ namespace squalor.DataBall
 
         private static string BuildWhere(
             IReadOnlyList<ColumnPredicate> predicates,
-            IReadOnlyList<(string Name, string DuckDbType)> tableCols)
+            IReadOnlyList<(string Name, string DuckDbType)> tableCols,
+            List<DuckDBParameter> parameters)
         {
             if (predicates is null || predicates.Count == 0)
                 return "";
@@ -108,11 +113,11 @@ namespace squalor.DataBall
                 var q = DuckDbStore.QuoteIdent(name);
                 clauses.Add(pred.Op switch
                 {
-                    PredicateOp.Eq => $"{q} = {SqlLiteral(pred.Value)}",
-                    PredicateOp.Ge => $"{q} >= {SqlLiteral(pred.Value)}",
-                    PredicateOp.Le => $"{q} <= {SqlLiteral(pred.Value)}",
-                    PredicateOp.Range => $"{q} >= {SqlLiteral(pred.Value)} AND {q} <= {SqlLiteral(pred.ValueTo)}",
-                    PredicateOp.In => InClause(q, pred.Value),
+                    PredicateOp.Eq => EqClause(q, pred.Value, parameters),
+                    PredicateOp.Ge => $"{q} >= {Bind(pred.Value, parameters)}",
+                    PredicateOp.Le => $"{q} <= {Bind(pred.Value, parameters)}",
+                    PredicateOp.Range => RangeClause(q, pred.Value, pred.ValueTo, parameters),
+                    PredicateOp.In => InClause(q, pred.Value, parameters),
                     _ => throw new DataBallException($"Unknown predicate op '{pred.Op}'")
                 });
             }
@@ -132,30 +137,69 @@ namespace squalor.DataBall
             return match.Name;
         }
 
-        private static string InClause(string quotedColumn, object? value)
+        private static string EqClause(string quotedColumn, object? value, List<DuckDBParameter> parameters)
+        {
+            value = DuckDbStore.Unwrap(value);
+            if (value is null)
+                return $"{quotedColumn} IS NULL";
+            return $"{quotedColumn} = {Bind(value, parameters)}";
+        }
+
+        private static string RangeClause(
+            string quotedColumn,
+            object? value,
+            object? valueTo,
+            List<DuckDBParameter> parameters)
+        {
+            if (DuckDbStore.Unwrap(value) is null || DuckDbStore.Unwrap(valueTo) is null)
+                throw new DataBallException("Range predicate requires both bounds");
+            return $"{quotedColumn} >= {Bind(value, parameters)} AND {quotedColumn} <= {Bind(valueTo, parameters)}";
+        }
+
+        private static string InClause(string quotedColumn, object? value, List<DuckDBParameter> parameters)
         {
             if (value is string or null || value is not IEnumerable enumerable)
                 throw new DataBallException("IN predicate requires a non-string list");
 
             var items = new List<string>();
             foreach (var item in enumerable)
-                items.Add(SqlLiteral(item));
+                items.Add(Bind(item, parameters));
             if (items.Count == 0)
                 throw new DataBallException("IN predicate list is empty");
             return $"{quotedColumn} IN ({string.Join(", ", items)})";
         }
 
-        private static string SqlLiteral(object? value)
+        private static string Bind(object? value, List<DuckDBParameter> parameters)
+        {
+            var name = $"p{parameters.Count}";
+            parameters.Add(DuckDbStore.Param(name, BindValue(value)));
+            return "$" + name;
+        }
+
+        private static object BindValue(object? value)
         {
             value = DuckDbStore.Unwrap(value);
             if (value is null)
-                return "NULL";
+                throw new DataBallException("Filter value cannot be null");
             return value switch
             {
-                bool b => b ? "TRUE" : "FALSE",
-                string s => DuckDbStore.QuoteString(s),
-                DateTime dt => DuckDbStore.QuoteString(dt.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)),
-                IFormattable n => n.ToString(null, CultureInfo.InvariantCulture) ?? "NULL",
+                bool b => b,
+                string s => s,
+                DateTime dt => dt,
+                DateOnly d => d.ToDateTime(TimeOnly.MinValue),
+                DateTimeOffset dto => dto.DateTime,
+                sbyte n => n,
+                byte n => n,
+                short n => n,
+                ushort n => n,
+                int n => n,
+                uint n => n,
+                long n => n,
+                ulong n => n,
+                decimal n => n,
+                float f when float.IsFinite(f) => f,
+                double d when double.IsFinite(d) => d,
+                float or double => throw new DataBallException("Non-finite filter value"),
                 _ => throw new DataBallException($"Unsupported filter value type: {value.GetType().Name}")
             };
         }

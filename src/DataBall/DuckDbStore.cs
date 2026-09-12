@@ -186,13 +186,12 @@ namespace squalor.DataBall
             }
         }
 
-        internal List<Dictionary<string, object?>> Query(string sql)
+        internal List<Dictionary<string, object?>> Query(string sql, params DuckDBParameter[] parameters)
         {
             ThrowIfDisposed();
             try
             {
-                using var cmd = _connection.CreateCommand();
-                cmd.CommandText = sql;
+                using var cmd = CreateCommand(sql, parameters ?? []);
                 using var reader = cmd.ExecuteReader();
                 return ReadRows(reader);
             }
@@ -603,14 +602,14 @@ namespace squalor.DataBall
             }
         }
 
-        internal void ExportCsv(string path, string? selectSql = null)
+        internal void ExportCsv(string path, ParameterizedSql? select = null)
         {
-            ExportTo(path, "FORMAT CSV, HEADER true", selectSql);
+            ExportTo(path, "FORMAT CSV, HEADER true", select);
         }
 
-        internal void ExportParquet(string path, string? selectSql = null)
+        internal void ExportParquet(string path, ParameterizedSql? select = null)
         {
-            ExportTo(path, "FORMAT PARQUET", selectSql);
+            ExportTo(path, "FORMAT PARQUET", select);
         }
 
         internal IReadOnlyList<string> ResolvePartitionColumns(IReadOnlyList<string> partitionColumns)
@@ -718,7 +717,7 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExportTo(string path, string copyOptions, string? selectSql = null)
+        private void ExportTo(string path, string copyOptions, ParameterizedSql? select = null)
         {
             ThrowIfDisposed();
             if (!DataTableExists())
@@ -728,8 +727,13 @@ namespace squalor.DataBall
             var dir = Path.GetDirectoryName(Path.GetFullPath(path));
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
-            var source = string.IsNullOrEmpty(selectSql) ? "\"data\"" : "(" + selectSql + ")";
-            Execute($"COPY {source} TO {QuotePath(path)} ({copyOptions})");
+            var source = select is null ? "\"data\"" : "(" + select.Value.Sql + ")";
+            var sql = $"COPY {source} TO {QuotePath(path)} ({copyOptions})";
+            var parameters = select?.Parameters ?? [];
+            if (parameters.Length > 0)
+                ExecuteParameterized(sql, parameters);
+            else
+                Execute(sql);
         }
 
         private void ApplyMetadataAgainstSource(string sourceTable)
@@ -1182,7 +1186,7 @@ namespace squalor.DataBall
             }
         }
 
-        private static DuckDBParameter Param(string name, object? value)
+        internal static DuckDBParameter Param(string name, object? value)
         {
             return new DuckDBParameter(name, value ?? DBNull.Value);
         }
