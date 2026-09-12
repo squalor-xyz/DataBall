@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using SharpCompress.Archives;
 using SharpCompress.Readers;
 using squalor.DataBall.Export;
@@ -17,8 +16,6 @@ namespace squalor.DataBall.Import
     /// </summary>
     public static class ImportManager
     {
-        private static readonly ILogger Logger = NullLogger.Instance;
-
         /// <summary>
         /// Imports data from a Parquet file into the DataBall instance asynchronously.
         /// </summary>
@@ -29,16 +26,16 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static Task ImportFromParquet(DataBall db, string path, bool append)
         {
-            Logger.LogInformation("Importing Parquet from {0}, append={1}", path, append);
+            db.Logger.LogInformation("Importing Parquet from {Path}, append={Append}", path, append);
             try
             {
                 db.Store.ImportParquet(path, append);
-                Logger.LogInformation("Parquet import completed");
+                db.Logger.LogInformation("Parquet import completed");
                 return Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Parquet import failed");
+                db.Logger.LogError(ex, "Parquet import failed");
                 throw new DataBallException("Failed to import Parquet file", ex);
             }
         }
@@ -53,16 +50,16 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromCsv(DataBall db, string path, bool append)
         {
-            Logger.LogInformation("Importing CSV from {0}, append={1}", path, append);
+            db.Logger.LogInformation("Importing CSV from {Path}, append={Append}", path, append);
             try
             {
                 db.Store.ImportCsv(path, append, db.ExpectedColumnTypes);
-                db.ApplyCsvSchema(path);
-                Logger.LogInformation("CSV import completed");
+                db.ApplyCsvSchema();
+                db.Logger.LogInformation("CSV import completed");
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "CSV import failed");
+                db.Logger.LogError(ex, "CSV import failed");
                 throw new DataBallException("Failed to import CSV file", ex);
             }
         }
@@ -76,24 +73,47 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromArchive(DataBall db, string path, bool append)
         {
-            Logger.LogInformation("Importing archive from {0}, append={1}", path, append);
+            db.Logger.LogInformation("Importing archive from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-in-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             try
             {
+                var rowsBefore = db.Store.DataTableExists() ? db.Store.RowCount() : 0;
+                Exception? factoryError = null;
+                var imported = false;
+
                 // ArchiveFactory.Open cannot identify xz; skip it for those extensions.
-                var imported = IsXzArchivePath(path)
-                    ? ImportArchiveViaReader(db, path, dir, append)
-                    : ImportArchiveViaFactory(db, path, dir, append)
-                        || ImportArchiveViaReader(db, path, dir, append);
+                if (!IsXzArchivePath(path))
+                {
+                    try
+                    {
+                        imported = ImportArchiveViaFactory(db, path, dir, append);
+                    }
+                    catch (Exception ex) when (ex is not DataBallException)
+                    {
+                        db.Logger.LogError(ex, "Archive factory import failed for {Path}", path);
+                        factoryError = ex;
+                        var rowsNow = db.Store.DataTableExists() ? db.Store.RowCount() : 0;
+                        if (rowsNow > rowsBefore)
+                            throw new DataBallException("Failed to import archive", ex);
+                    }
+                }
 
                 if (!imported)
+                    imported = ImportArchiveViaReader(db, path, dir, append);
+
+                if (!imported)
+                {
+                    if (factoryError is not null)
+                        throw new DataBallException("Failed to import archive", factoryError);
                     throw new DataBallException("Archive contains no CSV files");
-                Logger.LogInformation("Archive import completed");
+                }
+
+                db.Logger.LogInformation("Archive import completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
-                Logger.LogError(ex, "Archive import failed");
+                db.Logger.LogError(ex, "Archive import failed");
                 throw new DataBallException("Failed to import archive", ex);
             }
             finally
@@ -113,7 +133,7 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromBall(DataBall db, string path, bool append)
         {
-            Logger.LogInformation("Importing .ball from {0}, append={1}", path, append);
+            db.Logger.LogInformation("Importing .ball from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-ball-in-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             try
@@ -131,11 +151,11 @@ namespace squalor.DataBall.Import
                 if (configPath is not null)
                     db.ApplyImportedConfig(Config.LoadConfig(configPath));
 
-                Logger.LogInformation("Ball import completed");
+                db.Logger.LogInformation("Ball import completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
-                Logger.LogError(ex, "Ball import failed");
+                db.Logger.LogError(ex, "Ball import failed");
                 throw new DataBallException("Failed to import .ball file", ex);
             }
             finally
@@ -145,27 +165,7 @@ namespace squalor.DataBall.Import
             }
         }
 
-        internal static ExportType DetectImportFormat(string path)
-        {
-            if (Directory.Exists(path))
-                return ExportType.Parquet;
-
-            var fileName = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(fileName))
-                throw new DataBallException($"Unknown import format for '{path}'");
-
-            if (EndsWith(fileName, ".tar.gz") || EndsWith(fileName, ".tgz")
-                || EndsWith(fileName, ".tar.xz") || EndsWith(fileName, ".txz")
-                || EndsWith(fileName, ".tar") || EndsWith(fileName, ".zip"))
-                return ExportType.Archive;
-            if (EndsWith(fileName, ".ball"))
-                return ExportType.Ball;
-            if (EndsWith(fileName, ".csv"))
-                return ExportType.Csv;
-            if (EndsWith(fileName, ".parquet"))
-                return ExportType.Parquet;
-            throw new DataBallException($"Unknown import format for '{path}'");
-        }
+        internal static ExportType DetectImportFormat(string path) => DataBall.DetectFormat(path);
 
         private static bool ImportArchiveViaFactory(DataBall db, string path, string dir, bool append)
         {
@@ -191,8 +191,8 @@ namespace squalor.DataBall.Import
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
-                // Unrecognized stream (e.g. some compressed tars); ReaderFactory is the fallback.
-                return false;
+                db.Logger.LogError(ex, "Archive factory could not read {Path}", path);
+                throw;
             }
         }
 
@@ -234,7 +234,7 @@ namespace squalor.DataBall.Import
                 using (var fileStream = File.Create(dest))
                     entryStream.CopyTo(fileStream);
                 db.Store.ImportCsv(dest, append, db.ExpectedColumnTypes);
-                db.ApplyCsvSchema(dest);
+                db.ApplyCsvSchema();
             }
         }
 
@@ -267,11 +267,6 @@ namespace squalor.DataBall.Import
             if (!combined.StartsWith(prefix, StringComparison.Ordinal))
                 throw new DataBallException("Archive entry path is outside the extraction directory");
             return combined;
-        }
-
-        private static bool EndsWith(string fileName, string suffix)
-        {
-            return fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
         }
     }
 }

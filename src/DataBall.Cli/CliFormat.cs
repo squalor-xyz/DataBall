@@ -21,24 +21,14 @@ internal static class CliFormat
 
     internal static ExportType DetectExportType(string path)
     {
-        if (Directory.Exists(path))
-            return ExportType.Parquet;
-
-        var fileName = Path.GetFileName(path);
-        if (string.IsNullOrEmpty(fileName))
+        try
+        {
+            return DataBall.DetectFormat(path);
+        }
+        catch (DataBallException)
+        {
             throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|ball|archive.");
-
-        if (EndsWith(fileName, ".tar.gz") || EndsWith(fileName, ".tgz")
-            || EndsWith(fileName, ".tar.xz") || EndsWith(fileName, ".txz")
-            || EndsWith(fileName, ".tar") || EndsWith(fileName, ".zip"))
-            return ExportType.Archive;
-        if (EndsWith(fileName, ".ball"))
-            return ExportType.Ball;
-        if (EndsWith(fileName, ".csv"))
-            return ExportType.Csv;
-        if (EndsWith(fileName, ".parquet"))
-            return ExportType.Parquet;
-        throw new DataBallException($"Cannot detect format from '{path}'. Use --format csv|parquet|ball|archive.");
+        }
     }
 
     internal static ExportType ParseFormat(string value)
@@ -92,7 +82,4 @@ internal static class CliFormat
 
         return input;
     }
-
-    private static bool EndsWith(string fileName, string suffix)
-        => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
 }

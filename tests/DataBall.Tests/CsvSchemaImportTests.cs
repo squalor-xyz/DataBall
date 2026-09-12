@@ -69,6 +69,65 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void Import_HeaderWithTrailingComma_Succeeds()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "trail.csv");
+                File.WriteAllText(csv, "Freq(GHz),EVM(dB),\n2.4,-30,\n");
+                using var db = DataBall.Open(csv);
+                var row = Assert.Single(db.Query("SELECT Freq, EVM FROM data"));
+                Assert.IsType<double>(row["Freq"]);
+                Assert.IsType<double>(row["EVM"]);
+                Assert.Equal(2.4, Convert.ToDouble(row["Freq"]), 3);
+                Assert.Equal(-30.0, Convert.ToDouble(row["EVM"]), 3);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void Import_LeadingBlankLine_StillAppliesSchema()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "blank.csv");
+                File.WriteAllText(csv, "\nFreq(GHz),EVM(dB)\n2.4,-30\n");
+                using var db = DataBall.Open(csv);
+                var row = Assert.Single(db.Query("SELECT Freq, EVM FROM data"));
+                Assert.IsType<double>(row["Freq"]);
+                Assert.IsType<double>(row["EVM"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void Import_SemicolonDelimiter_AppliesSchema()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "semi.csv");
+                File.WriteAllText(csv, "Freq(GHz);EVM(dB)\n2.4;-30\n");
+                using var db = DataBall.Open(csv);
+                var row = Assert.Single(db.Query("SELECT Freq, EVM FROM data"));
+                Assert.IsType<double>(row["Freq"]);
+                Assert.IsType<double>(row["EVM"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public void ImportCsv_ClassificationOverlay()
         {
             var dir = TempDir();

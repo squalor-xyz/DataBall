@@ -5,7 +5,6 @@ using System.IO.Compression;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using SharpCompress.Common;
 using SharpCompress.Writers;
 
@@ -16,8 +15,6 @@ namespace squalor.DataBall.Export
     /// </summary>
     public static class ExportManager
     {
-        private static readonly ILogger Logger = NullLogger.Instance;
-
         /// <summary>
         /// Exports the DataBall to a Parquet file asynchronously.
         /// </summary>
@@ -27,16 +24,16 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static Task ExportToParquet(DataBall db, string path)
         {
-            Logger.LogInformation("Exporting to Parquet at {0}", path);
+            db.Logger.LogInformation("Exporting to Parquet at {Path}", path);
             try
             {
                 db.Store.ExportParquet(path);
-                Logger.LogInformation("Parquet export completed");
+                db.Logger.LogInformation("Parquet export completed");
                 return Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Parquet export failed");
+                db.Logger.LogError(ex, "Parquet export failed");
                 throw new DataBallException("Failed to export Parquet", ex);
             }
         }
@@ -51,7 +48,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static Task ExportToPartitionedParquet(DataBall db, string path, string[] partitionColumns)
         {
-            Logger.LogInformation("Exporting to partitioned Parquet at {0}", path);
+            db.Logger.LogInformation("Exporting to partitioned Parquet at {Path}", path);
             try
             {
                 if (partitionColumns.Length == 0)
@@ -62,12 +59,12 @@ namespace squalor.DataBall.Export
                 {
                     db.Store.ExportPartitionedParquet(path, partitionColumns);
                 }
-                Logger.LogInformation("Partitioned Parquet export completed");
+                db.Logger.LogInformation("Partitioned Parquet export completed");
                 return Task.CompletedTask;
             }
             catch (Exception ex)
             {
-                Logger.LogError(ex, "Partitioned Parquet export failed");
+                db.Logger.LogError(ex, "Partitioned Parquet export failed");
                 throw new DataBallException("Failed to export partitioned Parquet", ex);
             }
         }
@@ -80,7 +77,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static void ExportToArchive(DataBall db, string path)
         {
-            Logger.LogInformation("Exporting to archive {0}", path);
+            db.Logger.LogInformation("Exporting to archive {Path}", path);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             try
@@ -96,11 +93,11 @@ namespace squalor.DataBall.Export
                 using var writer = WriterFactory.OpenWriter(fs, archiveType, new WriterOptions(compressionType));
                 using var csvStream = File.OpenRead(csvPath);
                 writer.Write("data.csv", csvStream);
-                Logger.LogInformation("Archive export completed");
+                db.Logger.LogInformation("Archive export completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
-                Logger.LogError(ex, "Archive export failed");
+                db.Logger.LogError(ex, "Archive export failed");
                 throw new DataBallException("Archive export failed", ex);
             }
             finally
@@ -119,7 +116,7 @@ namespace squalor.DataBall.Export
         /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
         public static void ExportToBall(DataBall db, string path)
         {
-            Logger.LogInformation("Exporting to .ball at {0}", path);
+            db.Logger.LogInformation("Exporting to .ball at {Path}", path);
             var dir = Path.Combine(Path.GetTempPath(), "databall-ball-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             string? tmp = null;
@@ -170,11 +167,11 @@ namespace squalor.DataBall.Export
                 }
                 File.Move(tmp, path, overwrite: true);
                 tmp = null;
-                Logger.LogInformation("Ball export completed");
+                db.Logger.LogInformation("Ball export completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
             {
-                Logger.LogError(ex, "Ball export failed");
+                db.Logger.LogError(ex, "Ball export failed");
                 throw new DataBallException("Failed to export .ball file", ex);
             }
             finally

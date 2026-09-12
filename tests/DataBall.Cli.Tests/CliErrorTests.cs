@@ -25,6 +25,30 @@ public class CliErrorTests
     }
 
     [Fact]
+    public async Task Import_MissingOutput_WritesUsageToStderr()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+
+            var result = await Run("import", csv);
+            Assert.NotEqual(0, result.Exit);
+            Assert.True(
+                result.StdErr.Contains("import", StringComparison.OrdinalIgnoreCase)
+                || result.StdErr.Contains("Usage", StringComparison.OrdinalIgnoreCase)
+                || result.StdErr.Contains("Required", StringComparison.OrdinalIgnoreCase),
+                result.StdErr);
+            Assert.DoesNotContain("Usage", result.StdOut, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task Query_MissingFile_NonZero()
     {
         var result = await Run("query", "/no/such.csv", "SELECT 1");
@@ -125,6 +149,27 @@ public class CliErrorTests
             var result = await Run("query", csv, "SELECT nope FROM data");
             Assert.Equal(1, result.Exit);
             Assert.False(string.IsNullOrWhiteSpace(result.StdErr));
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
+    public async Task Query_BadSql_Verbose_PrintsFullException()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "in.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+
+            var quiet = await Run("query", csv, "SELECT nope FROM data");
+            var verbose = await Run("--verbose", "query", csv, "SELECT nope FROM data");
+            Assert.Equal(1, verbose.Exit);
+            Assert.True(verbose.StdErr.Length > quiet.StdErr.Length, verbose.StdErr);
+            Assert.Contains("DuckDB", verbose.StdErr, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {

@@ -7,13 +7,19 @@ public static class CommandFactory
     public static RootCommand CreateRootCommand(TextWriter stdout, TextWriter stderr)
     {
         var root = new RootCommand("Import, export, compact, and query DataBall files");
+        var verboseOption = new Option<bool>("--verbose")
+        {
+            Description = "Print full exception details",
+            Recursive = true,
+        };
+        root.Options.Add(verboseOption);
 
-        root.Subcommands.Add(CreateImportCommand(stderr));
-        root.Subcommands.Add(CreateExportCommand(stderr));
-        root.Subcommands.Add(CreateBounceCommand(stderr));
-        root.Subcommands.Add(CreateSquishCommand(stderr));
-        root.Subcommands.Add(CreateQueryCommand(stdout, stderr));
-        root.Subcommands.Add(CreateInfoCommand(stdout, stderr));
+        root.Subcommands.Add(CreateImportCommand(stderr, verboseOption));
+        root.Subcommands.Add(CreateExportCommand(stderr, verboseOption));
+        root.Subcommands.Add(CreateBounceCommand(stderr, verboseOption));
+        root.Subcommands.Add(CreateSquishCommand(stderr, verboseOption));
+        root.Subcommands.Add(CreateQueryCommand(stdout, stderr, verboseOption));
+        root.Subcommands.Add(CreateInfoCommand(stdout, stderr, verboseOption));
         return root;
     }
 
@@ -21,14 +27,13 @@ public static class CommandFactory
     {
         var root = CreateRootCommand(stdout, stderr);
         var parseResult = root.Parse(args);
-        parseResult.InvocationConfiguration.Output = stdout;
         parseResult.InvocationConfiguration.Error = stderr;
-        // Testhost has no process-control handles for SCL's SIGINT registration.
         parseResult.InvocationConfiguration.ProcessTerminationTimeout = null;
+        parseResult.InvocationConfiguration.Output = parseResult.Errors.Count > 0 ? stderr : stdout;
         return await parseResult.InvokeAsync();
     }
 
-    private static Command CreateImportCommand(TextWriter stderr)
+    private static Command CreateImportCommand(TextWriter stderr, Option<bool> verboseOption)
     {
         var inputArg = new Argument<string>("input")
         {
@@ -61,11 +66,12 @@ public static class CommandFactory
                 parseResult.GetValue(outputOption)!,
                 parseResult.GetValue(appendOption),
                 parseResult.GetValue(configOption),
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 
-    private static Command CreateExportCommand(TextWriter stderr)
+    private static Command CreateExportCommand(TextWriter stderr, Option<bool> verboseOption)
     {
         var inputArg = new Argument<string>("input")
         {
@@ -91,11 +97,12 @@ public static class CommandFactory
                 parseResult.GetValue(inputArg)!,
                 parseResult.GetValue(outputArg)!,
                 parseResult.GetValue(formatOption),
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 
-    private static Command CreateBounceCommand(TextWriter stderr)
+    private static Command CreateBounceCommand(TextWriter stderr, Option<bool> verboseOption)
     {
         var inputArg = new Argument<string>("input")
         {
@@ -116,11 +123,12 @@ public static class CommandFactory
             await CliApp.Bounce(
                 parseResult.GetValue(inputArg)!,
                 parseResult.GetValue(outputArg),
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 
-    private static Command CreateSquishCommand(TextWriter stderr)
+    private static Command CreateSquishCommand(TextWriter stderr, Option<bool> verboseOption)
     {
         var inputArg = new Argument<string>("input")
         {
@@ -147,11 +155,12 @@ public static class CommandFactory
                 parseResult.GetValue(inputArg)!,
                 parseResult.GetValue(outputArg),
                 parseResult.GetValue(partitionOption),
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 
-    private static Command CreateQueryCommand(TextWriter stdout, TextWriter stderr)
+    private static Command CreateQueryCommand(TextWriter stdout, TextWriter stderr, Option<bool> verboseOption)
     {
         var fileArg = new Argument<string>("file")
         {
@@ -172,11 +181,12 @@ public static class CommandFactory
                 parseResult.GetValue(fileArg)!,
                 parseResult.GetValue(sqlArg)!,
                 stdout,
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 
-    private static Command CreateInfoCommand(TextWriter stdout, TextWriter stderr)
+    private static Command CreateInfoCommand(TextWriter stdout, TextWriter stderr, Option<bool> verboseOption)
     {
         var fileArg = new Argument<string>("file")
         {
@@ -191,7 +201,8 @@ public static class CommandFactory
             await CliApp.InfoAsync(
                 parseResult.GetValue(fileArg)!,
                 stdout,
-                stderr));
+                stderr,
+                parseResult.GetValue(verboseOption)));
         return command;
     }
 }

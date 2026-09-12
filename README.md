@@ -158,7 +158,7 @@ databall query session.ball "SELECT * FROM data LIMIT 10"
 databall info session.ball
 ```
 
-`bounce` without an output path writes a sibling `.ball`. `query` prints TSV to stdout.
+`bounce` without an output path writes a sibling `.ball`. `query` prints TSV to stdout. It is a local escape hatch and must not be exposed at a service boundary.
 
 ## .ball format
 

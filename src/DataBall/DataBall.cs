@@ -88,6 +88,8 @@ namespace squalor.DataBall
             }
         }
 
+        internal ILogger Logger => _logger;
+
         internal IReadOnlyDictionary<string, Type> ExpectedColumnTypes => _expectedColumnTypes;
 
         internal IReadOnlyList<Relationship> Relationships => _relationships;
@@ -347,7 +349,7 @@ namespace squalor.DataBall
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
 
-            var format = ImportManager.DetectImportFormat(path);
+            var format = DetectFormat(path);
             if (!File.Exists(path) && !Directory.Exists(path))
                 throw new DataBallException($"File not found: {path}");
 
@@ -360,7 +362,7 @@ namespace squalor.DataBall
                 {
                     case ExportType.Csv:
                         _store.ImportCsv(path, append, _expectedColumnTypes);
-                        ApplyCsvSchema(path);
+                        ApplyCsvSchema();
                         break;
                     case ExportType.Parquet:
                         _store.ImportParquet(path, append);
@@ -545,12 +547,44 @@ namespace squalor.DataBall
             ApplyConfig(_config);
         }
 
-        internal void ApplyCsvSchema(string csvPath)
+        /// <summary>
+        /// Detects import/export format from a path. Directories are Parquet (hive).
+        /// Compound suffixes (<c>.tar.gz</c>, <c>.tar.xz</c>) are matched before short ones.
+        /// </summary>
+        public static ExportType DetectFormat(string path)
+        {
+            if (Directory.Exists(path))
+                return ExportType.Parquet;
+
+            var fileName = Path.GetFileName(path);
+            if (string.IsNullOrEmpty(fileName))
+                throw new DataBallException($"Unknown import format for '{path}'");
+
+            if (EndsWithSuffix(fileName, ".tar.gz") || EndsWithSuffix(fileName, ".tgz")
+                || EndsWithSuffix(fileName, ".tar.xz") || EndsWithSuffix(fileName, ".txz")
+                || EndsWithSuffix(fileName, ".tar") || EndsWithSuffix(fileName, ".zip"))
+                return ExportType.Archive;
+            if (EndsWithSuffix(fileName, ".ball"))
+                return ExportType.Ball;
+            if (EndsWithSuffix(fileName, ".csv"))
+                return ExportType.Csv;
+            if (EndsWithSuffix(fileName, ".parquet"))
+                return ExportType.Parquet;
+            throw new DataBallException($"Unknown import format for '{path}'");
+        }
+
+        private static bool EndsWithSuffix(string fileName, string suffix)
+            => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
+
+        internal void ApplyCsvSchema()
         {
             if (!_store.DataTableExists())
                 return;
 
-            var headers = ReadCsvHeaders(csvPath);
+            var headers = _store.GetColumns()
+                .Select(c => c.Name)
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .ToList();
             if (headers.Count == 0)
                 return;
 
@@ -634,54 +668,6 @@ namespace squalor.DataBall
                 if (policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase) && distinct > 1)
                     throw new DataBallException($"Metadata field '{match.Name}' is not constant");
             }
-        }
-
-        private static IReadOnlyList<string> ReadCsvHeaders(string path)
-        {
-            using var reader = new StreamReader(path);
-            var line = reader.ReadLine();
-            if (string.IsNullOrWhiteSpace(line))
-                return Array.Empty<string>();
-            if (line.Length > 0 && line[0] == '\uFEFF')
-                line = line[1..];
-            return SplitCsvLine(line);
-        }
-
-        private static List<string> SplitCsvLine(string line)
-        {
-            var result = new List<string>();
-            var current = new System.Text.StringBuilder();
-            var inQuotes = false;
-            for (var i = 0; i < line.Length; i++)
-            {
-                var ch = line[i];
-                if (inQuotes)
-                {
-                    if (ch == '"')
-                    {
-                        if (i + 1 < line.Length && line[i + 1] == '"')
-                        {
-                            current.Append('"');
-                            i++;
-                        }
-                        else
-                            inQuotes = false;
-                    }
-                    else
-                        current.Append(ch);
-                }
-                else if (ch == '"')
-                    inQuotes = true;
-                else if (ch == ',')
-                {
-                    result.Add(current.ToString().Trim());
-                    current.Clear();
-                }
-                else
-                    current.Append(ch);
-            }
-            result.Add(current.ToString().Trim());
-            return result;
         }
 
         private void ThrowIfDisposed()

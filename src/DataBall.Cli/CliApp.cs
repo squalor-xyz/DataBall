@@ -11,9 +11,10 @@ internal static class CliApp
         string output,
         bool append,
         string? configPath,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall(configPath);
             if (append && File.Exists(output))
@@ -35,9 +36,10 @@ internal static class CliApp
         string input,
         string output,
         string? format,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall();
             await db.ImportAsync(input);
@@ -52,9 +54,10 @@ internal static class CliApp
     internal static Task<int> Bounce(
         string input,
         string? output,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall();
             await db.ImportAsync(input);
@@ -70,9 +73,10 @@ internal static class CliApp
         string input,
         string? output,
         string? partition,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall();
             await db.ImportAsync(input);
@@ -99,9 +103,10 @@ internal static class CliApp
         string file,
         string sql,
         TextWriter stdout,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall();
             await db.ImportAsync(file);
@@ -113,9 +118,10 @@ internal static class CliApp
     internal static Task<int> InfoAsync(
         string file,
         TextWriter stdout,
-        TextWriter stderr)
+        TextWriter stderr,
+        bool verbose = false)
     {
-        return RunAsync(stderr, async () =>
+        return RunAsync(stderr, verbose, async () =>
         {
             using var db = new DataBall();
             await db.ImportAsync(file);
@@ -130,7 +136,7 @@ internal static class CliApp
             throw new DataBallException("Output path is the input path. Pass -o explicitly.");
     }
 
-    private static async Task<int> RunAsync(TextWriter stderr, Func<Task<int>> action)
+    private static async Task<int> RunAsync(TextWriter stderr, bool verbose, Func<Task<int>> action)
     {
         try
         {
@@ -140,7 +146,7 @@ internal static class CliApp
         {
             stderr.WriteLine(ex.Message);
             if (ex.InnerException is not null)
-                stderr.WriteLine(ex.InnerException.Message);
+                stderr.WriteLine(verbose ? ex.InnerException.ToString() : ex.InnerException.Message);
             return 1;
         }
         catch (OperationCanceledException)
@@ -149,7 +155,7 @@ internal static class CliApp
         }
         catch (Exception ex)
         {
-            stderr.WriteLine(ex.Message);
+            stderr.WriteLine(verbose ? ex.ToString() : ex.Message);
             return 1;
         }
     }

@@ -643,6 +643,49 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void Import_ArchiveFallback_DoesNotDoubleImport()
+        {
+            var dir = TempDir();
+            try
+            {
+                var zipPath = Path.Combine(dir, "mixed.zip");
+                using (var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create))
+                {
+                    using (var s = zip.CreateEntry("x.csv").Open())
+                    using (var w = new StreamWriter(s))
+                        w.Write("Name,Age\nAlice,30\nBob,25\n");
+                    using (var s = zip.CreateEntry("x.csv/y.csv").Open())
+                    using (var w = new StreamWriter(s))
+                        w.Write("Name,Age\nAlice,30\n");
+                }
+
+                using var db = new DataBall();
+                try
+                {
+                    ImportManager.ImportFromArchive(db, zipPath, append: false);
+                }
+                catch (DataBallException)
+                {
+                }
+
+                var alice = 0;
+                if (db.Query("""
+                    SELECT COUNT(*) AS c FROM information_schema.tables
+                    WHERE table_schema = 'main' AND table_name = 'data'
+                    """)[0]["c"] is { } c && Convert.ToInt64(c) > 0)
+                {
+                    alice = db.Query("SELECT Name FROM data WHERE Name = 'Alice'").Count;
+                }
+
+                Assert.Equal(1, alice);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
         public async Task BallRoundTrip_MetadataPreservesClrTypes()
         {
             var dir = TempDir();
