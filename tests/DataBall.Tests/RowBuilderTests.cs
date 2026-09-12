@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Xunit;
 
 namespace squalor.DataBall.Tests
@@ -139,7 +140,6 @@ namespace squalor.DataBall.Tests
                 var rows = db.Query("SELECT * FROM \"data\" ORDER BY rowid");
                 Assert.Equal(2, rows.Count);
                 Assert.Null(rows[0]["Age"]);
-                Assert.NotEqual(0, rows[0]["Age"] ?? -1);
                 Assert.Equal("Alice", rows[1]["Name"]);
                 Assert.Equal(30, Convert.ToInt32(rows[1]["Age"]));
                 Assert.IsType<int>(rows[1]["Age"]);
@@ -246,11 +246,26 @@ namespace squalor.DataBall.Tests
         [Fact]
         public void Dispose_WithPending_DoesNotThrowOrCommit()
         {
-            using var db = new DataBall();
-            db.AddColumn("Name", new[] { "Alice" });
-            db.InitializeRow();
-            db.ModifyField("Name", "Bob");
-            db.Dispose();
+            var dir = Path.Combine(Path.GetTempPath(), "databall-rb-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            var path = Path.Combine(dir, "session.duckdb");
+            try
+            {
+                using (var db = new DataBall(databasePath: path))
+                {
+                    db.AddColumn("Name", new[] { "Alice" });
+                    db.InitializeRow();
+                    db.ModifyField("Name", "Bob");
+                }
+
+                using var reopened = new DataBall(databasePath: path);
+                var names = reopened.Query("SELECT Name FROM data").Select(r => r["Name"]?.ToString()).ToArray();
+                Assert.Equal(new[] { "Alice" }, names);
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch (IOException) { }
+            }
         }
 
         [Fact]

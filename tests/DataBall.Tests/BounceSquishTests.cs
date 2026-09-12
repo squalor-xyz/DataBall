@@ -129,23 +129,17 @@ namespace squalor.DataBall.Tests
         [Fact]
         public async Task Squish_WithoutPath_MatchesBounce()
         {
-            using var bounced = new DataBall();
-            using var squished = new DataBall();
-            bounced.AddColumn("Site", new[] { "A", "A", "B" });
-            bounced.AddColumn<int>("Meas", new[] { 1, 1, 2 });
-            squished.AddColumn("Site", new[] { "A", "A", "B" });
-            squished.AddColumn<int>("Meas", new[] { 1, 1, 2 });
-            await bounced.Bounce();
-            await squished.Squish();
-            Assert.Equal(bounced.Metadata.Count, squished.Metadata.Count);
-            var bounceRows = bounced.Query("SELECT \"Site\", \"Meas\" FROM \"data\" ORDER BY \"Site\", \"Meas\"");
-            var squishRows = squished.Query("SELECT \"Site\", \"Meas\" FROM \"data\" ORDER BY \"Site\", \"Meas\"");
-            Assert.Equal(bounceRows.Count, squishRows.Count);
-            for (int i = 0; i < bounceRows.Count; i++)
-            {
-                Assert.Equal(bounceRows[i]["Site"], squishRows[i]["Site"]);
-                Assert.Equal(Convert.ToInt32(bounceRows[i]["Meas"]), Convert.ToInt32(squishRows[i]["Meas"]));
-            }
+            using var db = new DataBall();
+            db.AddColumn("Site", new[] { "A", "A", "B" });
+            db.AddColumn<int>("Meas", new[] { 1, 1, 2 });
+            await db.Squish();
+            Assert.False(db.Metadata.ContainsKey("Site"));
+            var rows = db.Query("SELECT \"Site\", \"Meas\" FROM \"data\" ORDER BY \"Site\", \"Meas\"");
+            Assert.Equal(2, rows.Count);
+            Assert.Equal("A", rows[0]["Site"]?.ToString());
+            Assert.Equal(1, Convert.ToInt32(rows[0]["Meas"]));
+            Assert.Equal("B", rows[1]["Site"]?.ToString());
+            Assert.Equal(2, Convert.ToInt32(rows[1]["Meas"]));
         }
 
         [Fact]

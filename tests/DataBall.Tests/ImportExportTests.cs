@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Text.Json;
@@ -253,33 +252,18 @@ namespace squalor.DataBall.Tests
         [Fact]
         public async Task Archive_TarXz_Import_FromHandBuiltFile()
         {
-            if (!XzAvailable())
-                return;
+            var xz = Path.Combine(AppContext.BaseDirectory, "fixtures", "people.tar.xz");
+            var txz = Path.Combine(AppContext.BaseDirectory, "fixtures", "people.txz");
+            Assert.True(File.Exists(xz), xz);
+            Assert.True(File.Exists(txz), txz);
 
-            var dir = TempDir();
-            try
-            {
-                var tar = Path.Combine(dir, "people.tar");
-                using (var db = Sample())
-                    await db.ExportAsync(tar, ExportType.Archive);
+            using var imported = new DataBall();
+            await imported.ImportAsync(xz);
+            AssertPeople(imported);
 
-                var xz = Path.Combine(dir, "people.tar.xz");
-                CompressWithXz(tar, xz);
-
-                using var imported = new DataBall();
-                await imported.ImportAsync(xz);
-                AssertPeople(imported);
-
-                var txz = Path.Combine(dir, "people.txz");
-                File.Copy(xz, txz);
-                using var importedTxz = new DataBall();
-                await importedTxz.ImportAsync(txz);
-                AssertPeople(importedTxz);
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
+            using var importedTxz = new DataBall();
+            await importedTxz.ImportAsync(txz);
+            AssertPeople(importedTxz);
         }
 
         [Fact]
@@ -768,51 +752,6 @@ namespace squalor.DataBall.Tests
         private static string EntryName(ZipArchiveEntry entry)
         {
             return entry.FullName.Replace('\\', '/');
-        }
-
-        private static bool XzAvailable()
-        {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "xz",
-                    ArgumentList = { "--version" },
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                };
-                using var proc = Process.Start(psi);
-                if (proc is null)
-                    return false;
-                proc.WaitForExit(2000);
-                return proc.ExitCode == 0;
-            }
-            catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or FileNotFoundException)
-            {
-                return false;
-            }
-        }
-
-        private static void CompressWithXz(string tarPath, string xzPath)
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = "xz",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                UseShellExecute = false,
-            };
-            psi.ArgumentList.Add("-c");
-            psi.ArgumentList.Add("--");
-            psi.ArgumentList.Add(tarPath);
-            using var proc = Process.Start(psi)
-                ?? throw new InvalidOperationException("xz is required to build the .tar.xz import fixture");
-            using (var fs = File.Create(xzPath))
-                proc.StandardOutput.BaseStream.CopyTo(fs);
-            proc.WaitForExit();
-            if (proc.ExitCode != 0)
-                throw new InvalidOperationException(proc.StandardError.ReadToEnd());
         }
 
         private static string TempDir()

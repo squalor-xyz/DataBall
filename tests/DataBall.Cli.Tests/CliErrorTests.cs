@@ -53,9 +53,7 @@ public class CliErrorTests
     {
         var result = await Run("query", "/no/such.csv", "SELECT 1");
         Assert.Equal(1, result.Exit);
-        Assert.True(
-            result.StdErr.Contains("File not found") || result.StdErr.Contains("/no/such.csv"),
-            result.StdErr);
+        Assert.Contains("File not found", result.StdErr);
     }
 
     [Fact]

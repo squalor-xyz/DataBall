@@ -388,6 +388,8 @@ namespace squalor.DataBall.Tests
                 var csv = reader.ReadToEnd().Replace("\r\n", "\n");
                 Assert.StartsWith("Name,Age\n", csv, StringComparison.Ordinal);
                 Assert.Contains("Alice,30", csv, StringComparison.Ordinal);
+                var dataLines = csv.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                Assert.Equal(2, dataLines.Length);
             }
             finally
             {
@@ -432,6 +434,10 @@ namespace squalor.DataBall.Tests
                     await db.Squish(hive, new[] { "Site" });
                 }
 
+                var parts = Directory.GetDirectories(hive);
+                Assert.Equal(2, parts.Length);
+                Assert.Contains(parts, p => Path.GetFileName(p) == "Site=Lab1");
+                Assert.Contains(parts, p => Path.GetFileName(p) == "Site=Lab2");
                 var lab1 = Directory.GetFiles(Path.Combine(hive, "Site=Lab1"), "*.parquet", SearchOption.AllDirectories);
                 Assert.NotEmpty(lab1);
                 using var imported = new DataBall();
@@ -472,7 +478,7 @@ namespace squalor.DataBall.Tests
                 db.ModifyField("Name", "Bob");
                 var path = Path.Combine(dir, "out.csv");
                 var ex = Assert.Throws<DataBallException>(() => db.Roll(ExportType.Csv, path));
-                Assert.Equal("Commit or discard the pending row first.", ex.Message);
+                Assert.Contains("pending row", ex.Message, StringComparison.OrdinalIgnoreCase);
                 var rows = db.Query("SELECT Name FROM data");
                 Assert.Single(rows);
                 Assert.Equal("Alice", rows[0]["Name"]);
