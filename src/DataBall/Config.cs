@@ -255,16 +255,17 @@ namespace squalor.DataBall
             if (src.Relationships.Count > 0)
             {
                 dest.Relationships.Clear();
-                dest.Relationships.AddRange(src.Relationships);
+                foreach (var rel in src.Relationships)
+                    dest.Relationships.Add(CloneRelationship(rel));
             }
 
             if (src.Csv.HeaderPatterns.Count > 0)
                 dest.Csv.HeaderPatterns = new List<string>(src.Csv.HeaderPatterns);
 
             foreach (var (k, v) in src.Units)
-                dest.Units[k] = v;
+                dest.Units[k] = CloneUnit(v);
             foreach (var (k, v) in src.Parameters)
-                dest.Parameters[k] = v;
+                dest.Parameters[k] = CloneParameter(v);
             if (src.Stimulus.Count > 0)
                 dest.Stimulus = new List<string>(src.Stimulus);
             if (src.Classification.Count > 0)
@@ -318,6 +319,42 @@ namespace squalor.DataBall
             Apply(config.Stimulus, ParameterRole.Stimulus);
             Apply(config.Classification, ParameterRole.Classification);
             Apply(config.MetadataFields, ParameterRole.Metadata);
+        }
+
+        internal Config Clone()
+        {
+            var dest = new Config();
+            CopyInto(dest, this);
+            return dest;
+        }
+
+        private static UnitSpec CloneUnit(UnitSpec spec)
+        {
+            if (spec is null)
+                return new UnitSpec();
+            return new UnitSpec
+            {
+                Type = spec.Type,
+                Aliases = spec.Aliases is null ? new List<string>() : new List<string>(spec.Aliases)
+            };
+        }
+
+        private static ParameterSpec CloneParameter(ParameterSpec spec)
+        {
+            if (spec is null)
+                return new ParameterSpec();
+            return new ParameterSpec { Role = spec.Role, Type = spec.Type };
+        }
+
+        private static Relationship CloneRelationship(Relationship rel)
+        {
+            if (rel is null)
+                return new Relationship();
+            return new Relationship
+            {
+                TriggerField = rel.TriggerField,
+                ResetFields = rel.ResetFields is null ? new List<string>() : new List<string>(rel.ResetFields)
+            };
         }
 
         private static bool ContainsName(IEnumerable<string> names, string name)

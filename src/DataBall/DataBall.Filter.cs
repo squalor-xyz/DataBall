@@ -40,6 +40,7 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Returns matching rows via DuckDB <c>SELECT</c>. Does not mutate the session table.
+        /// Each row is a caller-owned copy; mutating it does not change the store.
         /// </summary>
         public IReadOnlyList<Dictionary<string, object?>> Filter(SessionFilter filter)
         {

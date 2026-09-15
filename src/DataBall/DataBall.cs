@@ -14,6 +14,7 @@ namespace squalor.DataBall
 {
     /// <summary>
     /// Represents a versatile data handling class for test executive applications.
+    /// Instances are not thread-safe; one session per owner.
     /// </summary>
     public sealed partial class DataBall : IDisposable
     {
@@ -96,9 +97,10 @@ namespace squalor.DataBall
         internal IReadOnlyList<Relationship> Relationships => _relationships;
 
         /// <summary>
-        /// Gets the merged schema config (native defaults plus any overlay file).
+        /// Gets a snapshot of the merged schema config (native defaults plus any overlay file).
+        /// Mutating the returned object does not affect the session.
         /// </summary>
-        public Config Schema => _config;
+        public Config Schema => _config.Clone();
 
         /// <summary>
         /// Sets a metadata value.
@@ -184,6 +186,7 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Executes SQL against the in-memory store and returns rows as dictionaries.
+        /// Each row is a caller-owned copy; mutating it does not change the store.
         /// </summary>
         /// <param name="sql">The SQL to execute.</param>
         /// <returns>Query results as dictionaries keyed by column name.</returns>

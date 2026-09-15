@@ -14,6 +14,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace squalor.DataBall
 {
+    /// <summary>
+    /// DuckDB-backed session store. Instances are not thread-safe; one session per owner.
+    /// </summary>
     internal sealed class DuckDbStore : IDisposable
     {
         private static readonly object FileGate = new();

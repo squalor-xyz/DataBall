@@ -13,8 +13,10 @@ namespace squalor.DataBall
         private static readonly List<IFormatHandler> Handlers = new();
 
         /// <summary>
-        /// Registers a format handler. First match from <see cref="IFormatHandler.CanHandle"/> wins.
+        /// Registers a format handler on the process-wide, host-owned registry.
+        /// First match from <see cref="IFormatHandler.CanHandle"/> wins.
         /// Generic CSV / Parquet / archive / <c>.ball</c> need no handler.
+        /// Duplicates are the caller's problem; tests should <see cref="ClearHandlers"/> first.
         /// </summary>
         public static void RegisterHandler(IFormatHandler handler)
         {
@@ -24,7 +26,8 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Clears the process-wide handler registry (tests and host reset).
+        /// Clears the process-wide handler registry. Affects every registrant in this process
+        /// (tests and host reset).
         /// </summary>
         public static void ClearHandlers()
         {
