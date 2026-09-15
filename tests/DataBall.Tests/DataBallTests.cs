@@ -164,6 +164,49 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void AddColumn_EmptyTable_Succeeds()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", Array.Empty<string>());
+            Assert.Empty(db.Query("SELECT * FROM \"data\""));
+            db.AddColumn<int>("Age", Array.Empty<int>());
+            Assert.Empty(db.Query("SELECT * FROM \"data\""));
+        }
+
+        [Fact]
+        public void AddColumn_LargeTable_AlignsValuesToRows()
+        {
+            using var db = new DataBall();
+            const int n = 50_000;
+            var ids = new int[n];
+            var twice = new int[n];
+            for (var i = 0; i < n; i++)
+            {
+                ids[i] = i;
+                twice[i] = i * 2;
+            }
+
+            db.AddColumn("Id", ids);
+            try
+            {
+                db.Query("SET threads=8");
+            }
+            catch (DataBallException)
+            {
+                // SET may not return a result set; alignment must still hold.
+            }
+
+            db.AddColumn("Twice", twice);
+            var rows = db.Query("SELECT \"Id\", \"Twice\" FROM \"data\"");
+            Assert.Equal(n, rows.Count);
+            foreach (var row in rows)
+            {
+                var id = Convert.ToInt32(row["Id"]);
+                Assert.Equal(id * 2, Convert.ToInt32(row["Twice"]));
+            }
+        }
+
+        [Fact]
         public void AddColumn_QuotedKeywordName()
         {
             using var db = new DataBall();

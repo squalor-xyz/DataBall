@@ -297,11 +297,16 @@ namespace squalor.DataBall
                     }
                 }
 
+                // values[i] attaches to remaining rows in rowid order (insertion
+                // order; stable across DELETE of other rows). Unordered
+                // row_number() OVER () is not a DuckDB promise under a parallel
+                // scan. rowid is this table's row identity until CREATE OR REPLACE
+                // / vacuum, not a warehouse key.
                 Execute($"""
                     UPDATE "data" SET {qname} = "_addcol"."v"
                     FROM "_addcol",
                     (
-                        SELECT row_number() OVER () - 1 AS "_pos", rowid AS "_rid"
+                        SELECT row_number() OVER (ORDER BY rowid) - 1 AS "_pos", rowid AS "_rid"
                         FROM "data"
                     ) "_ord"
                     WHERE "data".rowid = "_ord"."_rid"
