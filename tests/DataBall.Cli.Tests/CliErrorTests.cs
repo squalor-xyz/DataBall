@@ -168,6 +168,7 @@ public class CliErrorTests
             var verbose = await Run("--verbose", "query", csv, "SELECT nope FROM data");
             Assert.Equal(1, verbose.Exit);
             Assert.True(verbose.StdErr.Length > quiet.StdErr.Length, verbose.StdErr);
+            Assert.Contains("at squalor.DataBall", verbose.StdErr, StringComparison.Ordinal);
             Assert.Contains("DuckDB", verbose.StdErr, StringComparison.OrdinalIgnoreCase);
         }
         finally

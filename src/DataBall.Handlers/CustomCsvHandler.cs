@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: Apache-2.0
-using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace squalor.DataBall.Handlers
@@ -32,17 +31,16 @@ namespace squalor.DataBall.Handlers
 
         public bool DelegatesToGenericImport => true;
 
-        public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
+        public IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,
             Config schema,
-            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default)
         {
+            _ = path;
             _ = schema;
-            using var db = new DataBall();
-            await db.ImportAsync(path);
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var row in db.Query("SELECT * FROM data"))
-                yield return row;
+            _ = cancellationToken;
+            throw new NotSupportedException(
+                "CustomCsvHandler.DelegatesToGenericImport is true; DataBall.Open uses ImportAsync, not Parse.");
         }
 
         private static bool IsKnownUnit(Config config, string unit)

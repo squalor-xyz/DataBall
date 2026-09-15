@@ -603,7 +603,6 @@ namespace squalor.DataBall
             InTransaction(() =>
             {
                 Execute($"CREATE OR REPLACE TABLE \"data\" AS SELECT {select} FROM \"data\"");
-                Execute("DROP TABLE IF EXISTS \"data_new\"");
             });
         }
 

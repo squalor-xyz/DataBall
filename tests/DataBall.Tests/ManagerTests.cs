@@ -171,8 +171,8 @@ namespace squalor.DataBall.Tests
                 var outDir = Path.Combine(dir, "parts");
                 using var db = Sample();
                 await ExportManager.ExportToPartitionedParquet(db, outDir, new[] { "Name" });
-                AssertHiveParquet(outDir, "Name=Alice");
-                AssertHiveParquet(outDir, "Name=Bob");
+                await AssertHiveParquetImported(outDir, "Name=Alice", "Name", "Alice");
+                await AssertHiveParquetImported(outDir, "Name=Bob", "Name", "Bob");
             }
             finally
             {
@@ -201,7 +201,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Roll_Parquet_WritesFile()
+        public async Task Roll_Parquet_WritesFile()
         {
             var dir = TempDir();
             try
@@ -209,7 +209,9 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "people.parquet");
                 using var db = Sample();
                 ExportManager.Roll(db, ExportType.Parquet, path);
-                Assert.True(File.Exists(path));
+                using var imported = new DataBall();
+                await imported.ImportAsync(path);
+                AssertPeople(imported);
             }
             finally
             {
@@ -235,11 +237,15 @@ namespace squalor.DataBall.Tests
             Assert.Equal(25, Convert.ToInt32(rows[1]["Age"]));
         }
 
-        private static void AssertHiveParquet(string root, string hiveDir)
+        private static async Task AssertHiveParquetImported(string root, string hiveDir, string column, string value)
         {
             var path = Path.Combine(root, hiveDir);
-            Assert.True(Directory.Exists(path), path);
-            Assert.NotEmpty(Directory.GetFiles(path, "*.parquet", SearchOption.AllDirectories));
+            var files = Directory.GetFiles(path, "*.parquet", SearchOption.AllDirectories);
+            Assert.NotEmpty(files);
+            using var imported = new DataBall();
+            await imported.ImportAsync(files[0]);
+            var row = Assert.Single(imported.Query($"SELECT \"{column}\" FROM \"data\""));
+            Assert.Equal(value, row[column]?.ToString());
         }
 
         private static string TempDir()

@@ -235,7 +235,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Filter_DateOnlyPredicate_FiltersOrThrows()
+        public void Filter_DateOnlyPredicate_KeepsTwoRows()
         {
             using var db = new DataBall();
             db.AddColumn<DateTime>("Day", new[]

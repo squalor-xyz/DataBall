@@ -32,19 +32,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task CustomCsv_Parse_ObfuscatorFixture_RowCount81()
+        public async Task CustomCsv_Parse_ThrowsNotSupported()
         {
-            var rows = 0;
-            await foreach (var row in new CustomCsvHandler().Parse(Fixture(), Config.CreateDefaults()))
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
             {
-                rows++;
-                if (rows == 1)
+                await foreach (var _ in new CustomCsvHandler().Parse(Fixture(), Config.CreateDefaults()))
                 {
-                    Assert.True(row.ContainsKey("EVM"));
-                    Assert.True(row.ContainsKey("sweep") || row.ContainsKey("stimulusGrp"));
                 }
-            }
-            Assert.Equal(81, rows);
+            });
         }
 
         [Fact]

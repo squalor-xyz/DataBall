@@ -153,12 +153,8 @@ namespace squalor.DataBall.Tests
                 db.AddColumn("Site", new[] { "Lab1", "Lab1", "Lab2" });
                 db.AddColumn<int>("Meas", new[] { 1, 2, 3 });
                 await db.Squish(dir, new[] { "Site" });
-                var lab1 = Path.Combine(dir, "Site=Lab1");
-                var lab2 = Path.Combine(dir, "Site=Lab2");
-                Assert.True(Directory.Exists(lab1));
-                Assert.True(Directory.Exists(lab2));
-                Assert.NotEmpty(Directory.GetFiles(lab1, "*.parquet", SearchOption.AllDirectories));
-                Assert.NotEmpty(Directory.GetFiles(lab2, "*.parquet", SearchOption.AllDirectories));
+                await AssertHiveImported(dir, "Site=Lab1", "Site", "Lab1");
+                await AssertHiveImported(dir, "Site=Lab2", "Site", "Lab2");
             }
             finally
             {
@@ -429,32 +425,6 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Bounce_WithStaleDataNewTable_SucceedsOrRollsBackCleanly()
-        {
-            using var db = new DataBall();
-            db.AddColumn("Site", new[] { "A", "A", "A" });
-            db.AddColumn<int>("Meas", new[] { 1, 1, 2 });
-            db.Query("CREATE TABLE \"data_new\" AS SELECT 1 AS x");
-            var beforeRows = CountDataRows(db);
-            await db.Bounce();
-            var siteInMetadata = db.Metadata.ContainsKey("Site");
-            var siteStillColumn = ColumnNames(db).Any(n => n.Equals("Site", StringComparison.OrdinalIgnoreCase));
-            var afterRows = CountDataRows(db);
-            Assert.False(siteInMetadata && siteStillColumn);
-            if (siteInMetadata)
-            {
-                Assert.Equal("A", db.Metadata["Site"]);
-                Assert.Equal(2, afterRows);
-                await db.Bounce();
-            }
-            else
-            {
-                Assert.True(siteStillColumn);
-                Assert.Equal(beforeRows, afterRows);
-            }
-        }
-
-        [Fact]
         public async Task InitializeRow_AfterBounce_CopiesLastCommittedRow()
         {
             using var db = new DataBall();
@@ -483,6 +453,18 @@ namespace squalor.DataBall.Tests
                 WHERE table_schema = 'main' AND table_name = 'data'
                 ORDER BY ordinal_position
                 """).Select(r => Convert.ToString(r["column_name"]) ?? string.Empty).ToArray();
+        }
+
+        private static async Task AssertHiveImported(string root, string hiveDir, string column, string value)
+        {
+            var path = Path.Combine(root, hiveDir);
+            var files = Directory.GetFiles(path, "*.parquet", SearchOption.AllDirectories);
+            Assert.NotEmpty(files);
+            using var imported = new DataBall();
+            await imported.ImportAsync(files[0]);
+            var rows = imported.Query($"SELECT \"{column}\" FROM \"data\"");
+            Assert.NotEmpty(rows);
+            Assert.All(rows, r => Assert.Equal(value, r[column]?.ToString()));
         }
 
         private static void AssertHiveParquet(string root, string hiveDir)

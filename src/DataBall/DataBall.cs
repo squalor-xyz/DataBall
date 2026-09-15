@@ -528,7 +528,6 @@ namespace squalor.DataBall
             if (!_store.DataTableExists())
                 return;
             _store.Execute("CREATE OR REPLACE TABLE \"data\" AS SELECT DISTINCT * FROM \"data\"");
-            _store.Execute("DROP TABLE IF EXISTS \"data_new\"");
         }
 
         private void EnsureExpectedType(string name, Type actual)

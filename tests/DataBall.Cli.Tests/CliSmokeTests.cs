@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System.IO;
+using squalor.DataBall;
 using squalor.DataBall.Cli;
 using Xunit;
 
@@ -112,12 +113,12 @@ public class CliSmokeTests
     {
         var result = await Run("--help");
         Assert.Equal(0, result.Exit);
-        Assert.Contains("import", result.StdOut);
-        Assert.Contains("export", result.StdOut);
-        Assert.Contains("bounce", result.StdOut);
-        Assert.Contains("squish", result.StdOut);
-        Assert.Contains("query", result.StdOut);
-        Assert.Contains("info", result.StdOut);
+        Assert.Matches(@"(?m)^\s+import\b", result.StdOut);
+        Assert.Matches(@"(?m)^\s+export\b", result.StdOut);
+        Assert.Matches(@"(?m)^\s+bounce\b", result.StdOut);
+        Assert.Matches(@"(?m)^\s+squish\b", result.StdOut);
+        Assert.Matches(@"(?m)^\s+query\b", result.StdOut);
+        Assert.Matches(@"(?m)^\s+info\b", result.StdOut);
     }
 
     [Fact]
@@ -182,10 +183,20 @@ public class CliSmokeTests
 
             var lab1 = Path.Combine(hive, "Site=Lab1");
             var lab2 = Path.Combine(hive, "Site=Lab2");
-            Assert.True(Directory.Exists(lab1), lab1);
-            Assert.True(Directory.Exists(lab2), lab2);
-            Assert.NotEmpty(Directory.GetFiles(lab1, "*.parquet", SearchOption.AllDirectories));
-            Assert.NotEmpty(Directory.GetFiles(lab2, "*.parquet", SearchOption.AllDirectories));
+            using (var imported = new DataBall())
+            {
+                await imported.ImportAsync(Directory.GetFiles(lab1, "*.parquet", SearchOption.AllDirectories)[0]);
+                var rows = imported.Query("SELECT Site FROM data");
+                Assert.NotEmpty(rows);
+                Assert.All(rows, r => Assert.Equal("Lab1", r["Site"]?.ToString()));
+            }
+
+            using (var imported = new DataBall())
+            {
+                await imported.ImportAsync(Directory.GetFiles(lab2, "*.parquet", SearchOption.AllDirectories)[0]);
+                var row = Assert.Single(imported.Query("SELECT Site FROM data"));
+                Assert.Equal("Lab2", row["Site"]?.ToString());
+            }
         }
         finally
         {

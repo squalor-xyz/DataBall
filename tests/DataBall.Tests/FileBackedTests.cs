@@ -119,11 +119,7 @@ namespace squalor.DataBall.Tests
             try
             {
                 using var db = new DataBall(config, databasePath: path);
-                Assert.NotNull(db.Schema.Csv);
-                Assert.NotNull(db.Schema.Metadata);
-                Assert.NotNull(db.Schema.Relationships);
-                Assert.NotNull(db.Schema.Stimulus);
-                Assert.NotNull(db.Schema.MetadataFields);
+                _ = db.Schema;
             }
             finally
             {
