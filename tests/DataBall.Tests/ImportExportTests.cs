@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using squalor.DataBall.Export;
 using squalor.DataBall.Import;
@@ -12,6 +14,31 @@ namespace squalor.DataBall.Tests
 {
     public class ImportExportTests
     {
+        [Fact]
+        public void ExportToArchive_FailsMidWrite_LeavesExistingFileIntact()
+        {
+            var dir = TempDir();
+            var previous = ExportManager.AfterArchiveFileCreatedForTests;
+            ExportManager.AfterArchiveFileCreatedForTests = _ => throw new IOException("injected mid-write failure");
+            try
+            {
+                var path = Path.Combine(dir, "keep.zip");
+                var payload = Encoding.UTF8.GetBytes("KEEP-EXISTING-ARCHIVE");
+                File.WriteAllBytes(path, payload);
+                var before = SHA256.HashData(payload);
+                using var db = new DataBall();
+                db.AddColumn("Name", new[] { "Alice" });
+                Assert.ThrowsAny<Exception>(() => db.ExportToArchive(path));
+                Assert.True(File.Exists(path));
+                Assert.Equal(before, SHA256.HashData(File.ReadAllBytes(path)));
+            }
+            finally
+            {
+                ExportManager.AfterArchiveFileCreatedForTests = previous;
+                Directory.Delete(dir, true);
+            }
+        }
+
         [Fact]
         public async Task Csv_RoundTrip_ViaImportExportAsync()
         {

@@ -9,6 +9,8 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using DuckDB.NET.Data;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace squalor.DataBall
 {
@@ -18,12 +20,15 @@ namespace squalor.DataBall
         private static readonly HashSet<string> OpenFiles = new(StringComparer.Ordinal);
 
         private readonly DuckDBConnection _connection;
+        private readonly ILogger _logger;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
         private readonly string? _exclusivePath;
+        private DbTransaction? _currentTx;
         private bool _disposed;
 
-        internal DuckDbStore(string? databasePath = null)
+        internal DuckDbStore(string? databasePath = null, ILogger? logger = null)
         {
+            _logger = logger ?? NullLogger.Instance;
             _exclusivePath = ExclusiveFilePath(databasePath);
             if (_exclusivePath is not null)
             {
@@ -156,13 +161,36 @@ namespace squalor.DataBall
             return value is JsonElement element ? UnwrapJson(element) : value;
         }
 
+        internal void InTransaction(Action body)
+        {
+            ArgumentNullException.ThrowIfNull(body);
+            ThrowIfDisposed();
+            using var tx = _connection.BeginTransaction();
+            var previous = _currentTx;
+            _currentTx = tx;
+            try
+            {
+                body();
+                tx.Commit();
+            }
+            catch
+            {
+                try { tx.Rollback(); }
+                catch (Exception ex) { _logger.LogError(ex, "Rollback failed"); }
+                throw;
+            }
+            finally
+            {
+                _currentTx = previous;
+            }
+        }
+
         internal void Execute(string sql)
         {
             ThrowIfDisposed();
             try
             {
-                using var cmd = _connection.CreateCommand();
-                cmd.CommandText = sql;
+                using var cmd = CreateCommand(sql, []);
                 cmd.ExecuteNonQuery();
             }
             catch (DuckDBException ex)
@@ -176,8 +204,7 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             try
             {
-                using var cmd = _connection.CreateCommand();
-                cmd.CommandText = sql;
+                using var cmd = CreateCommand(sql, []);
                 var result = cmd.ExecuteScalar();
                 return result is DBNull ? null : result;
             }
@@ -353,28 +380,31 @@ namespace squalor.DataBall
                     throw new DataBallException($"Duplicate column name '{key}'");
             }
 
-            if (!DataTableExists())
+            InTransaction(() =>
             {
-                if (values.Count == 0)
-                    throw new DataBallException("AddRow requires at least one column");
+                if (!DataTableExists())
+                {
+                    if (values.Count == 0)
+                        throw new DataBallException("AddRow requires at least one column");
 
-                var parts = new List<string>(values.Count);
+                    var parts = new List<string>(values.Count);
+                    foreach (var key in values.Keys)
+                        parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
+                    Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
+                    InsertAppenderRow(GetColumns(), values);
+                    return;
+                }
+
+                var cols = GetColumns();
                 foreach (var key in values.Keys)
-                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
-                Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
+                {
+                    if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                        continue;
+                    Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
+                }
+
                 InsertAppenderRow(GetColumns(), values);
-                return;
-            }
-
-            var cols = GetColumns();
-            foreach (var key in values.Keys)
-            {
-                if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
-                    continue;
-                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, values[key], expectedTypes))}");
-            }
-
-            InsertAppenderRow(GetColumns(), values);
+            });
         }
 
         internal void AddRows(
@@ -405,44 +435,35 @@ namespace squalor.DataBall
             if (keyOrder.Count == 0)
                 throw new DataBallException("AddRows requires at least one column");
 
-            if (!DataTableExists())
+            InTransaction(() =>
             {
-                var parts = new List<string>(keyOrder.Count);
-                foreach (var key in keyOrder)
-                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
-                Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
-            }
-            else
-            {
-                var cols = GetColumns();
-                foreach (var key in keyOrder)
+                if (!DataTableExists())
                 {
-                    if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
-                        continue;
-                    Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                    var parts = new List<string>(keyOrder.Count);
+                    foreach (var key in keyOrder)
+                        parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                    Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
                 }
-            }
-
-            var columns = GetColumns();
-            var coercedRows = new List<object?[]>(rows.Count);
-            foreach (var values in rows)
-                coercedRows.Add(CoerceAppenderValues(columns, values));
-
-            using var tx = _connection.BeginTransaction();
-            try
-            {
-                using (var appender = _connection.CreateAppender("data"))
+                else
                 {
-                    foreach (var coerced in coercedRows)
-                        WriteCoercedAppenderRow(appender, coerced);
+                    var cols = GetColumns();
+                    foreach (var key in keyOrder)
+                    {
+                        if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                            continue;
+                        Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                    }
                 }
-                tx.Commit();
-            }
-            catch
-            {
-                tx.Rollback();
-                throw;
-            }
+
+                var columns = GetColumns();
+                var coercedRows = new List<object?[]>(rows.Count);
+                foreach (var values in rows)
+                    coercedRows.Add(CoerceAppenderValues(columns, values));
+
+                using var appender = _connection.CreateAppender("data");
+                foreach (var coerced in coercedRows)
+                    WriteCoercedAppenderRow(appender, coerced);
+            });
         }
 
         internal IReadOnlyDictionary<string, object?> SnapshotMetadata()
@@ -576,18 +597,11 @@ namespace squalor.DataBall
                     ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
                     : q;
             }));
-            Execute("BEGIN TRANSACTION");
-            try
+            InTransaction(() =>
             {
                 Execute($"CREATE OR REPLACE TABLE \"data\" AS SELECT {select} FROM \"data\"");
                 Execute("DROP TABLE IF EXISTS \"data_new\"");
-                Execute("COMMIT");
-            }
-            catch
-            {
-                try { Execute("ROLLBACK"); } catch { /* already failed */ }
-                throw;
-            }
+            });
         }
 
         internal void ImportParquet(string path, bool append)
@@ -1011,6 +1025,8 @@ namespace squalor.DataBall
         {
             var cmd = _connection.CreateCommand();
             cmd.CommandText = sql;
+            if (_currentTx is not null)
+                cmd.Transaction = _currentTx;
             foreach (var parameter in parameters)
                 cmd.Parameters.Add(parameter);
             return cmd;

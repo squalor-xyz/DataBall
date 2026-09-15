@@ -9,6 +9,54 @@ namespace squalor.DataBall.Tests
     public class BatchInsertTests
     {
         [Fact]
+        public void AddRow_InsertFailsAfterSchemaChange_LeavesNoNewColumn()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", new[] { "Alice" });
+            db.AddColumn("Age", new[] { 30 });
+            Assert.ThrowsAny<Exception>(() => db.AddRow(Dict(("Name", "Bob"), ("Age", "not-an-int"), ("Extra", 1))));
+            var cols = db.Query("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'main' AND table_name = 'data'
+                """);
+            Assert.DoesNotContain(cols, r => string.Equals(Convert.ToString(r["column_name"]), "Extra", StringComparison.OrdinalIgnoreCase));
+            Assert.Single(db.Query("SELECT * FROM data"));
+        }
+
+        [Fact]
+        public void AddRows_BatchFailsMidway_LeavesNoNewColumns()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", new[] { "Alice" });
+            db.AddColumn("Age", new[] { 30 });
+            Assert.ThrowsAny<Exception>(() => db.AddRows(
+            [
+                Dict(("Name", "Bob"), ("Age", 25), ("Extra", 1)),
+                Dict(("Name", "Carol"), ("Age", "not-an-int"), ("Extra", 2)),
+            ]));
+            var cols = db.Query("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'main' AND table_name = 'data'
+                """);
+            Assert.DoesNotContain(cols, r => string.Equals(Convert.ToString(r["column_name"]), "Extra", StringComparison.OrdinalIgnoreCase));
+        }
+
+        [Fact]
+        public void AddRows_BatchFailsMidway_InsertsNoRows()
+        {
+            using var db = new DataBall();
+            db.AddColumn("Name", new[] { "Alice" });
+            db.AddColumn("Age", new[] { 30 });
+            Assert.ThrowsAny<Exception>(() => db.AddRows(
+            [
+                Dict(("Name", "Bob"), ("Age", 25)),
+                Dict(("Name", "Carol"), ("Age", "not-an-int")),
+            ]));
+            var rows = db.Query("SELECT Name FROM data");
+            Assert.Equal("Alice", Assert.Single(rows)["Name"]);
+        }
+
+        [Fact]
         public void AddRows_InsertsAll_WithoutCommitRowLoop()
         {
             using var db = new DataBall();

@@ -35,7 +35,7 @@ namespace squalor.DataBall
         public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null)
         {
             _logger = logger ?? NullLogger.Instance;
-            _store = new DuckDbStore(ValidateDatabasePath(databasePath));
+            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger);
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
             try
@@ -284,18 +284,11 @@ namespace squalor.DataBall
                 var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
                 try
                 {
-                    _store.Execute("BEGIN TRANSACTION");
-                    try
+                    _store.InTransaction(() =>
                     {
                         ExtractConstantsToMetadataSql(partitionColumns);
                         DistinctInPlace();
-                        _store.Execute("COMMIT");
-                    }
-                    catch
-                    {
-                        try { _store.Execute("ROLLBACK"); } catch { /* already failed */ }
-                        throw;
-                    }
+                    });
                 }
                 catch
                 {

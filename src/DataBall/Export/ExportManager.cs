@@ -71,6 +71,11 @@ namespace squalor.DataBall.Export
         }
 
         /// <summary>
+        /// Test seam: invoked after the archive file is created and before bytes are written.
+        /// </summary>
+        internal static Action<string>? AfterArchiveFileCreatedForTests;
+
+        /// <summary>
         /// Exports the DataBall to an archive (ZIP, TAR.GZ, or TAR.XZ).
         /// </summary>
         /// <param name="db">The DataBall to export.</param>
@@ -81,6 +86,7 @@ namespace squalor.DataBall.Export
             db.Logger.LogInformation("Exporting to archive {Path}", path);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
+            string? tmp = null;
             try
             {
                 EnsureArchiveExportSupported(path);
@@ -90,10 +96,18 @@ namespace squalor.DataBall.Export
                 var destDir = Path.GetDirectoryName(Path.GetFullPath(path));
                 if (!string.IsNullOrEmpty(destDir))
                     Directory.CreateDirectory(destDir);
-                using var fs = File.Create(path);
-                using var writer = WriterFactory.OpenWriter(fs, archiveType, new WriterOptions(compressionType));
-                using var csvStream = File.OpenRead(csvPath);
-                writer.Write("data.csv", csvStream);
+                tmp = path + ".tmp";
+                if (File.Exists(tmp))
+                    File.Delete(tmp);
+                using (var fs = File.Create(tmp))
+                {
+                    AfterArchiveFileCreatedForTests?.Invoke(tmp);
+                    using var writer = WriterFactory.OpenWriter(fs, archiveType, new WriterOptions(compressionType));
+                    using var csvStream = File.OpenRead(csvPath);
+                    writer.Write("data.csv", csvStream);
+                }
+                File.Move(tmp, path, overwrite: true);
+                tmp = null;
                 db.Logger.LogInformation("Archive export completed");
             }
             catch (Exception ex) when (ex is not DataBallException)
@@ -103,6 +117,8 @@ namespace squalor.DataBall.Export
             }
             finally
             {
+                if (tmp is not null && File.Exists(tmp))
+                    File.Delete(tmp);
                 if (Directory.Exists(dir))
                     Directory.Delete(dir, true);
             }
