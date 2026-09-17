@@ -62,7 +62,9 @@ namespace squalor.DataBall
             if (string.IsNullOrWhiteSpace(databasePath))
                 throw new DataBallException("Database path is required");
 
-            var name = Path.GetFileName(databasePath);
+            var full = Path.GetFullPath(databasePath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var name = Path.GetFileName(full);
             if (name.Equals("catalog.duckdb", StringComparison.OrdinalIgnoreCase))
                 throw new DataBallException("catalog.duckdb is not a DataBall session file");
 

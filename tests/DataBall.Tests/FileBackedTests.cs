@@ -166,6 +166,25 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void Ctor_CatalogDuckDbWithTrailingSeparator_Throws()
+        {
+            var dir = TempDir();
+            try
+            {
+                var slash = Path.Combine(dir, "catalog.duckdb") + Path.DirectorySeparatorChar;
+                var dot = Path.Combine(dir, "catalog.duckdb", ".");
+                var slashEx = Assert.Throws<DataBallException>(() => new DataBall(databasePath: slash));
+                Assert.Contains("catalog.duckdb", slashEx.Message, StringComparison.OrdinalIgnoreCase);
+                var dotEx = Assert.Throws<DataBallException>(() => new DataBall(databasePath: dot));
+                Assert.Contains("catalog.duckdb", dotEx.Message, StringComparison.OrdinalIgnoreCase);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
         public void Ctor_ConfigPathAndDatabasePath_Together()
         {
             var dir = TempDir();
