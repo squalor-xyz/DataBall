@@ -69,6 +69,7 @@ namespace squalor.DataBall
                 if (!_store.DataTableExists())
                     throw new DataBallException("No data to filter");
                 var tableCols = _store.GetColumns();
+                _ = BuildSelectList(filter.Columns, tableCols);
                 var parameters = new List<DuckDBParameter>();
                 var where = BuildWhere(filter.Predicates, tableCols, parameters);
                 var sql = new StringBuilder("SELECT COUNT(*) AS c FROM \"data\"");

@@ -112,6 +112,28 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public void Count_UnknownColumn_Throws()
+        {
+            using var db = People();
+            var ex = Assert.Throws<DataBallException>(() => db.Count(new SessionFilter
+            {
+                Columns = ["Nope"]
+            }));
+            Assert.Contains("Nope", ex.Message, StringComparison.Ordinal);
+        }
+
+        [Fact]
+        public void Count_EmptyColumns_Throws()
+        {
+            using var db = People();
+            var ex = Assert.Throws<DataBallException>(() => db.Count(new SessionFilter
+            {
+                Columns = []
+            }));
+            Assert.Contains("empty", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
         public void Filter_DoesNotMutateTable()
         {
             using var db = People();

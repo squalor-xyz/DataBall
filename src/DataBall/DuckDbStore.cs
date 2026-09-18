@@ -308,45 +308,48 @@ namespace squalor.DataBall
             if (n != existing)
                 throw new DataBallException($"Column '{name}' length {n} does not match row count {existing}");
 
-            Execute($"ALTER TABLE \"data\" ADD COLUMN {qname} {sqlType}");
-            if (n == 0)
-                return;
-
-            Execute("DROP TABLE IF EXISTS \"_addcol\"");
-            Execute($"CREATE TEMP TABLE \"_addcol\" (\"rid\" BIGINT, \"v\" {sqlType})");
-            try
+            InTransaction(() =>
             {
-                using (var appender = _connection.CreateAppender("_addcol"))
-                {
-                    for (int i = 0; i < n; i++)
-                    {
-                        var row = appender.CreateRow();
-                        row.AppendValue((long)i);
-                        AppendClr(row, values[i]);
-                        row.EndRow();
-                    }
-                }
+                Execute($"ALTER TABLE \"data\" ADD COLUMN {qname} {sqlType}");
+                if (n == 0)
+                    return;
 
-                // values[i] attaches to remaining rows in rowid order (insertion
-                // order; stable across DELETE of other rows). Unordered
-                // row_number() OVER () is not a DuckDB promise under a parallel
-                // scan. rowid is this table's row identity until CREATE OR REPLACE
-                // / vacuum, not a warehouse key.
-                Execute($"""
-                    UPDATE "data" SET {qname} = "_addcol"."v"
-                    FROM "_addcol",
-                    (
-                        SELECT row_number() OVER (ORDER BY rowid) - 1 AS "_pos", rowid AS "_rid"
-                        FROM "data"
-                    ) "_ord"
-                    WHERE "data".rowid = "_ord"."_rid"
-                      AND "_addcol"."rid" = "_ord"."_pos"
-                    """);
-            }
-            finally
-            {
                 Execute("DROP TABLE IF EXISTS \"_addcol\"");
-            }
+                Execute($"CREATE TEMP TABLE \"_addcol\" (\"rid\" BIGINT, \"v\" {sqlType})");
+                try
+                {
+                    using (var appender = _connection.CreateAppender("_addcol"))
+                    {
+                        for (int i = 0; i < n; i++)
+                        {
+                            var row = appender.CreateRow();
+                            row.AppendValue((long)i);
+                            AppendClr(row, values[i]);
+                            row.EndRow();
+                        }
+                    }
+
+                    // values[i] attaches to remaining rows in rowid order (insertion
+                    // order; stable across DELETE of other rows). Unordered
+                    // row_number() OVER () is not a DuckDB promise under a parallel
+                    // scan. rowid is this table's row identity until CREATE OR REPLACE
+                    // / vacuum, not a warehouse key.
+                    Execute($"""
+                        UPDATE "data" SET {qname} = "_addcol"."v"
+                        FROM "_addcol",
+                        (
+                            SELECT row_number() OVER (ORDER BY rowid) - 1 AS "_pos", rowid AS "_rid"
+                            FROM "data"
+                        ) "_ord"
+                        WHERE "data".rowid = "_ord"."_rid"
+                          AND "_addcol"."rid" = "_ord"."_pos"
+                        """);
+                }
+                finally
+                {
+                    Execute("DROP TABLE IF EXISTS \"_addcol\"");
+                }
+            });
         }
 
         internal void RemoveColumn(string name)
@@ -516,8 +519,11 @@ namespace squalor.DataBall
 
             if (!append || !DataTableExists() || RowCount() == 0)
             {
-                Execute("DROP TABLE IF EXISTS \"data\"");
-                Execute($"CREATE TABLE \"data\" AS SELECT * FROM {qSrc}");
+                InTransaction(() =>
+                {
+                    Execute("DROP TABLE IF EXISTS \"data\"");
+                    Execute($"CREATE TABLE \"data\" AS SELECT * FROM {qSrc}");
+                });
                 return;
             }
 
