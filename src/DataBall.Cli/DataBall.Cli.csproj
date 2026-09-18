@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>squalor.DataBall.Cli</RootNamespace>
+    <!-- Cannot be 'databall': CLR assembly names are case-insensitive and collide with DataBall.dll. -->
+    <AssemblyName>DataBall.Cli</AssemblyName>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>databall</ToolCommandName>
+    <PackageId>squalor.DataBall.Cli</PackageId>
+    <IsPackable>true</IsPackable>
+    <Version>1.2.0</Version>
+    <Description>Command-line tool for squalor.DataBall.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" Version="2.0.11" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DataBall\DataBall.csproj" />
+  </ItemGroup>
+</Project>

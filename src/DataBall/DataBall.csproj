@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>squalor.DataBall</RootNamespace>
+    <AssemblyName>DataBall</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>squalor.DataBall</PackageId>
+    <Version>1.2.0</Version>
+    <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, zip/tar, .ball), row builder, Bounce/Squish. Apache-2.0.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DuckDB.NET.Data.Full" Version="1.5.5" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <!-- 0.50.4: NU1902 on ≤0.47.4. XZ is still decompress-only; tar.gz export must stay working. Never SharpCompress 1.0.0. -->
+    <PackageReference Include="SharpCompress" Version="0.50.4" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DataBall.Tests" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>squalor.DataBall.Handlers</RootNamespace>
+    <AssemblyName>DataBall.Handlers</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>squalor.DataBall.Handlers</PackageId>
+    <Version>1.2.0</Version>
+    <Description>Lab format translators for DataBall Open (custom CSV primary; STDF/Touchstone/production slots).</Description>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\DataBall\DataBall.csproj" />
+  </ItemGroup>
+</Project>

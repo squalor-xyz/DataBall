@@ -1,210 +1,188 @@
 # DataBall
 
-Versatile data handling library for test executive applications. Supports import/export in multiple formats (CSV, Parquet, SQLite, Archives, .ball), data manipulation via row builder pattern and DataFrame operations, metadata storage, configuration-based relationships, and large dataset handling via chunking/partitioning.
+Apache-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, zip/tar of CSV, and `.ball`.
 
-## Features
-- Import and export data in CSV, Parquet, SQLite, archives (ZIP/TAR.GZ/TAR.XZ), and native .ball format.
-- Row builder pattern with relationship propagation for data manipulation.
-- Bounce and Squish operations for data compaction and partitioning.
-- Backend abstraction for in-memory or out-of-core (Parquet) processing.
-- Configuration-loaded metadata, column types, and relationships.
+## Engine (DuckDB)
 
-## Installation
-Install via NuGet:
+The working store is DuckDB via `DuckDB.NET.Data.Full` 1.5.5. Default is **in-memory** (`Data Source=:memory:`). Opt-in file-backed: `new DataBall(databasePath: "session.duckdb")` (named argument; the first ctor string is still config JSON). Dispose does not delete the file. Do not open `catalog.duckdb` as a DataBall session. Interchange remains `.ball`. The package ships **native RID binaries** (`libduckdb` / `duckdb.dll`) for win-x64, win-arm64, osx-x64, osx-arm64, linux-x64, and linux-arm64. This is **not** a pure-managed library.
+
+Callers do not need SQL. `Query(string sql)` is an escape hatch against table `"data"`.
+
+## Install
+
+Packages are **not on nuget.org**. Do **not** `dotnet nuget push`. There are no API keys in this tree. Pack locally:
+
 ```bash
-dotnet add package squalor.DataBall --version 1.0.0
+dotnet pack src/DataBall/DataBall.csproj -c Release -o artifacts
+dotnet pack src/DataBall.Cli/DataBall.Cli.csproj -c Release -o artifacts
 ```
 
-## Usage
+Inspect the library nupkg: `lib/net10.0/DataBall.dll`, README, **no `runtimes/`** (DuckDB natives come from `DuckDB.NET.Data.Full` at consumer restore). Inspect the tool nupkg: `tools/net10.0/any/` includes `DataBall.dll` and `runtimes/{linux-x64,linux-arm64,osx,win-x64,win-arm64}/native/`.
+
+Consume from `./artifacts`. Restore still needs nuget.org (or a mirror) for DuckDB.NET, SharpCompress, and logging abstractions:
+
+```bash
+dotnet add package squalor.DataBall --source ./artifacts
+dotnet tool uninstall -g squalor.DataBall.Cli   # if an older version is already installed
+dotnet tool install --global squalor.DataBall.Cli --add-source ./artifacts
+databall --help
+```
+
+Package IDs: `squalor.DataBall` (library), `squalor.DataBall.Cli` (global tool `databall`).
+
+Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward: latestFeature`).
+
+## Supported formats
+
+| Format | Extensions | Import | Export |
+|---|---|---|---|
+| CSV | `.csv` | yes | yes |
+| Parquet | `.parquet` or hive directory | yes (file or Squish hive dir) | yes (hive partition via Bounce/Squish path+cols) |
+| Archive of CSV | `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.xz`, `.txz` | yes | `.zip` / `.tar` / `.tar.gz` / `.tgz` only |
+| `.ball` | `.ball` | yes | yes |
+
+## Library usage
+
 ```csharp
 using squalor.DataBall;
+using squalor.DataBall.Export;
 
-var db = new DataBall("config.json");
+using var db = new DataBall("config.json");
 
-// Add columns and rows
-db.AddColumn<string>("Name", new[] { "Alice", "Bob" });
+db.AddColumn("Name", new[] { "Alice", "Bob" });
 db.AddColumn<int>("Age", new[] { 30, 25 });
+db.AddRows(new[]
+{
+    new Dictionary<string, object?> { ["Name"] = "Carol", ["Age"] = 40 },
+});
 
-// Bounce for compaction
-db.Bounce();
+db.SetMetadata("Source", "TestData");
 
-// Export to CSV
+await db.Bounce();
+await db.ExportAsync("output.csv", ExportType.Csv);
+// equivalent sync export:
 db.Roll(ExportType.Csv, "output.csv");
 
-// Import from CSV
-db.ImportFromCsv("input.csv", append: true);
+await db.ImportAsync("input.csv", new ImportOptions { Append = true });
+await db.SaveAsync("session.ball");
+
+using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(path, "config.json")
 ```
 
-## Quick Start Guide
+`Metadata` is a snapshot; write with `SetMetadata`. `ImportAsync` detects format by extension (`Append` defaults to `false`). `SaveAsync` writes `ExportType.Ball`. Dispose with `using`; an uncommitted pending row is discarded.
 
-### 1. Configuration with `config.json`
-When creating a new `DataBall` instance, you can optionally specify a `config.json` file to define metadata, column types, and relationships. The configuration file is in JSON format and has the following structure:
+`DataBall.Open(path, schemaPath?)` creates a new session from a **file**. Generic CSV / Parquet / archive / `.ball` need no handler (`ImportAsync` path). `ImportAsync` also reads a Squish **hive directory** of parquet (`hive_partitioning=false`; partition columns come from the files). Hive import is not `.ball` and does not restore Bounce metadata.
+
+Lab translators live in `squalor.DataBall.Handlers` (not `DuckDbStore`). Primary dialect is **custom CSV** with unit headers (`EVM(dB)`). `LabHandlers.RegisterDefaults()` also registers STDF / Touchstone / production **slots** (Parse throws until a golden file exists). Register with `DataBall.RegisterHandler`; first `CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
+
+Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` is honored by export/save; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
+
+`AddRows` inserts a batch with one DuckDB appender. It does not apply trigger/reset (`CommitRow` does). Empty input is a no-op.
+
+### Config
 
 ```json
 {
-  "metadata": {
-    "Version": "1.0",
-    "Source": "TestData"
-  },
+  "metadata": { "Version": "1.0", "Source": "TestData" },
   "columns": {
     "Name": "string",
     "Age": "int",
     "Date": "datetime"
   },
   "relationships": [
-    {
-      "trigger": "Name",
-      "reset": ["Age", "Date"]
-    }
+    { "trigger": "Name", "reset": ["Age", "Date"] }
   ]
 }
 ```
 
-- **metadata**: Key-value pairs for constants (e.g., version, source info).
-- **columns**: Column names with types (`int`, `long`, `float`, `double`, `bool`, `datetime`, `string`).
-- **relationships**: Defines fields that reset to null when a trigger field changes (used in row builder).
+Column types: `int`, `long`, `float`, `double`, `bool`, `datetime`, `string`. Types come from this config or from `AddColumn`. Untyped CSV integers stay DuckDB BIGINT / `long` — they are not narrowed from value range. Relationship JSON uses `"trigger"` / `"reset"` (Pascal `TriggerField` / `ResetFields` also binds). Logging is constructor-injected `ILogger`, default `NullLogger`.
 
-If no `config.json` is provided, `DataBall` starts with an empty `DataFrame` and no predefined types or relationships.
+A config file is an **overlay** on native defaults (`Config.CreateDefaults`). CSV headers are parsed in order `{name}({unit})`, `{name}_{unit}` (only if the suffix is a known unit), then `{name}` — so `EVM(dB)` and `I_Total(A)` become columns `EVM` and `I_Total` with types from the unit table (`dB`/`A` → `double`; `id`/`ID` → `long`). `{name}_{unit}` does not split `I_Total`. Roles: `parameters` or lists `stimulus` / `classification`; default role is `meas`. Names in `metadataFields` (defaults: Lot, Tester, Program) move to the metadata table when constant (`metadataPolicy`: `requireConstant`, `first`, or `bounce`). `columns` still overrides type per canonical name. Overlay JSON may also include `units` (with `aliases`) and `csv.headerPatterns`.
 
-### 2. Building Datasets
-`DataBall` supports two primary ways to build datasets:
+### Row builder (`CommitRow`)
 
-#### a. Direct Column and Row Addition
-Use `AddColumn<T>` and `AddRow` for direct data manipulation:
+`CommitRow` commits the pending row. `Roll` is export, not a row commit.
+
 ```csharp
-var db = new DataBall();
-db.AddColumn<string>("Name", new[] { "Alice", "Bob" });
-db.AddColumn<int>("Age", new[] { 30, 25 });
-db.AddRow(new object?[] { "Charlie", 40 });
-```
+using var db = new DataBall("config.json");
+db.InitializeRow(new Dictionary<string, object?>
+{
+    ["Name"] = "Alice",
+    ["Age"] = 30,
+});
+db.CommitRow();
 
-#### b. Row Builder Pattern
-For controlled data entry with relationship propagation:
-```csharp
-var db = new DataBall("config.json");
-db.InitializeRow(new Dictionary<string, object?> { { "Name", "Alice" }, { "Age", 30 } });
-db.ModifyField("Name", "Bob"); // Triggers relationship reset if configured
-db.CommitRow(); // Adds row to DataFrame
-```
-
-The row builder ensures relationships (e.g., resetting dependent fields when a trigger changes) are applied before committing.
-
-### 3. DataFrame Operations
-`DataBall` uses `Microsoft.Data.Analysis.DataFrame` for in-memory storage, supporting standard operations like filtering, grouping, joining, and sorting transparently. See the [Microsoft.Data.Analysis documentation](https://docs.microsoft.com/en-us/dotnet/api/microsoft.data.analysis.dataframe) for details.
-
-Example:
-```csharp
-var filtered = db.Filter(row => (int?)row["Age"] > 25);
-var grouped = db.GroupBy(new[] { "Name" });
-var sorted = db.Sort(new[] { "Age" });
-```
-
-### 4. Order of Operations
-To optimize data processing, follow this order:
-1. **Load Configuration**: Use `new DataBall("config.json")` to set up metadata, types, and relationships.
-2. **Import Data**: Use `ImportFrom*` methods (e.g., `ImportFromCsv`) to load data.
-3. **Manipulate Data**: Use `AddColumn`, `AddRow`, or row builder (`InitializeRow`, `ModifyField`, `CommitRow`).
-4. **Bounce**: Call `Bounce()` to compact data (extract constants, deduplicate rows, limited chunk deduplication).
-5. **Export/Save**: Use `Roll` or `Save` to export to desired format.
-6. **Squish (Optional)**: For large datasets, use `Squish` to partition and deduplicate for disk storage.
-
-### 5. Export Operations
-Export data using the `Roll` method with supported formats (`ExportType`):
-```csharp
-db.Roll(ExportType.Csv, "output.csv");
-db.Roll(ExportType.Parquet, "output.parquet", new[] { "Name" }); // Partitioned
-db.Roll(ExportType.Sqlite, "output.db");
-db.Roll(ExportType.Archive, "output.tar.gz");
-db.Roll(ExportType.DataBall, "output.ball"); // Native .ball format
-```
-
-- **CSV**: Simple tabular export with chunking support.
-- **Parquet**: Efficient columnar storage, supports partitioning.
-- **SQLite**: Relational database export.
-- **Archive**: ZIP/TAR.GZ/TAR.XZ with CSVs, supports partitioning.
-- **DataBall (.ball)**: ZIP with Parquet data and JSON metadata.
-
-### 6. Import Operations
-Import data from various formats:
-```csharp
-db.ImportFromCsv("input.csv", append: true, chunkSize: 1000); // Chunked import
-db.ImportFromParquet("input.parquet", append: true);
-db.ImportFromSqlite("input.db");
-db.ImportFromArchive("input.tar.gz");
-db.ImportFromDataBall("input.ball");
-```
-
-- Set `append: true` to add to existing data; `false` to replace.
-- `chunkSize` enables streaming for large CSVs.
-
-### 7. Bounce
-The `Bounce` operation optimizes in-memory data:
-- Extracts constant columns to metadata.
-- Deduplicates rows.
-- Performs limited chunk deduplication (max 5 tables, 4x4 to 1000x1000 matrices).
-- Optionally exports to partitioned Parquet.
-
-Use before `Roll` or `Save` for smaller memory footprint:
-```csharp
-db.Bounce("output_dir", new[] { "Name" });
-```
-
-### 8. Squish and Save
-`Squish` is designed for large datasets, performing full deduplication and partitioning for disk storage:
-```csharp
-db.Squish("output_dir", new[] { "Name" });
-```
-
-`Save` exports to the native .ball format (ZIP with Parquet and metadata):
-```csharp
-db.Save("output.ball", new[] { "Name" });
-```
-
-Use `Squish` when minimizing disk usage; `Save` for portable .ball files.
-
-### 9. Adding Rows with Row Builder
-The row builder pattern ensures controlled data entry:
-```csharp
-db.InitializeRow(new Dictionary<string, object?> { { "Name", "Alice" } });
-db.ModifyField("Age", 30);
+db.InitializeRow();
+db.ModifyField("Name", "Bob"); // trigger "Name" resets Age/Date unless modified
 db.CommitRow();
 ```
 
-- `InitializeRow`: Starts a new row, optionally copying the last row or setting initial values.
-- `ModifyField`: Updates fields, marking them as modified.
-- `CommitRow`: Applies relationships and adds the row to the `DataFrame`.
+`InitializeRow` copies the last committed row when one exists. Changing a trigger field resets dependents that were not explicitly modified.
 
-### 10. Other Prominent Features
-- **Backend Switching**: Switch to `ParquetBackend` for large datasets:
-  ```csharp
-  db.SwitchBackend(new ParquetBackend("data.parquet"));
-  ```
-- **Metadata**: Store and retrieve constants or configuration data:
-  ```csharp
-  db.Metadata["Source"] = "TestData";
-  ```
-- **Type Coercion**: Automatically coerces data to expected types during import or row commits.
-- **Logging**: Uses NLog for detailed logging (see `NLog.config`).
+### Bounce and Squish
 
-## FAQ
+Bounce moves **strict constants** (exactly one distinct non-null value **and no nulls**) into `Metadata`, drops those columns, then `DISTINCT` remaining rows. Mixed or all-null columns stay. Partition columns are not extracted. If the last remaining constant is extracted, table `"data"` is dropped (DuckDB cannot store a 0-column table).
 
-**Q: What if I don't have a `config.json`?**
-A: You can create a `DataBall` instance without a config file. Columns and types are inferred dynamically, but you lose predefined relationships and metadata.
+Squish is the same call as Bounce. Hive-partitioned Parquet is written only when both a directory path and partition columns are supplied:
 
-**Q: When should I use `Bounce` vs `Squish`?**
-A: Use `Bounce` for in-memory optimization before export. Use `Squish` for large datasets requiring full deduplication and partitioning for disk storage.
+```csharp
+await db.Squish("hive", new[] { "Site" });
+```
 
-**Q: Can I use advanced DataFrame operations?**
-A: Yes, `DataBall.Data` exposes the full `DataFrame` API. See Microsoft.Data.Analysis docs for advanced operations.
+This is not a matrix rewrite. DuckDB already dictionary-encodes repeats.
 
-**Q: How does partitioning work?**
-A: For Parquet and .ball exports, specify `partitionColumns` to group data by unique values, creating subdirectories (e.g., `Name=Alice/part-0.parquet`).
+### Query
 
-**Q: What is the .ball format?**
-A: A ZIP file containing Parquet data (partitioned or single) and a `metadata.json` file with constants and configuration.
+```csharp
+var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+```
+
+## CLI
+
+```
+databall import  <input> -o <output> [--append] [--config]
+databall export  <input> <output> [--format csv|parquet|ball|archive]
+databall bounce  <input> [output]
+databall squish  <input> [output] [--partition col,...]
+databall query   <file> <sql>
+databall info    <file>
+```
+
+```bash
+databall import measurements.csv -o session.ball
+databall import more.csv -o session.ball --append
+databall export session.ball people.parquet
+databall bounce session.ball compact.ball
+databall squish session.ball hive --partition Site
+databall import hive -o session.ball
+databall query session.ball "SELECT * FROM data LIMIT 10"
+databall info session.ball
+```
+
+`bounce` without an output path writes a sibling `.ball`. `query` prints TSV to stdout. It is a local escape hatch and must not be exposed at a service boundary.
+
+## .ball format
+
+A `.ball` file is a ZIP of `data.parquet` + `metadata.json` (+ optional `config.json` when column types or relationships exist). Portable without DuckDB: unzip and read the parquet. DuckDB is the working engine, not the interchange file.
+
+## Platforms
+
+CI is `windows-latest` = win-x64, `macos-latest` = osx-arm64 (portable `osx` RID), and `ubuntu-latest` = linux-x64. win-arm64 is in the nupkg, not CI-tested. linux-arm64 is in the nupkg, not CI-tested.
+
+## Troubleshooting
+
+Debugging a process that uses DuckDB.NET can throw `AccessViolationException` because the debugger touches native memory; this is documented upstream (Giorgi/DuckDB.NET “Known Issues”) and is not a DataBall bug.
+
+SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ is decompress-only). Do not use SharpCompress 1.0.0.
+
+## Historical docs
+
+`docs/archive/` holds pre-rebuild proposals (Polars, Arrow, hierarchical TestData). They do not describe the shipped API.
 
 ## License
-Mozilla Public License Version 2.0 (MPL-2.0). See [LICENSE](LICENSE) for details.
+
+Apache License 2.0. See [LICENSE](LICENSE) for details. Versions ≤ 1.0.0 were distributed under MPL-2.0; those releases remain available under those terms. 1.1.0+ is Apache-2.0. Git tags: `v1.2.0` (this tree), `v1.0.0-mpl` (last MPL-2.0 commit).
 
 ## Repository
+
 https://github.com/squalor-xyz/DataBall
