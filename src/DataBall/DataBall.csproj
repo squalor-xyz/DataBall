@@ -8,6 +8,8 @@
     <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, zip/tar, .ball), row builder, Bounce/Squish. Apache-2.0.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <NoWarn>$(NoWarn);CS1591</NoWarn>
   </PropertyGroup>
   <ItemGroup>

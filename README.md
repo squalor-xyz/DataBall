@@ -14,6 +14,7 @@ Packages are **not on nuget.org**. Do **not** `dotnet nuget push`. There are no 
 
 ```bash
 dotnet pack src/DataBall/DataBall.csproj -c Release -o artifacts
+dotnet pack src/DataBall.Handlers/DataBall.Handlers.csproj -c Release -o artifacts
 dotnet pack src/DataBall.Cli/DataBall.Cli.csproj -c Release -o artifacts
 ```
 
@@ -28,7 +29,9 @@ dotnet tool install --global squalor.DataBall.Cli --add-source ./artifacts
 databall --help
 ```
 
-Package IDs: `squalor.DataBall` (library), `squalor.DataBall.Cli` (global tool `databall`).
+Package IDs: `squalor.DataBall` (library), `squalor.DataBall.Handlers` (lab CSV/translators), `squalor.DataBall.Cli` (global tool `databall`).
+
+A `v*` tag that is an ancestor of `main` packs those three and attaches the nupkgs to a GitHub Release. nuget.org push runs only when the `NUGET_API_KEY` secret is set on the DataBall repo; until then the packages are **not** on nuget.org. Do not claim a nuget.org listing until a tagged release has pushed.
 
 Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward: latestFeature`).
 

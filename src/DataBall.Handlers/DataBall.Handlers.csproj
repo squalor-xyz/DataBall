@@ -6,7 +6,13 @@
     <PackageId>squalor.DataBall.Handlers</PackageId>
     <Version>1.2.0</Version>
     <Description>Lab format translators for DataBall Open (custom CSV primary; STDF/Touchstone/production slots).</Description>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\DataBall\DataBall.csproj" />
   </ItemGroup>
