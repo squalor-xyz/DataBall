@@ -10,24 +10,25 @@ Callers do not need SQL. `Query(string sql)` is an escape hatch against table `"
 
 ## Install
 
-Packages are not published to nuget.org from this repository. Use the package IDs below from a feed you control, or pack locally.
-
-```bash
-# Library
-dotnet add package squalor.DataBall
-
-# CLI
-dotnet tool install --global squalor.DataBall.Cli
-```
-
-Local pack from this tree:
+Packages are **not on nuget.org**. Do **not** `dotnet nuget push`. There are no API keys in this tree. Pack locally:
 
 ```bash
 dotnet pack src/DataBall/DataBall.csproj -c Release -o artifacts
 dotnet pack src/DataBall.Cli/DataBall.Cli.csproj -c Release -o artifacts
-dotnet add package squalor.DataBall --source ./artifacts
-dotnet tool install --global squalor.DataBall.Cli --add-source ./artifacts
 ```
+
+Inspect the library nupkg: `lib/net10.0/DataBall.dll`, README, **no `runtimes/`** (DuckDB natives come from `DuckDB.NET.Data.Full` at consumer restore). Inspect the tool nupkg: `tools/net10.0/any/` includes `DataBall.dll` and `runtimes/{linux-x64,linux-arm64,osx,win-x64,win-arm64}/native/`.
+
+Consume from `./artifacts`. Restore still needs nuget.org (or a mirror) for DuckDB.NET, SharpCompress, and logging abstractions:
+
+```bash
+dotnet add package squalor.DataBall --source ./artifacts
+dotnet tool uninstall -g squalor.DataBall.Cli   # if an older version is already installed
+dotnet tool install --global squalor.DataBall.Cli --add-source ./artifacts
+databall --help
+```
+
+Package IDs: `squalor.DataBall` (library), `squalor.DataBall.Cli` (global tool `databall`).
 
 Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward: latestFeature`).
 

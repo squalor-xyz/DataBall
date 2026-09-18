@@ -8,6 +8,21 @@ namespace squalor.DataBall.Tests
     public class ReadmePlatformsTests
     {
         [Fact]
+        public void Readme_Install_LocalPackBeforeUnsourcedAdd()
+        {
+            var readme = File.ReadAllText(Path.Combine(RepoRoot(), "README.md"));
+            var install = Section(readme, "## Install");
+            const string add = "dotnet add package squalor.DataBall";
+            var i = install.IndexOf(add, StringComparison.Ordinal);
+            Assert.True(i >= 0, "Install must show how to add squalor.DataBall");
+            var lineEnd = install.IndexOf('\n', i);
+            var line = lineEnd < 0 ? install[i..] : install[i..lineEnd];
+            Assert.Contains("--source", line, StringComparison.Ordinal);
+            Assert.Contains("lib/net10.0/DataBall.dll", install, StringComparison.Ordinal);
+            Assert.Contains("no `runtimes/`", install, StringComparison.Ordinal);
+        }
+
+        [Fact]
         public void Readme_Platforms_NamesCiMatrixAndNotCiRids()
         {
             var readme = File.ReadAllText(Path.Combine(RepoRoot(), "README.md"));
