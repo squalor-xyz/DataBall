@@ -216,6 +216,26 @@ internal static class CliApp
         foreach (var column in columns)
             stdout.WriteLine($"  {column["column_name"]} ({column["data_type"]})");
 
+        var isView = db.Query("""
+            SELECT COUNT(*) AS c FROM information_schema.tables
+            WHERE table_schema = 'main' AND table_name = 'data' AND table_type = 'VIEW'
+            """);
+        if (Convert.ToInt64(isView[0]["c"], CultureInfo.InvariantCulture) > 0)
+        {
+            stdout.WriteLine("Tables:");
+            var tables = db.Query("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name <> 'meta'
+                ORDER BY table_name
+                """);
+            foreach (var table in tables)
+            {
+                var name = Convert.ToString(table["table_name"], CultureInfo.InvariantCulture) ?? string.Empty;
+                var count = db.Query($"SELECT COUNT(*) AS c FROM \"{name.Replace("\"", "\"\"", StringComparison.Ordinal)}\"");
+                stdout.WriteLine($"  {name} ({Convert.ToInt64(count[0]["c"], CultureInfo.InvariantCulture)} rows)");
+            }
+        }
+
         stdout.WriteLine("Metadata:");
         foreach (var pair in db.Metadata.OrderBy(p => p.Key, StringComparer.Ordinal))
             stdout.WriteLine($"  {pair.Key}: {Convert.ToString(pair.Value, CultureInfo.InvariantCulture)}");

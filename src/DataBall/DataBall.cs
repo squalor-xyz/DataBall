@@ -45,6 +45,7 @@ namespace squalor.DataBall
                     ? Config.CreateDefaults()
                     : Config.LoadMerged(configPath);
                 ApplyConfig(_config);
+                InitializeLayout();
             }
             catch
             {
@@ -98,6 +99,12 @@ namespace squalor.DataBall
 
         internal IReadOnlyList<Relationship> Relationships => _relationships;
 
+        /// <summary>Bound table layout, or null when <c>"data"</c> is one wide table.</summary>
+        internal TableLayout? Layout => _store.Layout;
+
+        /// <summary>True when the merged config declares a <c>tables</c> layout.</summary>
+        internal bool HasLayoutConfig => _config.Tables.Count > 0;
+
         /// <summary>
         /// Gets a snapshot of the merged schema config (native defaults plus any overlay file).
         /// Mutating the returned object does not affect the session.
@@ -124,6 +131,7 @@ namespace squalor.DataBall
         public void AddColumn<T>(string name, IEnumerable<T> values) where T : struct
         {
             ThrowIfDisposed();
+            ThrowIfLayoutDeclared("AddColumn");
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(T));
             var list = values as IReadOnlyList<T> ?? values.ToList();
@@ -140,6 +148,7 @@ namespace squalor.DataBall
         public void AddColumn(string name, IEnumerable<string?> values)
         {
             ThrowIfDisposed();
+            ThrowIfLayoutDeclared("AddColumn");
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(string));
             var list = values as IReadOnlyList<string?> ?? values.ToList();
@@ -155,6 +164,7 @@ namespace squalor.DataBall
         public void RemoveColumn(string name)
         {
             ThrowIfDisposed();
+            ThrowIfLayoutDeclared("RemoveColumn");
             _store.RemoveColumn(name);
             _expectedColumnTypes.Remove(name);
         }
@@ -166,8 +176,10 @@ namespace squalor.DataBall
         public void AddRow(IReadOnlyDictionary<string, object?> values)
         {
             ThrowIfDisposed();
+            ThrowIfMultiTable("AddRow");
             _store.AddRow(values, _expectedColumnTypes);
             RememberRow(values);
+            SplitIfLayout();
         }
 
         /// <summary>
@@ -182,8 +194,10 @@ namespace squalor.DataBall
             var list = rows as IReadOnlyList<IReadOnlyDictionary<string, object?>> ?? rows.ToList();
             if (list.Count == 0)
                 return;
+            ThrowIfMultiTable("AddRows");
             _store.AddRows(list, _expectedColumnTypes);
             RememberRow(list[list.Count - 1]);
+            SplitIfLayout();
         }
 
         /// <summary>
@@ -217,6 +231,7 @@ namespace squalor.DataBall
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
+            ThrowIfLayoutDeclared("MergeOrAppend");
             ArgumentNullException.ThrowIfNull(other);
             ObjectDisposedException.ThrowIf(other._disposed, other);
 
@@ -272,6 +287,7 @@ namespace squalor.DataBall
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
+            ThrowIfMultiTable("Bounce");
             _logger.LogInformation("Starting Bounce operation");
             try
             {
@@ -357,23 +373,47 @@ namespace squalor.DataBall
             _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, append);
             try
             {
-                switch (format)
+                if (append && _store.DataIsView())
+                    throw new DataBallException("ImportAsync with Append = true is not supported on a multi-table session yet");
+
+                void Import()
                 {
-                    case ExportType.Csv:
-                        _store.ImportCsv(path, append, _expectedColumnTypes);
-                        ApplyCsvSchema();
-                        break;
-                    case ExportType.Parquet:
-                        _store.ImportParquet(path, append);
-                        break;
-                    case ExportType.Archive:
-                        ImportManager.ImportFromArchive(this, path, append);
-                        break;
-                    case ExportType.Ball:
-                        ImportManager.ImportFromBall(this, path, append);
-                        break;
-                    default:
-                        throw new DataBallException($"Unknown import format for '{path}'");
+                    switch (format)
+                    {
+                        case ExportType.Csv:
+                            _store.ImportCsv(path, append, _expectedColumnTypes);
+                            ApplyCsvSchema();
+                            break;
+                        case ExportType.Parquet:
+                            _store.ImportParquet(path, append);
+                            break;
+                        case ExportType.Archive:
+                            ImportManager.ImportFromArchive(this, path, append);
+                            break;
+                        case ExportType.Ball:
+                            ImportManager.ImportFromBall(this, path, append);
+                            break;
+                        default:
+                            throw new DataBallException($"Unknown import format for '{path}'");
+                    }
+                }
+
+                if (HasLayoutConfig)
+                {
+                    // One transaction: a failed import must not leave an emptied layout session.
+                    _store.InTransaction(() =>
+                    {
+                        if (_store.DataIsView())
+                            _store.DropDataRelation();
+                        Import();
+                        SplitIfLayout();
+                    });
+                }
+                else
+                {
+                    Import();
+                    // A .ball config.json may have introduced a layout.
+                    SplitIfLayout();
                 }
                 return Task.CompletedTask;
             }
@@ -664,6 +704,51 @@ namespace squalor.DataBall
                 if (policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase) && distinct > 1)
                     throw new DataBallException($"Metadata field '{match.Name}' is not constant");
             }
+        }
+
+        /// <summary>
+        /// Constructor step: bind or build the layout. A view-backed file needs a config with
+        /// <c>tables</c>; a wide file opened with <c>tables</c> is split; a bad layout fails now.
+        /// </summary>
+        private void InitializeLayout()
+        {
+            if (_store.DataIsView())
+            {
+                if (!HasLayoutConfig)
+                    throw new DataBallException("Session file has a multi-table layout; open it with the config that declares 'tables'");
+                _store.BindExistingLayout(_config);
+                return;
+            }
+
+            if (!HasLayoutConfig)
+                return;
+
+            TableLayout.Validate(_config);
+            SplitIfLayout();
+        }
+
+        /// <summary>
+        /// Splits the wide base table into the declared layout when one is configured and
+        /// <c>"data"</c> is still a base table. No-op otherwise.
+        /// </summary>
+        internal void SplitIfLayout()
+        {
+            if (!HasLayoutConfig || !_store.DataTableExists() || _store.DataIsView())
+                return;
+            _store.SplitIntoLayout(_config);
+            _logger.LogInformation("Split \"data\" into tables: {Tables}", string.Join(", ", _store.Layout!.PhysicalTableNames));
+        }
+
+        private void ThrowIfMultiTable(string operation)
+        {
+            if (_store.DataIsView())
+                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
+        }
+
+        private void ThrowIfLayoutDeclared(string operation)
+        {
+            if (HasLayoutConfig)
+                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
         }
 
         private void ThrowIfDisposed()

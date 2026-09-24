@@ -1,0 +1,11 @@
+{
+  "stimulus": ["Frequency", "Temp", "Vcc"],
+  "parameters": { "stimulusGrp": { "role": "identity" }, "sweep": { "role": "identity" } },
+  "tables": {
+    "device": { "kind": "master",       "columns": ["SN"] },
+    "setup":  { "kind": "dimension",    "columns": ["Teststand", "Temp", "Vcc"] },
+    "sweep":  { "kind": "rows",         "roles":   ["identity", "stimulus"], "columns": ["Date"] },
+    "rf":     { "kind": "measurements", "columns": ["Pout", "Pin", "Gain", "EVM"] },
+    "dc":     { "kind": "measurements", "columns": ["I_Total"] }
+  }
+}

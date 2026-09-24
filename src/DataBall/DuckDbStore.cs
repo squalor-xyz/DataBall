@@ -17,7 +17,7 @@ namespace squalor.DataBall
     /// <summary>
     /// DuckDB-backed session store. Instances are not thread-safe; one session per owner.
     /// </summary>
-    internal sealed class DuckDbStore : IDisposable
+    internal sealed partial class DuckDbStore : IDisposable
     {
         private static readonly object FileGate = new();
         private static readonly HashSet<string> OpenFiles = new(StringComparer.Ordinal);
@@ -168,6 +168,13 @@ namespace squalor.DataBall
         {
             ArgumentNullException.ThrowIfNull(body);
             ThrowIfDisposed();
+            if (_currentTx is not null)
+            {
+                // Nested call joins the outer transaction; the outermost caller commits or rolls back.
+                body();
+                return;
+            }
+
             using var tx = _connection.BeginTransaction();
             var previous = _currentTx;
             _currentTx = tx;
@@ -686,7 +693,7 @@ namespace squalor.DataBall
             var qDir = QuotePath(directory);
             var by = string.Join(", ", resolved.Select(QuoteIdent));
             // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
-            Execute($"COPY \"data\" TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
+            Execute($"COPY (SELECT * FROM \"data\") TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
         }
 
         private static void ClearHiveTarget(string directory)
@@ -769,7 +776,8 @@ namespace squalor.DataBall
             var dir = Path.GetDirectoryName(Path.GetFullPath(path));
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
-            var source = select is null ? "\"data\"" : "(" + select.Value.Sql + ")";
+            // Subquery form so "data" may be a base table or the layout view.
+            var source = select is null ? "(SELECT * FROM \"data\")" : "(" + select.Value.Sql + ")";
             var sql = $"COPY {source} TO {QuotePath(path)} ({copyOptions})";
             var parameters = select?.Parameters ?? [];
             if (parameters.Length > 0)

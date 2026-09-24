@@ -4,7 +4,7 @@
     <AssemblyName>DataBall</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageId>squalor.DataBall</PackageId>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <Description>Test-executive table + metadata library. DuckDB-backed import/export (CSV, Parquet, zip/tar, .ball), row builder, Bounce/Squish. Apache-2.0.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>

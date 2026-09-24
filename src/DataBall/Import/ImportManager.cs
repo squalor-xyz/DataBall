@@ -31,6 +31,7 @@ namespace squalor.DataBall.Import
             try
             {
                 db.Store.ImportParquet(path, append);
+                db.SplitIfLayout();
                 db.Logger.LogInformation("Parquet import completed");
                 return Task.CompletedTask;
             }
@@ -56,6 +57,7 @@ namespace squalor.DataBall.Import
             {
                 db.Store.ImportCsv(path, append, db.ExpectedColumnTypes);
                 db.ApplyCsvSchema();
+                db.SplitIfLayout();
                 db.Logger.LogInformation("CSV import completed");
             }
             catch (Exception ex)
@@ -127,6 +129,9 @@ namespace squalor.DataBall.Import
         /// <summary>
         /// Imports a <c>.ball</c> ZIP (parquet + metadata, optional config).
         /// <c>data.parquet</c> is optional; metadata-only balls load metadata without a data table.
+        /// A v2 ball (<c>manifest.json</c> + <c>tables/&lt;name&gt;.parquet</c>) whose <c>config.json</c>
+        /// declares <c>tables</c> is rebuilt table by table; otherwise the wide <c>data.parquet</c> is
+        /// imported as before and split when the session has a layout.
         /// </summary>
         /// <param name="db">The DataBall instance to import into.</param>
         /// <param name="path">The path to the <c>.ball</c> file.</param>
@@ -140,17 +145,20 @@ namespace squalor.DataBall.Import
             try
             {
                 ZipFile.ExtractToDirectory(path, dir);
+
+                // Config first: a layout in config.json decides how the parquet is read.
+                var configPath = FindExtractedFile(dir, "config.json");
+                if (configPath is not null)
+                    db.ApplyImportedConfig(Config.LoadConfig(configPath));
+
                 var parquet = FindExtractedFile(dir, "data.parquet");
-                if (parquet is not null)
+                var loadedTables = !append && TryLoadLayoutTables(db, dir);
+                if (!loadedTables && parquet is not null)
                     db.Store.ImportParquet(parquet, append);
 
                 var metadataPath = FindExtractedFile(dir, "metadata.json");
                 if (metadataPath is not null)
                     LoadMetadataJson(db, metadataPath);
-
-                var configPath = FindExtractedFile(dir, "config.json");
-                if (configPath is not null)
-                    db.ApplyImportedConfig(Config.LoadConfig(configPath));
 
                 db.Logger.LogInformation("Ball import completed");
             }
@@ -167,6 +175,73 @@ namespace squalor.DataBall.Import
         }
 
         internal static ExportType DetectImportFormat(string path) => DataBall.DetectFormat(path);
+
+        /// <summary>
+        /// Rebuilds a layout from <c>manifest.json</c> + <c>tables/*.parquet</c>. Returns false (and
+        /// leaves the session untouched) when the ball is v1, the session has no layout, or the
+        /// manifest does not match the config; the caller then falls back to <c>data.parquet</c>.
+        /// </summary>
+        private static bool TryLoadLayoutTables(DataBall db, string dir)
+        {
+            if (!db.HasLayoutConfig)
+                return false;
+            var manifestPath = FindExtractedFile(dir, BallManifest.FileName);
+            if (manifestPath is null)
+                return false;
+
+            BallManifest? manifest;
+            try
+            {
+                manifest = JsonSerializer.Deserialize<BallManifest>(File.ReadAllText(manifestPath), BallManifest.JsonOptions);
+            }
+            catch (JsonException ex)
+            {
+                db.Logger.LogWarning(ex, "Ignoring unreadable {Manifest}", BallManifest.FileName);
+                return false;
+            }
+
+            if (manifest is null || manifest.BallVersion < 2 || manifest.Columns.Count == 0)
+                return false;
+
+            TableLayout layout;
+            try
+            {
+                layout = TableLayout.Build(db.Schema, manifest.Columns);
+            }
+            catch (DataBallException ex)
+            {
+                db.Logger.LogWarning(ex, "Ball manifest does not fit the session config; using data.parquet");
+                return false;
+            }
+
+            var expected = new HashSet<string>(layout.PhysicalTableNames, StringComparer.OrdinalIgnoreCase);
+            if (!expected.SetEquals(manifest.Tables))
+            {
+                db.Logger.LogWarning("Ball tables {BallTables} differ from config tables {ConfigTables}; using data.parquet",
+                    string.Join(",", manifest.Tables), string.Join(",", layout.PhysicalTableNames));
+                return false;
+            }
+
+            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var table in layout.PhysicalTableNames)
+            {
+                var file = Path.Combine(dir, "tables", table + ".parquet");
+                if (!File.Exists(file))
+                    return false;
+                files[table] = file;
+            }
+
+            try
+            {
+                db.Store.LoadLayoutTables(layout, files);
+                return true;
+            }
+            catch (DataBallException ex)
+            {
+                db.Logger.LogWarning(ex, "Ball tables/ did not load; using data.parquet");
+                return false;
+            }
+        }
 
         private static bool ImportArchiveViaFactory(DataBall db, string path, string dir, bool append)
         {

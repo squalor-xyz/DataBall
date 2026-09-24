@@ -2,7 +2,7 @@
 
 Engineering leftovers from the DuckDB rebuild review, plus the suite-driven Open/handler track. **ATE spirit:** sequential test-executive tables, DuckDB as the only SQL engine, interchange via CSV / Parquet / `.ball` / zip-tar.gz. SQLite, DataFrame, and matrix Bounce are gone and stay gone.
 
-DataBall is WIP and co-developed with `squalor-xyz/suite`. It is the cross-app utility: configurable schema, Open (detect + `IFormatHandler` → session), batch/row insert, query, session filter.
+DataBall is WIP and co-developed with `squalor-xyz/suite`. It is the cross-app utility: configurable schema, Open (detect + `IFormatHandler` → session), batch/row insert, query, session filter, and (from 1.3.0) a config-declared multi-table layout behind the `"data"` view.
 
 License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
@@ -21,6 +21,7 @@ Do not nuget-push or git-push from this list unless the owner asks.
 | S3 | First lab handler project (not in `DuckDbStore`) | Feature (done: `DataBall.Handlers`, custom CSV primary; STDF/Touchstone/production slots) |
 | S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature (done) |
 | S5 | Batch insert path that does not row-loop | Feature (done) |
+| S6 | Config-declared table layout (`tables`): master / dimension / rows / measurements behind the `"data"` view; `.ball` v2 | Feature — suite **S46** read path + `.ball` (done); **S47** row writes into tables; **S48** Bounce / column edits / MergeOrAppend; **S49** snowflake `parent` + perf guard |
 
 Handlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.
 
@@ -317,4 +318,4 @@ public DataBall(string? configPath = null, ILogger? logger = null, string? datab
 
 ## Explicitly not on this roadmap
 
-Hierarchical `DataFile`/`DataGroup`/`DataSweep`, streaming `Query`, Polars, DataFrame, SQLite, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing.
+Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), streaming `Query`, Polars, DataFrame, SQLite, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing.

@@ -127,6 +127,9 @@ namespace squalor.DataBall.Export
         /// <summary>
         /// Exports the DataBall as a <c>.ball</c> ZIP of parquet plus metadata.
         /// Parquet is omitted when there is no data table; metadata-only balls are allowed.
+        /// A multi-table session also writes <c>manifest.json</c> and <c>tables/&lt;name&gt;.parquet</c>
+        /// next to the wide <c>data.parquet</c> (kept for older readers), unless a session filter
+        /// is applied, in which case only the filtered wide parquet is written.
         /// </summary>
         /// <param name="db">The DataBall to export.</param>
         /// <param name="path">The path to save the <c>.ball</c> file.</param>
@@ -144,23 +147,50 @@ namespace squalor.DataBall.Export
                     throw new DataBallException("No data to export");
 
                 string? parquetPath = null;
+                var filtered = db.FilteredSelectOrNull();
                 if (hasTable)
                 {
                     parquetPath = Path.Combine(dir, "data.parquet");
-                    db.Store.ExportParquet(parquetPath, db.FilteredSelectOrNull());
+                    db.Store.ExportParquet(parquetPath, filtered);
+                }
+
+                var tableEntries = new List<(string Entry, string Path)>();
+                string? manifestPath = null;
+                var layout = db.Layout;
+                if (hasTable && filtered is null && layout is not null && db.Store.DataIsView())
+                {
+                    var tablesDir = Path.Combine(dir, "tables");
+                    Directory.CreateDirectory(tablesDir);
+                    foreach (var table in layout.PhysicalTables)
+                    {
+                        var file = Path.Combine(tablesDir, table.Name + ".parquet");
+                        db.Store.ExportTableParquet(table.Name, file);
+                        tableEntries.Add(("tables/" + table.Name + ".parquet", file));
+                    }
+
+                    var manifest = new BallManifest
+                    {
+                        BallVersion = 2,
+                        Columns = new List<string>(layout.WideColumns),
+                        Tables = new List<string>(layout.PhysicalTableNames)
+                    };
+                    manifestPath = Path.Combine(dir, BallManifest.FileName);
+                    File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, BallManifest.JsonOptions));
                 }
 
                 var metadataPath = Path.Combine(dir, "metadata.json");
                 File.WriteAllText(metadataPath, DuckDbStore.SerializeMetadataMap(db.Metadata));
 
                 string? configPath = null;
-                if (db.ExpectedColumnTypes.Count > 0 || db.Relationships.Count > 0)
+                var schema = db.Schema;
+                if (db.ExpectedColumnTypes.Count > 0 || db.Relationships.Count > 0 || schema.Tables.Count > 0)
                 {
                     var config = new Config
                     {
                         Metadata = new Dictionary<string, object?>(),
                         Columns = ToColumnTypeNames(db.ExpectedColumnTypes),
-                        Relationships = new List<Relationship>(db.Relationships)
+                        Relationships = new List<Relationship>(db.Relationships),
+                        Tables = schema.Tables
                     };
                     configPath = Path.Combine(dir, "config.json");
                     File.WriteAllText(configPath, JsonSerializer.Serialize(config));
@@ -178,6 +208,10 @@ namespace squalor.DataBall.Export
                 {
                     if (parquetPath is not null)
                         zip.CreateEntryFromFile(parquetPath, "data.parquet");
+                    foreach (var (entry, file) in tableEntries)
+                        zip.CreateEntryFromFile(file, entry);
+                    if (manifestPath is not null)
+                        zip.CreateEntryFromFile(manifestPath, BallManifest.FileName);
                     zip.CreateEntryFromFile(metadataPath, "metadata.json");
                     if (configPath is not null)
                         zip.CreateEntryFromFile(configPath, "config.json");

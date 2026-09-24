@@ -75,6 +75,13 @@ namespace squalor.DataBall
         public string? MetadataPolicy { get; set; }
 
         /// <summary>
+        /// Gets or sets the config-declared table layout, keyed by table name (insertion order is
+        /// table order). Empty means one wide <c>"data"</c> table. Non-empty makes <c>"data"</c> a
+        /// view over these tables. An overlay with tables replaces the baseline list.
+        /// </summary>
+        public Dictionary<string, TableSpec> Tables { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
         /// Built-in profile: header patterns, common units, default stimulus and metadata names.
         /// </summary>
         public static Config CreateDefaults()
@@ -281,6 +288,13 @@ namespace squalor.DataBall
 
             if (!string.IsNullOrWhiteSpace(src.MetadataPolicy))
                 dest.MetadataPolicy = src.MetadataPolicy;
+
+            if (src.Tables.Count > 0)
+            {
+                dest.Tables = new Dictionary<string, TableSpec>(StringComparer.OrdinalIgnoreCase);
+                foreach (var (k, v) in src.Tables)
+                    dest.Tables[k] = CloneTable(v);
+            }
         }
 
         private static Config Normalize(Config config)
@@ -295,9 +309,11 @@ namespace squalor.DataBall
             config.Classification ??= new();
             config.MetadataFields ??= new();
             config.MetadataFieldsAdd ??= new();
+            config.Tables ??= new();
             config.Columns = new Dictionary<string, string>(config.Columns, StringComparer.OrdinalIgnoreCase);
             config.Units = new Dictionary<string, UnitSpec>(config.Units, StringComparer.OrdinalIgnoreCase);
             config.Parameters = new Dictionary<string, ParameterSpec>(config.Parameters, StringComparer.OrdinalIgnoreCase);
+            config.Tables = new Dictionary<string, TableSpec>(config.Tables, StringComparer.OrdinalIgnoreCase);
             return config;
         }
 
@@ -344,6 +360,20 @@ namespace squalor.DataBall
             if (spec is null)
                 return new ParameterSpec();
             return new ParameterSpec { Role = spec.Role, Type = spec.Type };
+        }
+
+        private static TableSpec CloneTable(TableSpec spec)
+        {
+            if (spec is null)
+                return new TableSpec();
+            return new TableSpec
+            {
+                Kind = spec.Kind,
+                Columns = spec.Columns is null ? new List<string>() : new List<string>(spec.Columns),
+                Roles = spec.Roles is null ? new List<string>() : new List<string>(spec.Roles),
+                Key = spec.Key is null ? new List<string>() : new List<string>(spec.Key),
+                Parent = spec.Parent
+            };
         }
 
         private static Relationship CloneRelationship(Relationship rel)

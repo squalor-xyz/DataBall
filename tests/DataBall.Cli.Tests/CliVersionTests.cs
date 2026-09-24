@@ -15,13 +15,13 @@ public class CliVersionTests
         var sln = FindUp("DataBall.sln");
         var csproj = Path.Combine(sln, "src", "DataBall", "DataBall.csproj");
         var version = XDocument.Load(csproj).Descendants("Version").First().Value;
-        Assert.Equal("1.2.0", version);
+        Assert.Equal("1.3.0", version);
 
         var suiteAgents = Path.Combine(Directory.GetParent(sln)!.FullName, "AGENTS.md");
         if (!File.Exists(suiteAgents))
             return;
         var agents = File.ReadAllText(suiteAgents);
-        Assert.Matches(new Regex(@"squalor\.DataBall`?\s+\*?\*?1\.2\.0"), agents);
+        Assert.Matches(new Regex(@"squalor\.DataBall`?\s+\*?\*?1\.3\.0"), agents);
     }
 
     private static string FindUp(string name)

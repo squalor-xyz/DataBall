@@ -110,6 +110,7 @@ namespace squalor.DataBall.Tests
         [InlineData("""{"relationships": null}""")]
         [InlineData("""{"stimulus": null}""")]
         [InlineData("""{"metadataFields": null}""")]
+        [InlineData("""{"tables": null}""")]
         public void Ctor_ConfigWithExplicitNulls_DoesNotThrowNullReference(string json)
         {
             var dir = TempDir();
