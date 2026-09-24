@@ -30,8 +30,7 @@ namespace squalor.DataBall.Import
             db.Logger.LogInformation("Importing Parquet from {Path}, append={Append}", path, append);
             try
             {
-                db.Store.ImportParquet(path, append);
-                db.SplitIfLayout();
+                db.RunImport(append, () => db.Store.ImportParquet(path, append));
                 db.Logger.LogInformation("Parquet import completed");
                 return Task.CompletedTask;
             }
@@ -55,9 +54,7 @@ namespace squalor.DataBall.Import
             db.Logger.LogInformation("Importing CSV from {Path}, append={Append}", path, append);
             try
             {
-                db.Store.ImportCsv(path, append, db.ExpectedColumnTypes);
-                db.ApplyCsvSchema();
-                db.SplitIfLayout();
+                db.RunImport(append, () => db.ImportCsvWithSchema(path, append));
                 db.Logger.LogInformation("CSV import completed");
             }
             catch (Exception ex)
@@ -75,6 +72,12 @@ namespace squalor.DataBall.Import
         /// <param name="append">If true, the first CSV is appended; subsequent CSVs always append.</param>
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromArchive(DataBall db, string path, bool append)
+        {
+            db.RunImport(append, () => ImportFromArchiveCore(db, path, append));
+        }
+
+        /// <summary>Archive import body; <see cref="DataBall.ImportAsync"/> runs it inside its own <c>RunImport</c>.</summary>
+        internal static void ImportFromArchiveCore(DataBall db, string path, bool append)
         {
             db.Logger.LogInformation("Importing archive from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-in-" + Guid.NewGuid().ToString("N"));
@@ -139,6 +142,12 @@ namespace squalor.DataBall.Import
         /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
         public static void ImportFromBall(DataBall db, string path, bool append)
         {
+            db.RunImport(append, () => ImportFromBallCore(db, path, append));
+        }
+
+        /// <summary>Ball import body; <see cref="DataBall.ImportAsync"/> runs it inside its own <c>RunImport</c>.</summary>
+        internal static void ImportFromBallCore(DataBall db, string path, bool append)
+        {
             db.Logger.LogInformation("Importing .ball from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-ball-in-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
@@ -147,9 +156,13 @@ namespace squalor.DataBall.Import
                 ZipFile.ExtractToDirectory(path, dir);
 
                 // Config first: a layout in config.json decides how the parquet is read.
+                Config? config = null;
                 var configPath = FindExtractedFile(dir, "config.json");
                 if (configPath is not null)
-                    db.ApplyImportedConfig(Config.LoadConfig(configPath));
+                {
+                    config = Config.LoadConfig(configPath);
+                    db.ApplyImportedConfig(config);
+                }
 
                 var parquet = FindExtractedFile(dir, "data.parquet");
                 var loadedTables = !append && TryLoadLayoutTables(db, dir);
@@ -159,6 +172,10 @@ namespace squalor.DataBall.Import
                 var metadataPath = FindExtractedFile(dir, "metadata.json");
                 if (metadataPath is not null)
                     LoadMetadataJson(db, metadataPath);
+
+                // Config metadata keeps winning over metadata.json, as when config was applied last.
+                if (config is not null)
+                    db.ApplyImportedConfigMetadata(config);
 
                 db.Logger.LogInformation("Ball import completed");
             }
@@ -233,12 +250,14 @@ namespace squalor.DataBall.Import
 
             try
             {
-                db.Store.LoadLayoutTables(layout, files);
+                db.Store.LoadLayoutTables(layout, files, db.CurrentConfig);
                 return true;
             }
-            catch (DataBallException ex)
+            catch (DataBallException ex) when (ex.InnerException is not DuckDB.NET.Data.DuckDBException)
             {
-                db.Logger.LogWarning(ex, "Ball tables/ did not load; using data.parquet");
+                // Validation failed before any catalog write; the wide parquet is still a valid source.
+                // A DuckDB-level error has aborted the enclosing transaction and must propagate.
+                db.Logger.LogWarning(ex, "Ball tables/ did not fit; using data.parquet");
                 return false;
             }
         }
@@ -309,8 +328,7 @@ namespace squalor.DataBall.Import
                     Directory.CreateDirectory(destDir);
                 using (var fileStream = File.Create(dest))
                     entryStream.CopyTo(fileStream);
-                db.Store.ImportCsv(dest, append, db.ExpectedColumnTypes);
-                db.ApplyCsvSchema();
+                db.ImportCsvWithSchema(dest, append);
             }
         }
 

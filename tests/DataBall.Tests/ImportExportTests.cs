@@ -671,25 +671,17 @@ namespace squalor.DataBall.Tests
                         w.Write("Name,Age\nAlice,30\n");
                 }
 
+                // An import is one transaction (S47): the factory path lands x.csv, the broken
+                // x.csv/y.csv entry fails it, and the rollback leaves the session as it was.
+                // Before S47 the first CSV survived; either way Alice is never imported twice.
                 using var db = new DataBall();
-                try
-                {
-                    ImportManager.ImportFromArchive(db, zipPath, append: false);
-                }
-                catch (DataBallException)
-                {
-                }
+                Assert.Throws<DataBallException>(() => ImportManager.ImportFromArchive(db, zipPath, append: false));
 
-                var alice = 0;
-                if (db.Query("""
+                var exists = Convert.ToInt64(db.Query("""
                     SELECT COUNT(*) AS c FROM information_schema.tables
                     WHERE table_schema = 'main' AND table_name = 'data'
-                    """)[0]["c"] is { } c && Convert.ToInt64(c) > 0)
-                {
-                    alice = db.Query("SELECT Name FROM data WHERE Name = 'Alice'").Count;
-                }
-
-                Assert.Equal(1, alice);
+                    """)[0]["c"]);
+                Assert.Equal(0, exists);
             }
             finally
             {

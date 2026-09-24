@@ -278,6 +278,8 @@ namespace squalor.DataBall
             ValidateName(name, "Column");
             ArgumentNullException.ThrowIfNull(clrType);
             var sqlType = ToDuckDbType(clrType);
+            if (Layout is not null)
+                return; // the routed AddRow grows the layout schema inside its own transaction
             if (!DataTableExists())
             {
                 Execute($"CREATE TABLE \"data\" ({QuoteIdent(name)} {sqlType})");
@@ -393,6 +395,16 @@ namespace squalor.DataBall
                     throw new DataBallException($"Duplicate column name '{key}'");
             }
 
+            if (Layout is not null)
+            {
+                // An empty row is a spine row with no values: stage one NULL for a wide column.
+                var staged = values.Count == 0
+                    ? new Dictionary<string, object?> { [Layout.WideColumns[0]] = null }
+                    : values;
+                AddRows(new[] { staged }, expectedTypes);
+                return;
+            }
+
             InTransaction(() =>
             {
                 if (!DataTableExists())
@@ -447,6 +459,12 @@ namespace squalor.DataBall
 
             if (keyOrder.Count == 0)
                 throw new DataBallException("AddRows requires at least one column");
+
+            if (Layout is not null)
+            {
+                AddRowsIntoLayout(rows, keyOrder, expectedTypes);
+                return;
+            }
 
             InTransaction(() =>
             {
@@ -524,6 +542,12 @@ namespace squalor.DataBall
             ValidateName(sourceTable, "Table");
             var qSrc = QuoteIdent(sourceTable);
 
+            if (Layout is not null && append)
+            {
+                AppendStagingIntoLayout(sourceTable);
+                return;
+            }
+
             if (!append || !DataTableExists() || RowCount() == 0)
             {
                 InTransaction(() =>
@@ -534,6 +558,21 @@ namespace squalor.DataBall
                 return;
             }
 
+            try
+            {
+                InTransaction(() => AppendFromTable(sourceTable, qSrc));
+            }
+            catch
+            {
+                // ApplyMetadataAgainstSource mutated _metadata inside the transaction; reload once it is rolled back.
+                if (_currentTx is null)
+                    ReloadMetadata();
+                throw;
+            }
+        }
+
+        private void AppendFromTable(string sourceTable, string qSrc)
+        {
             var sourceRowCount = RowCountOf(sourceTable);
             ApplyMetadataAgainstSource(sourceTable);
 
@@ -573,39 +612,60 @@ namespace squalor.DataBall
             Execute($"INSERT INTO \"data\" BY NAME SELECT {string.Join(", ", selectParts)} FROM {qSrc}");
         }
 
-        internal void ImportCsv(string path, bool append, IReadOnlyDictionary<string, Type>? expectedTypes = null)
+        /// <summary>
+        /// Imports a CSV. <paramref name="prepareStaging"/> runs against the staging table after type
+        /// coercion and before the merge (layout sessions apply the CSV schema there).
+        /// </summary>
+        internal void ImportCsv(
+            string path,
+            bool append,
+            IReadOnlyDictionary<string, Type>? expectedTypes = null,
+            Action<string>? prepareStaging = null)
         {
-            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes);
+            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes, prepareStaging);
         }
 
-        internal void RenameColumn(string from, string to)
+        internal void RenameColumnOf(string table, string from, string to)
         {
             ThrowIfDisposed();
+            ValidateName(table, "Table");
             ValidateName(from, "Column");
             ValidateName(to, "Column");
-            if (!DataTableExists())
+            if (!TableExists(table))
                 throw new DataBallException($"Column '{from}' does not exist");
             if (from.Equals(to, StringComparison.OrdinalIgnoreCase))
                 return;
-            var cols = GetColumns();
+            var cols = GetColumnsOf(table);
             if (!cols.Any(c => c.Name.Equals(from, StringComparison.OrdinalIgnoreCase)))
                 throw new DataBallException($"Column '{from}' does not exist");
             if (cols.Any(c => c.Name.Equals(to, StringComparison.OrdinalIgnoreCase)))
                 throw new DataBallException($"Column '{to}' already exists");
-            Execute($"ALTER TABLE \"data\" RENAME COLUMN {QuoteIdent(from)} TO {QuoteIdent(to)}");
+            Execute($"ALTER TABLE {QuoteIdent(table)} RENAME COLUMN {QuoteIdent(from)} TO {QuoteIdent(to)}");
         }
 
-        internal void CoerceDataColumns(IReadOnlyDictionary<string, Type> expectedTypes)
+        /// <summary>
+        /// Rewrites <paramref name="table"/> casting the columns named in <paramref name="expectedTypes"/>.
+        /// Works for the base table and for TEMP staging tables.
+        /// </summary>
+        internal void CoerceColumnsOf(string table, IReadOnlyDictionary<string, Type>? expectedTypes)
         {
             ThrowIfDisposed();
-            if (!DataTableExists() || expectedTypes is null || expectedTypes.Count == 0)
+            ValidateName(table, "Table");
+            if (expectedTypes is null || expectedTypes.Count == 0 || !TableExists(table))
                 return;
-            var cols = GetColumns();
+
+            var cols = GetColumnsOf(table);
+            if (cols.Count == 0)
+                return;
+
             var byName = new Dictionary<string, Type>(expectedTypes.Count, StringComparer.OrdinalIgnoreCase);
             foreach (var pair in expectedTypes)
                 byName[pair.Key] = pair.Value;
+
             if (!cols.Any(c => byName.ContainsKey(c.Name)))
                 return;
+
+            var qTable = QuoteIdent(table);
             var select = string.Join(", ", cols.Select(c =>
             {
                 var q = QuoteIdent(c.Name);
@@ -613,9 +673,10 @@ namespace squalor.DataBall
                     ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
                     : q;
             }));
+            var temp = IsTempTable(table) ? "TEMP " : string.Empty;
             InTransaction(() =>
             {
-                Execute($"CREATE OR REPLACE TABLE \"data\" AS SELECT {select} FROM \"data\"");
+                Execute($"CREATE OR REPLACE {temp}TABLE {qTable} AS SELECT {select} FROM {qTable}");
             });
         }
 
@@ -642,12 +703,11 @@ namespace squalor.DataBall
             try
             {
                 PromoteDateColumns("_staging");
-                CoerceStagingColumns("_staging", expected: null);
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
             {
-                Execute("DROP TABLE IF EXISTS \"_staging\"");
+                DropTemp("_staging");
             }
         }
 
@@ -747,7 +807,8 @@ namespace squalor.DataBall
             bool append,
             string function,
             string extraArgs,
-            IReadOnlyDictionary<string, Type>? expectedTypes = null)
+            IReadOnlyDictionary<string, Type>? expectedTypes = null,
+            Action<string>? prepareStaging = null)
         {
             ThrowIfDisposed();
             if (string.IsNullOrWhiteSpace(path))
@@ -757,12 +818,16 @@ namespace squalor.DataBall
             try
             {
                 PromoteDateColumns("_staging");
-                CoerceStagingColumns("_staging", expectedTypes);
+                CoerceColumnsOf("_staging", expectedTypes);
+                prepareStaging?.Invoke("_staging");
+                // Extracting metadata may have consumed every staging column (and the table with it).
+                if (!TableExists("_staging"))
+                    return;
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
             {
-                Execute("DROP TABLE IF EXISTS \"_staging\"");
+                DropTemp("_staging");
             }
         }
 
@@ -824,6 +889,15 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>Drops a column from any table; drops the table itself when it was the last column.</summary>
+        internal void RemoveColumnOf(string tableName, string columnName)
+        {
+            ThrowIfDisposed();
+            ValidateName(tableName, "Table");
+            ValidateName(columnName, "Column");
+            DropColumnFromTable(tableName, columnName);
+        }
+
         private void DropColumnFromTable(string tableName, string columnName)
         {
             var cols = GetColumnsOf(tableName);
@@ -851,33 +925,6 @@ namespace squalor.DataBall
             Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
         }
 
-        private void CoerceStagingColumns(string tableName, IReadOnlyDictionary<string, Type>? expected)
-        {
-            if (expected is null || expected.Count == 0)
-                return;
-
-            var cols = GetColumnsOf(tableName);
-            if (cols.Count == 0)
-                return;
-
-            var byName = new Dictionary<string, Type>(expected.Count, StringComparer.OrdinalIgnoreCase);
-            foreach (var pair in expected)
-                byName[pair.Key] = pair.Value;
-
-            if (!cols.Any(c => byName.ContainsKey(c.Name)))
-                return;
-
-            var qTable = QuoteIdent(tableName);
-            var select = string.Join(", ", cols.Select(c =>
-            {
-                var q = QuoteIdent(c.Name);
-                return byName.TryGetValue(c.Name, out var clr)
-                    ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
-                    : q;
-            }));
-            Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
-        }
-
         private long RowCountOf(string tableName)
         {
             if (!TableExists(tableName))
@@ -886,7 +933,17 @@ namespace squalor.DataBall
             return Convert.ToInt64(result, CultureInfo.InvariantCulture);
         }
 
-        private bool TableExists(string tableName)
+        private bool IsTempTable(string tableName)
+        {
+            // DuckDB puts TEMP tables in catalog 'temp', schema 'main'.
+            var result = ExecuteScalar($"""
+                SELECT COUNT(*) FROM information_schema.tables
+                WHERE table_name = {QuoteString(tableName)} AND table_catalog = 'temp'
+                """);
+            return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
+        }
+
+        internal bool TableExists(string tableName)
         {
             var result = ExecuteScalar($"""
                 SELECT COUNT(*) FROM information_schema.tables
@@ -911,7 +968,7 @@ namespace squalor.DataBall
             }
         }
 
-        private IReadOnlyList<(string Name, string DuckDbType)> GetColumnsOf(string tableName)
+        internal IReadOnlyList<(string Name, string DuckDbType)> GetColumnsOf(string tableName)
         {
             ThrowIfDisposed();
             var sql = $"""

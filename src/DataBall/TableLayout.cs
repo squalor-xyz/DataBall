@@ -204,6 +204,8 @@ namespace squalor.DataBall
                 }
             }
 
+            // Config.Tables is a Dictionary; JSON object order is preserved in practice and is
+            // what decides role-selector precedence between tables.
             var order = config.Tables.Keys.ToList();
             var assigned = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // wide column -> table
 
@@ -282,6 +284,32 @@ namespace squalor.DataBall
             return new TableLayout(wide, spine, dimensions, groups);
         }
 
+        /// <summary>
+        /// True when <paramref name="other"/> has the same spine, dimensions (name, columns, key),
+        /// and measurement groups (name, columns). Column order and wide order are ignored.
+        /// </summary>
+        internal bool SameShapeAs(TableLayout other)
+        {
+            ArgumentNullException.ThrowIfNull(other);
+            static bool SameTable(PhysicalTable a, PhysicalTable b)
+                => a.Name.Equals(b.Name, StringComparison.OrdinalIgnoreCase)
+                   && a.Kind == b.Kind
+                   && a.Columns.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b.Columns)
+                   && a.KeyColumns.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(b.KeyColumns);
+
+            var mine = PhysicalTables.ToList();
+            var theirs = other.PhysicalTables.ToList();
+            if (mine.Count != theirs.Count)
+                return false;
+            foreach (var table in mine)
+            {
+                var match = theirs.FirstOrDefault(t => t.Name.Equals(table.Name, StringComparison.OrdinalIgnoreCase));
+                if (match is null || !SameTable(table, match))
+                    return false;
+            }
+            return true;
+        }
+
         /// <summary>Physical table that owns <paramref name="column"/>.</summary>
         internal string TableFor(string column)
         {
@@ -307,6 +335,8 @@ namespace squalor.DataBall
         /// </summary>
         internal string BuildViewSelect()
         {
+            if (WideColumns.Count == 0)
+                throw new DataBallException("A table layout needs at least one wide column");
             var sb = new StringBuilder("SELECT ");
             var first = true;
             foreach (var column in WideColumns)
@@ -317,9 +347,6 @@ namespace squalor.DataBall
                 var table = _tableForColumn[column];
                 sb.Append(DuckDbStore.QuoteIdent(table.Name)).Append('.').Append(DuckDbStore.QuoteIdent(column));
             }
-
-            if (WideColumns.Count == 0)
-                sb.Append(DuckDbStore.QuoteIdent(Spine.Name)).Append('.').Append(DuckDbStore.QuoteIdent(RowKey));
 
             var qSpine = DuckDbStore.QuoteIdent(Spine.Name);
             sb.Append(" FROM ").Append(qSpine);
@@ -338,6 +365,13 @@ namespace squalor.DataBall
                   .Append(" = ").Append(qSpine).Append('.').Append(qr);
             }
             return sb.ToString();
+        }
+
+        /// <summary>The wide row with the highest row key (the last committed row).</summary>
+        internal string BuildLastRowSelect()
+        {
+            return BuildViewSelect()
+                + $" ORDER BY {DuckDbStore.QuoteIdent(Spine.Name)}.{DuckDbStore.QuoteIdent(RowKey)} DESC LIMIT 1";
         }
 
         private static string KindOf(TableSpec spec) => (spec.Kind ?? string.Empty).Trim().ToLowerInvariant();

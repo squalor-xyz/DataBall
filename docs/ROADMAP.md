@@ -21,7 +21,7 @@ Do not nuget-push or git-push from this list unless the owner asks.
 | S3 | First lab handler project (not in `DuckDbStore`) | Feature (done: `DataBall.Handlers`, custom CSV primary; STDF/Touchstone/production slots) |
 | S4 | Session filter API (column predicates; `Query` stays escape hatch) | Feature (done) |
 | S5 | Batch insert path that does not row-loop | Feature (done) |
-| S6 | Config-declared table layout (`tables`): master / dimension / rows / measurements behind the `"data"` view; `.ball` v2 | Feature — suite **S46** read path + `.ball` (done); **S47** row writes into tables; **S48** Bounce / column edits / MergeOrAppend; **S49** snowflake `parent` + perf guard |
+| S6 | Config-declared table layout (`tables`): master / dimension / rows / measurements behind the `"data"` view; `.ball` v2 | Feature — suite **S46** read path + `.ball` (done); **S47** row writes, append import, MergeOrAppend into tables (done); **S48** Bounce / AddColumn / RemoveColumn / dimension growth; **S49** snowflake `parent` + perf guard |
 
 Handlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.
 

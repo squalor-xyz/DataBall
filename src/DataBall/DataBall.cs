@@ -105,6 +105,9 @@ namespace squalor.DataBall
         /// <summary>True when the merged config declares a <c>tables</c> layout.</summary>
         internal bool HasLayoutConfig => _config.Tables.Count > 0;
 
+        /// <summary>The live merged config (not a clone); for store binding only.</summary>
+        internal Config CurrentConfig => _config;
+
         /// <summary>
         /// Gets a snapshot of the merged schema config (native defaults plus any overlay file).
         /// Mutating the returned object does not affect the session.
@@ -176,7 +179,6 @@ namespace squalor.DataBall
         public void AddRow(IReadOnlyDictionary<string, object?> values)
         {
             ThrowIfDisposed();
-            ThrowIfMultiTable("AddRow");
             _store.AddRow(values, _expectedColumnTypes);
             RememberRow(values);
             SplitIfLayout();
@@ -194,7 +196,6 @@ namespace squalor.DataBall
             var list = rows as IReadOnlyList<IReadOnlyDictionary<string, object?>> ?? rows.ToList();
             if (list.Count == 0)
                 return;
-            ThrowIfMultiTable("AddRows");
             _store.AddRows(list, _expectedColumnTypes);
             RememberRow(list[list.Count - 1]);
             SplitIfLayout();
@@ -231,7 +232,6 @@ namespace squalor.DataBall
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
-            ThrowIfLayoutDeclared("MergeOrAppend");
             ArgumentNullException.ThrowIfNull(other);
             ObjectDisposedException.ThrowIf(other._disposed, other);
 
@@ -241,10 +241,7 @@ namespace squalor.DataBall
                 if (!other.Store.DataTableExists())
                 {
                     if (!append || !_store.DataTableExists() || _store.RowCount() == 0)
-                    {
-                        if (_store.DataTableExists())
-                            _store.Execute("DROP TABLE IF EXISTS \"data\"");
-                    }
+                        RunImport(append: false, () => _store.DropDataRelation());
                     _logger.LogDebug("Merge/append completed");
                     return;
                 }
@@ -255,7 +252,7 @@ namespace squalor.DataBall
                 {
                     var path = Path.Combine(dir, "data.parquet");
                     other.Store.ExportParquet(path);
-                    _store.ImportParquet(path, append);
+                    RunImport(append, () => _store.ImportParquet(path, append));
                 }
                 finally
                 {
@@ -373,48 +370,28 @@ namespace squalor.DataBall
             _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, append);
             try
             {
-                if (append && _store.DataIsView())
-                    throw new DataBallException("ImportAsync with Append = true is not supported on a multi-table session yet");
-
                 void Import()
                 {
                     switch (format)
                     {
                         case ExportType.Csv:
-                            _store.ImportCsv(path, append, _expectedColumnTypes);
-                            ApplyCsvSchema();
+                            ImportCsvWithSchema(path, append);
                             break;
                         case ExportType.Parquet:
                             _store.ImportParquet(path, append);
                             break;
                         case ExportType.Archive:
-                            ImportManager.ImportFromArchive(this, path, append);
+                            ImportManager.ImportFromArchiveCore(this, path, append);
                             break;
                         case ExportType.Ball:
-                            ImportManager.ImportFromBall(this, path, append);
+                            ImportManager.ImportFromBallCore(this, path, append);
                             break;
                         default:
                             throw new DataBallException($"Unknown import format for '{path}'");
                     }
                 }
 
-                if (HasLayoutConfig)
-                {
-                    // One transaction: a failed import must not leave an emptied layout session.
-                    _store.InTransaction(() =>
-                    {
-                        if (_store.DataIsView())
-                            _store.DropDataRelation();
-                        Import();
-                        SplitIfLayout();
-                    });
-                }
-                else
-                {
-                    Import();
-                    // A .ball config.json may have introduced a layout.
-                    SplitIfLayout();
-                }
+                RunImport(append, Import);
                 return Task.CompletedTask;
             }
             catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
@@ -583,6 +560,18 @@ namespace squalor.DataBall
             ArgumentNullException.ThrowIfNull(config);
             _config = Config.Merge(_config, config);
             ApplyConfig(_config);
+            _store.UpdateLayoutConfig(_config);
+        }
+
+        /// <summary>
+        /// Re-applies the constant metadata of an imported config so it wins over
+        /// <c>metadata.json</c>, as it did when config was applied last.
+        /// </summary>
+        internal void ApplyImportedConfigMetadata(Config config)
+        {
+            ArgumentNullException.ThrowIfNull(config);
+            foreach (var (key, value) in config.Metadata)
+                _store.SetMetadata(key, DuckDbStore.Unwrap(value));
         }
 
         /// <summary>
@@ -614,12 +603,35 @@ namespace squalor.DataBall
         private static bool EndsWithSuffix(string fileName, string suffix)
             => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
 
-        internal void ApplyCsvSchema()
+        /// <summary>
+        /// Imports a CSV and applies the CSV schema. Legacy sessions apply it to <c>"data"</c> after
+        /// the merge (unchanged behavior); layout sessions apply it to the staging table before
+        /// the rows are routed, because <c>"data"</c> is a view.
+        /// </summary>
+        internal void ImportCsvWithSchema(string path, bool append)
         {
-            if (!_store.DataTableExists())
+            if (HasLayoutConfig)
+            {
+                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null));
+                return;
+            }
+
+            _store.ImportCsv(path, append, _expectedColumnTypes);
+            ApplyCsvSchema();
+        }
+
+        /// <summary>
+        /// Renames raw headers to canonical names, coerces configured types, and extracts
+        /// configured metadata fields on <paramref name="table"/>. With <paramref name="layoutAppend"/>
+        /// (staging rows joining a live layout) fields already in metadata are left in place for
+        /// the append reconciliation, and no column is dropped here.
+        /// </summary>
+        internal void ApplyCsvSchema(string table = "data", bool layoutAppend = false)
+        {
+            if (!_store.TableExists(table))
                 return;
 
-            var headers = _store.GetColumns()
+            var headers = _store.GetColumnsOf(table)
                 .Select(c => c.Name)
                 .Where(n => !string.IsNullOrWhiteSpace(n))
                 .ToList();
@@ -627,7 +639,7 @@ namespace squalor.DataBall
                 return;
 
             var parsed = SchemaResolver.ResolveAll(headers, _config);
-            var tableCols = _store.GetColumns();
+            var tableCols = _store.GetColumnsOf(table);
             foreach (var col in parsed)
             {
                 if (col.ClrType is not null)
@@ -638,11 +650,11 @@ namespace squalor.DataBall
                 if (match.Name is null)
                     continue;
                 if (!match.Name.Equals(col.Name, StringComparison.Ordinal))
-                    _store.RenameColumn(match.Name, col.Name);
+                    _store.RenameColumnOf(table, match.Name, col.Name);
             }
 
-            _store.CoerceDataColumns(_expectedColumnTypes);
-            ExtractConfiguredMetadata();
+            _store.CoerceColumnsOf(table, _expectedColumnTypes);
+            ExtractConfiguredMetadata(table, layoutAppend);
         }
 
         private void ApplyConfig(Config config)
@@ -658,18 +670,22 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExtractConfiguredMetadata()
+        private void ExtractConfiguredMetadata(string table, bool layoutAppend)
         {
-            if (!_store.DataTableExists() || _config.MetadataFields.Count == 0)
+            if (!_store.TableExists(table) || _config.MetadataFields.Count == 0)
                 return;
 
+            var qTable = DuckDbStore.QuoteIdent(table);
             var policy = _config.MetadataPolicy ?? "requireConstant";
+            var existing = _store.SnapshotMetadata();
             foreach (var field in _config.MetadataFields.ToList())
             {
-                var cols = _store.GetColumns();
+                var cols = _store.GetColumnsOf(table);
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
                     continue;
+                if (layoutAppend && existing.ContainsKey(match.Name))
+                    continue; // the append reconciliation compares against the stored value
 
                 var q = DuckDbStore.QuoteIdent(match.Name);
                 var rows = _store.Query($"""
@@ -677,7 +693,7 @@ namespace squalor.DataBall
                       COUNT(DISTINCT {q}) FILTER (WHERE {q} IS NOT NULL) AS d,
                       COUNT(*) FILTER (WHERE {q} IS NULL) AS n,
                       any_value({q}) AS v
-                    FROM "data"
+                    FROM {qTable}
                     """);
                 var distinct = Convert.ToInt64(rows[0]["d"], CultureInfo.InvariantCulture);
                 var nulls = Convert.ToInt64(rows[0]["n"], CultureInfo.InvariantCulture);
@@ -685,19 +701,25 @@ namespace squalor.DataBall
 
                 if (policy.Equals("first", StringComparison.OrdinalIgnoreCase))
                 {
-                    var first = _store.Query($"SELECT {q} FROM \"data\" WHERE {q} IS NOT NULL LIMIT 1");
+                    var first = _store.Query($"SELECT {q} FROM {qTable} WHERE {q} IS NOT NULL LIMIT 1");
                     if (first.Count > 0)
                         _store.SetMetadata(match.Name, first[0][match.Name]);
-                    _store.RemoveColumn(match.Name);
-                    _expectedColumnTypes.Remove(match.Name);
+                    if (!layoutAppend)
+                    {
+                        _store.RemoveColumnOf(table, match.Name);
+                        _expectedColumnTypes.Remove(match.Name);
+                    }
                     continue;
                 }
 
                 if (distinct == 1 && (nulls == 0 || policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) is false))
                 {
                     _store.SetMetadata(match.Name, value);
-                    _store.RemoveColumn(match.Name);
-                    _expectedColumnTypes.Remove(match.Name);
+                    if (!layoutAppend)
+                    {
+                        _store.RemoveColumnOf(table, match.Name);
+                        _expectedColumnTypes.Remove(match.Name);
+                    }
                     continue;
                 }
 
@@ -733,21 +755,96 @@ namespace squalor.DataBall
         /// </summary>
         internal void SplitIfLayout()
         {
-            if (!HasLayoutConfig || !_store.DataTableExists() || _store.DataIsView())
+            if (!HasLayoutConfig || _store.Layout is not null)
+                return;
+            if (!_store.DataTableExists() || _store.DataIsView())
                 return;
             _store.SplitIntoLayout(_config);
             _logger.LogInformation("Split \"data\" into tables: {Tables}", string.Join(", ", _store.Layout!.PhysicalTableNames));
         }
 
-        private void ThrowIfMultiTable(string operation)
+        /// <summary>
+        /// Runs an import as one transaction. On a layout session a replace drops the view and its
+        /// tables first; afterwards the result is split (or the layout cleared when no data
+        /// remains). A <c>.ball</c> <c>config.json</c> may change the config mid-import, so the
+        /// in-memory mirrors (config, expected types, relationships, layout, metadata) are
+        /// snapshotted first and restored when the transaction rolls back.
+        /// </summary>
+        internal void RunImport(bool append, Action import)
         {
-            if (_store.DataIsView())
-                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
+            ArgumentNullException.ThrowIfNull(import);
+            var snapshot = TakeSnapshot();
+            try
+            {
+                _store.InTransaction(() =>
+                {
+                    if (HasLayoutConfig && !append && _store.DataIsView())
+                    {
+                        _store.DropDataRelation();
+                        _store.ClearLayout();
+                    }
+
+                    import();
+                    SplitIfLayout();
+                    if (!_store.DataTableExists())
+                        _store.ClearLayout();
+                });
+            }
+            catch
+            {
+                RestoreSnapshot(snapshot);
+                throw;
+            }
+        }
+
+        private sealed record SessionSnapshot(
+            Config Config,
+            Dictionary<string, Type> ExpectedTypes,
+            List<Relationship> Relationships,
+            TableLayout? Layout,
+            Config? LayoutConfig);
+
+        private SessionSnapshot TakeSnapshot()
+        {
+            return new SessionSnapshot(
+                _config,
+                new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase),
+                new List<Relationship>(_relationships),
+                _store.Layout,
+                _store.LayoutConfig);
+        }
+
+        /// <summary>Restores the in-memory mirrors after the store rolled back.</summary>
+        private void RestoreSnapshot(SessionSnapshot snapshot)
+        {
+            _config = snapshot.Config;
+            _expectedColumnTypes.Clear();
+            foreach (var pair in snapshot.ExpectedTypes)
+                _expectedColumnTypes[pair.Key] = pair.Value;
+            _relationships.Clear();
+            _relationships.AddRange(snapshot.Relationships);
+            try
+            {
+                _store.RestoreLayout(snapshot.Layout, snapshot.LayoutConfig);
+                if (!_store.DataTableExists())
+                    _store.ClearLayout();
+                _store.ReloadMetadata();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Could not restore session state after a failed import");
+            }
         }
 
         private void ThrowIfLayoutDeclared(string operation)
         {
             if (HasLayoutConfig)
+                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
+        }
+
+        private void ThrowIfMultiTable(string operation)
+        {
+            if (_store.DataIsView())
                 throw new DataBallException($"{operation} is not supported on a multi-table session yet");
         }
 

@@ -20,7 +20,6 @@ namespace squalor.DataBall
         public void InitializeRow(IReadOnlyDictionary<string, object?>? initial = null)
         {
             ThrowIfDisposed();
-            ThrowIfMultiTable("InitializeRow");
             _pendingRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             _originalRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             _modifiedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -75,7 +74,6 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             if (_pendingRow is null)
                 throw new DataBallException("No pending row. Call InitializeRow before CommitRow.");
-            ThrowIfMultiTable("CommitRow");
 
             ApplyRelationships();
 
@@ -158,6 +156,11 @@ namespace squalor.DataBall
                 return new Dictionary<string, object?>(_lastCommittedRow, StringComparer.OrdinalIgnoreCase);
             if (!_store.DataTableExists() || _store.RowCount() == 0)
                 return null;
+            if (_store.Layout is not null)
+            {
+                var last = _store.Query(_store.Layout.BuildLastRowSelect());
+                return last.Count == 0 ? null : last[0];
+            }
             var rows = _store.Query($"SELECT * FROM {DuckDbStore.QuoteIdent("data")}");
             return rows.Count == 0 ? null : rows[rows.Count - 1];
         }
