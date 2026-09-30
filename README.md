@@ -206,6 +206,10 @@ Debugging a process that uses DuckDB.NET can throw `AccessViolationException` be
 
 SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ is decompress-only). Do not use SharpCompress 1.0.0.
 
+## Diagrams
+
+[`docs/how-it-works.md`](docs/how-it-works.md): Mermaid diagrams of the session lifecycle, where the data lives (memory, `.duckdb`, `.ball`), atomic import, header → schema, row builder, Bounce, multi-table layout, and the `.ball` format.
+
 ## Historical docs
 
 `docs/archive/` holds pre-rebuild proposals and the DataFrame/SQLite-era class notes (Polars, Arrow, hierarchical TestData). They do not describe the shipped API. This README and the roadmap in `.slicer/` (see `docs/ROADMAP.md`) are the current docs.
