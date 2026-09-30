@@ -1,0 +1,9 @@
+{"when": "2026-09-29T22:59:01Z", "item": "db-01", "action": "add", "from": "", "to": "open", "note": "DataBall Bounce and column edits must work on layouts"}
+{"when": "2026-09-29T22:59:01Z", "item": "db-01", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-09-29T22:59:01Z", "item": "db-02", "action": "add", "from": "", "to": "open", "note": "DataBall dimension growth on append must work on layouts"}
+{"when": "2026-09-29T22:59:01Z", "item": "db-02", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-09-29T22:59:02Z", "item": "db-03", "action": "add", "from": "", "to": "open", "note": "DataBall snowflake `parent` and a perf guard"}
+{"when": "2026-09-29T22:59:02Z", "item": "db-03", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-09-29T23:54:21Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-09-29T23:54:21Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-09-29T23:54:21Z", "item": "preamble", "action": "prose", "from": "", "to": "", "note": "edit"}

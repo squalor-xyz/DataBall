@@ -1,0 +1,39 @@
+{
+  "id": "db-02",
+  "title": "DataBall dimension growth on append must work on layouts",
+  "lead": [],
+  "depends_note": null,
+  "findings_note": "owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** Bounce / AddColumn / RemoveColumn (db-01); `parent` (db-03).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "After suite S47, appending into a layout session throws when the incoming rows need a dimension to grow:\n- a dimension the config declares whose columns arrive for the first time;\n- a new column in an existing dimension;\n- a metadata constant that starts varying and belongs to a dimension (`PlanAppend`, `DuckDbStore.Layout.cs` \"Adding dimension …\", \"Adding column … to dimension …\", \"only spine columns are supported …\").\n\n`databall/docs/ROADMAP.md` S6 and suite `AGENTS.md` listed this under db-01. The owner split it out on 2026-09-29 to keep db-01 at size M."
+    },
+    {
+      "heading": "Files",
+      "body": "- `databall/src/DataBall/DuckDbStore.Layout.cs`:\n  - `PlanAppend`: the three throws become an `AppendPlan` flag (`NeedsRematerialize`).\n  - `AppendStagingIntoLayout`: take the flagged path.\n- `databall/tests/DataBall.Tests/MultiTableTests.cs`\n- `databall/README.md` Tables section; suite `AGENTS.md` \"Not yet on a layout session\" list"
+    },
+    {
+      "heading": "Failing tests",
+      "body": "`Append_NewDimension_CreatesTableAndKeysExistingRows`, `Append_NewColumnInDimension_RematerializesAndSplits`, `Append_MetadataVaryingIntoDimension_Demotes`, `Append_DimensionGrowth_KeyConflict_RollsBack` (throws the existing \"do not determine\" message; view, tables, metadata, and in-memory layout unchanged)."
+    },
+    {
+      "heading": "Implement",
+      "body": "Reuse db-01's primitive instead of growing dimension tables in place. Existing dimension rows would need new keys and new-column values; re-splitting gets both from one code path.\n\n1. `PlanAppend` still computes `next` and the demote list. Where it throws today for a new dimension, a new dimension column, or a demote into a non-spine table, set `NeedsRematerialize` instead.\n2. In `AppendStagingIntoLayout`, when the flag is set, do all of this in one `InTransaction`:\n   - `MaterializeWide(\"_bounce\")`;\n   - write the demoted constants into the materialized wide rows as columns;\n   - `INSERT INTO \"_bounce\" BY NAME SELECT … FROM <staging>` (add missing columns first; absent values are NULL);\n   - `DropDataRelation()` → `CREATE TABLE \"data\"` from it → `ClearLayout()` → `SplitIntoLayout(config)`.\n\n   Existing rows get NULL in new dimension columns. When a non-key column then conflicts for an existing key, the existing functional-key check throws, and the transaction rolls back.\n3. The fast path (no flag) is unchanged.\n4. Rollback: `RunImport` / `AddRows` already snapshot and restore config, layout, and metadata. Only `DropTemp` in `finally`.\n5. **Docs, same change:**\n   - README: say that dimension growth re-splits, so `_row` and dimension keys regenerate.\n   - AGENTS.md: remove the db-02 items from the \"Not yet\" list."
+    },
+    {
+      "heading": "Check",
+      "body": "1. Watch each test fail on today's throws.\n2. Mutation: restore any one throw → its test red.\n3. `./scripts/check.sh`."
+    },
+    {
+      "heading": "Git",
+      "body": "`databall/` then suite gitlink."
+    }
+  ],
+  "notes": []
+}

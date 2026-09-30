@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "id": {
+    "prefix": "db-",
+    "width": 2
+  },
+  "statuses": {
+    "open": "—",
+    "done": "done",
+    "parked": "parked",
+    "later": "later"
+  },
+  "open_status": "open",
+  "done_status": "done",
+  "retired_status": "retired",
+  "parked_status": "parked",
+  "started_status": "started",
+  "review_status": "review",
+  "sections": [
+    "Why",
+    "Files",
+    "Failing tests",
+    "Implement",
+    "Check",
+    "Git"
+  ],
+  "boundary": "**Not in this slice:**",
+  "done_dir": "done",
+  "retired_dir": "retired",
+  "exclude_flags": [],
+  "pointers": {
+    "next_format": "**{{id}}** {{title}}",
+    "next_empty": "nothing unmarked",
+    "later": {
+      "group_sep": "; ",
+      "item_sep": "/",
+      "groups": [
+        {
+          "status": "open",
+          "skip_first": true,
+          "prefix": ""
+        },
+        {
+          "status": "parked",
+          "skip_first": false,
+          "prefix": "parked "
+        },
+        {
+          "status": "later",
+          "skip_first": false,
+          "prefix": "later "
+        }
+      ],
+      "suffix": ""
+    }
+  },
+  "sync": {
+    "targets": []
+  },
+  "git_check": true,
+  "render_driver_check": true,
+  "claim_owner": ""
+}

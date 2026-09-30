@@ -1,0 +1,39 @@
+{
+  "id": "db-01",
+  "title": "DataBall Bounce and column edits must work on layouts",
+  "lead": [],
+  "depends_note": null,
+  "findings_note": "owner charter (2026-09-23) (was suite S48)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** `parent` (db-03); dimension growth on append — a new dimension, a new dimension column, metadata demoted into a dimension (db-02).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "After suite S47 a layout session still throws on `Bounce` / `Squish`, `AddColumn`, `RemoveColumn`, and adopting `tables` onto existing wide data. Bounce is the suite's compaction step before parking; it must not be a dead end for layout sessions."
+    },
+    {
+      "heading": "Files",
+      "body": "- `databall/src/DataBall/DataBall.cs` — `BounceLayout()`: `MaterializeWide(\"_bounce\")` → today's constant-extraction loop against `_bounce` → `DISTINCT` → `DropDataRelation()` → re-split (regenerates `_row`; documented, not a public key); `ApplyImportedConfig` with `tables` onto wide data → adopt via the same path\n- `databall/src/DataBall/DuckDbStore.Layout.cs` — `MaterializeWide`; `AddColumn` aligned `ORDER BY \"_row\"` into `TableFor(name)` (into a dimension → re-materialize); `RemoveColumn` from the owning table then `RefreshDataView()`; last column gone → drop view + tables so `DataTableExists()` is false as today\n- Squish hive write already reads the view (no change)"
+    },
+    {
+      "heading": "Failing tests",
+      "body": "`Bounce_WithLayout_ExtractsTeststand_DropsFromSetup_Distinct`, `Bounce_WithLayout_AllConstant_DropsViewAndTables`, `Squish_WithLayout_HivePartitionByTemp_Roundtrips`, `AddColumn_WithLayout_AlignsByRow`, `AddColumn_ToDimension_RematerializesAndSplits`, `RemoveColumn_WithLayout_DropsFromOwningTable_ViewRefreshed`, `ApplyImportedConfig_TablesOntoWideData_AdoptsLayout`."
+    },
+    {
+      "heading": "Implement",
+      "body": "One primitive, then each op on top of it. Keep every step inside one `InTransaction` and snapshot/restore the in-memory mirrors with the existing `TakeSnapshot` / `RestoreSnapshot` (as `RunImport` does). Never run SQL from `catch`/`finally` inside a joined transaction.\n\n1. **`MaterializeWide(string temp)`** in `DuckDbStore.Layout.cs`: `CREATE TEMP TABLE <temp> AS SELECT * FROM \"data\"` ordered by the spine's `\"_row\"` (use `Layout.BuildViewSelect()` + `ORDER BY` spine `_row`). The later re-split numbers rows with `row_number() OVER (ORDER BY rowid)`, so the order must survive the round trip.\n2. **Back to wide:** `MaterializeWide(\"_bounce\")` → `DropDataRelation()` → `CREATE TABLE \"data\" AS SELECT * FROM \"_bounce\"` → `ClearLayout()`. The session is now a plain wide table and every existing wide path applies unchanged.\n3. **Bounce / Squish:** on a layout session, do step 2, then run today's `ExtractConstantsToMetadataSql(partitionColumns)` + `DistinctInPlace()` unchanged, then `SplitIfLayout()`. If every column was extracted, `\"data\"` is gone: leave no view and no tables, and `ClearLayout()` (`DataTableExists()` false, as today). Partition columns stay unextracted. The hive export already reads the view (no change). Remove `ThrowIfMultiTable(\"Bounce\")` (`DataBall.cs:287`).\n4. **AddColumn:** remove `ThrowIfLayoutDeclared(\"AddColumn\")` (`DataBall.cs:137`, `:154`). With a layout bound: rebuild the layout from `LayoutConfig` with `name` appended to `WideColumns`, then check `TableFor(name)`.\n   - **Spine:** `ALTER TABLE <spine> ADD COLUMN`, then `UPDATE` from a TEMP table of `(_row, value)` whose `_row` is the ordinal in current `_row` order. Apply the wide path's row-count check. Refresh the view.\n   - **Dimension or measurement group:** step 2, then the wide `AddColumn` (aligned by `rowid`, as today), then `SplitIfLayout()`. Group rows exist only where some group column is non-null, so an in-place `UPDATE` cannot fill every row. This is a design choice; say so in the close-out.\n   - With a layout declared but no data yet: behave as the wide path does, then `SplitIfLayout()`.\n5. **RemoveColumn:** remove `ThrowIfLayoutDeclared(\"RemoveColumn\")` (`DataBall.cs:170`). The owner is `TableFor(name)`.\n   - **Spine, or a group non-key column:** `ALTER TABLE <owner> DROP COLUMN`, then rebuild the layout from `LayoutConfig` with the column removed from wide. If a table is left with no columns, drop it. Drop and recreate the view (add a small `RefreshDataView(layout)` next to `CreateDataView`).\n   - **A dimension column:** the key may change, so do step 2, then the wide `RemoveColumn`, then `SplitIfLayout()`.\n   - **Last wide column:** `DropDataRelation()` + `ClearLayout()`.\n6. **Adopt `tables` onto wide data:** write `ApplyImportedConfig_TablesOntoWideData_AdoptsLayout` first and run it **before** changing code. An appended `.ball` whose `config.json` carries `tables` may already split via `RunImport` → `SplitIfLayout()`. If it is green, keep it as a pin and say so in the close-out. If it is red, route adoption through `SplitIfLayout()` inside `RunImport`.\n7. Delete `ThrowIfLayoutDeclared` / `ThrowIfMultiTable` once nothing calls them. Delete the `UnsupportedOps` Theory in `MultiTableTests.cs`.\n8. **Docs, same change:**\n   - `databall/README.md`: remove the Bounce note, and document that `_row` is regenerated by Bounce and column edits and is not a public key.\n   - Suite `AGENTS.md`: shrink the \"Not yet on a layout session\" list to the db-02 items."
+    },
+    {
+      "heading": "Check",
+      "body": "`BounceSquishTests` unchanged; README Bounce note removed; `UnsupportedOps` Theory shrinks to nothing (delete it)."
+    },
+    {
+      "heading": "Git",
+      "body": "`databall/` then suite gitlink."
+    }
+  ],
+  "notes": []
+}

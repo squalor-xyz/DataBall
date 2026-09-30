@@ -1,0 +1,93 @@
+{
+  "version": 2,
+  "id_prefix": "db-",
+  "id_width": 2,
+  "next_id": 4,
+  "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
+  "passes": [],
+  "items": [
+    {
+      "id": "db-01",
+      "title": "DataBall Bounce and column edits must work on layouts",
+      "short_title": "DataBall Bounce and column edits must work on layouts",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "notes": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner charter (2026-09-23) (was suite S48)",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 3,
+        "effort": 3
+      }
+    },
+    {
+      "id": "db-02",
+      "title": "DataBall dimension growth on append must work on layouts",
+      "short_title": "DataBall dimension growth on append",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-01"
+      ],
+      "notes": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50)",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2
+      }
+    },
+    {
+      "id": "db-03",
+      "title": "DataBall snowflake `parent` and a perf guard",
+      "short_title": "DataBall snowflake `parent` and a perf guard",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-01",
+        "db-02"
+      ],
+      "notes": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall,suite"
+        ],
+        "trees_literal": false,
+        "findings": "owner charter (2026-09-23) (was suite S49)",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 3
+      }
+    }
+  ],
+  "epilogue": "",
+  "goals": "Engineering leftovers from the DuckDB rebuild review, plus the suite-driven Open/handler track. **ATE spirit:** sequential test-executive tables, DuckDB as the only SQL engine, interchange via CSV / Parquet / `.ball` / zip-tar.gz. SQLite, DataFrame, and matrix Bounce are gone and stay gone.\n\nDataBall is WIP and co-developed with `squalor-xyz/suite`. It is the cross-app utility: configurable schema, Open (detect + `IFormatHandler` → session), batch/row insert, query, session filter, and (from 1.3.0) a config-declared multi-table layout behind the `\"data\"` view.\n\nLicense: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).",
+  "non_goals": "Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `\"data\"`), streaming `Query`, Polars, DataFrame, SQLite, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing."
+}

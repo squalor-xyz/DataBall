@@ -208,7 +208,7 @@ SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ 
 
 ## Historical docs
 
-`docs/archive/` holds pre-rebuild proposals and the DataFrame/SQLite-era class notes (Polars, Arrow, hierarchical TestData). They do not describe the shipped API. This README and `docs/ROADMAP.md` are the current docs.
+`docs/archive/` holds pre-rebuild proposals and the DataFrame/SQLite-era class notes (Polars, Arrow, hierarchical TestData). They do not describe the shipped API. This README and the roadmap in `.slicer/` (see `docs/ROADMAP.md`) are the current docs.
 
 ## License
 
