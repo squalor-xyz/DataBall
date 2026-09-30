@@ -1,0 +1,43 @@
+{
+  "id": "db-04",
+  "title": "DataBall v1.3.0 must be tagged and released",
+  "lead": [
+    "**Owner gate:** tagging publishes a GitHub Release, and pushes to nuget.org if the `NUGET_API_KEY` secret is set. The owner tags, or explicitly asks the agent to."
+  ],
+  "depends_note": null,
+  "findings_note": "owner request (2026-09-29)",
+  "size": "S",
+  "flags": [
+    "OWNER"
+  ],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** bumping the standalone squalplot / squaltest `PackageReference` to 1.3.0 (their own queues); setting `NUGET_API_KEY` or a nuget.org listing (non-goal).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "After db-01–db-03 the 1.3.0 multi-table layout is complete, but it is unreleased. The last tag is `v1.2.0`. Standalone squalplot / squaltest clones `PackageReference` `squalor.DataBall` + `squalor.DataBall.Handlers` **1.2.0** and cannot use layouts until a `v1.3.0` tag packs. A `v*` tag is the only release trigger (`.github/workflows/release.yml`)."
+    },
+    {
+      "heading": "Files",
+      "body": "- `src/DataBall/DataBall.csproj`, `src/DataBall.Handlers/DataBall.Handlers.csproj`, `src/DataBall.Cli/DataBall.Cli.csproj`: already `<Version>1.3.0</Version>`; confirm, do not bump\n- `README.md`: the license paragraph's tag line (\"`v1.2.0` (last release; this tree is 1.3.0, unreleased)\")\n- `.github/workflows/release.yml`: no change. It checks the tag is an ancestor of `main`, then tests, packs the three packages, creates a GitHub Release, and runs `dotnet nuget push` only when `NUGET_API_KEY` is set.\n- Suite `AGENTS.md` DataBall section: \"1.3.0 in tree (unreleased; last tag `v1.2.0`)\" and \"Standalone hosts still pin the 1.2.0 package until a `v1.3.0` tag packs\""
+    },
+    {
+      "heading": "Failing tests",
+      "body": "None new: this is a release slice. The gate is the existing suite plus a local pack."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Confirm db-01, db-02 and db-03 are done (`slicer list --all`, `git log`), and that `main` CI is green.\n2. Local pack exactly as README \"Install\" says (three `dotnet pack … -c Release -o artifacts`). Inspect as README says:\n   - library nupkg has `lib/net10.0/DataBall.dll` and no `runtimes/`;\n   - tool nupkg has `runtimes/{linux-x64,linux-arm64,osx,win-x64,win-arm64}/native/`.\n\n   Install the CLI from `./artifacts` and run `databall --help`.\n3. Docs, in one databall commit on `main`, before the tag:\n   - README tag line → `v1.3.0` is the last release.\n   - Keep the \"not on nuget.org\" wording unless the owner confirms the key is set.\n4. **Owner decision before tagging:** is `NUGET_API_KEY` set on the DataBall repo? If it is, the tag also lists 1.3.0 on nuget.org, which the non-goals exclude (\"nuget.org listing\"). The owner either removes the secret first or changes that non-goal.\n5. The owner (or the agent, on explicit request) tags the docs commit: `git tag -a v1.3.0 -m \"DataBall 1.3.0\"`, then `git push origin v1.3.0`.\n6. Watch the release run through ancestor check → test → pack → GitHub Release."
+    },
+    {
+      "heading": "Check",
+      "body": "- The release run is green.\n- The GitHub Release `v1.3.0` carries `squalor.DataBall`, `squalor.DataBall.Handlers` and `squalor.DataBall.Cli` 1.3.0 nupkgs (+ snupkgs).\n- README and suite `AGENTS.md` both say `v1.3.0` is the last tag.\n- `slicer check`."
+    },
+    {
+      "heading": "Git",
+      "body": "Databall docs commit on `main` → push → tag `v1.3.0` → push tag (owner). Then suite `AGENTS.md` + gitlink."
+    }
+  ],
+  "notes": []
+}

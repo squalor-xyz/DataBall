@@ -8,20 +8,24 @@ Handlers: custom CSV is implemented. STDF / Touchstone / production are register
 
 ## Goals
 
-Engineering leftovers from the DuckDB rebuild review, plus the suite-driven Open/handler track. **ATE spirit:** sequential test-executive tables, DuckDB as the only SQL engine, interchange via CSV / Parquet / `.ball` / zip-tar.gz. SQLite, DataFrame, and matrix Bounce are gone and stay gone.
+DataBall is the session engine of the squalor semiconductor suite, co-developed with `squalor-xyz/suite` and shared by its hosts. One run lives in one DataBall: in-memory DuckDB by default, file-backed on request. It sits behind the wide `"data"` relation plus `"meta"`, and is parked to a file and reopened from one.
 
-DataBall is WIP and co-developed with `squalor-xyz/suite`. It is the cross-app utility: configurable schema, Open (detect + `IFormatHandler` → session), batch/row insert, query, session filter, and (from 1.3.0) a config-declared multi-table layout behind the `"data"` view.
+- **ATE spirit:** sequential test-executive tables; DuckDB is the only SQL engine; interchange is CSV / Parquet / `.ball` / zip-tar.gz.
+- **One way in:** `Open` detects the format and hands lab dialects to an `IFormatHandler`. Parsers never go in the store.
+- **Schema from config, not sniffing:** types, units, roles, and metadata fields come from the default profile plus overlay config. A config-declared multi-table layout (`tables`) sits behind the same `"data"` view, so readers never see the split.
+- **Now:** finish the 1.3.0 layout (Bounce, column edits, dimension growth, snowflake `parent`; db-01–db-03) and release it as `v1.3.0` (db-04).
 
 License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 ## Non-goals
 
-Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), streaming `Query`, Polars, DataFrame, SQLite, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing.
+Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), streaming `Query`, Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing.
 
-3 items · — 3
+4 items · — 4
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
 | 1 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | — |
 | 2 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | — |
 | 3 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
+| 4 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | — |

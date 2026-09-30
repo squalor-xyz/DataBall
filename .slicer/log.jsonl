@@ -8,3 +8,8 @@
 {"when": "2026-09-29T23:54:21Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}
 {"when": "2026-09-29T23:54:21Z", "item": "preamble", "action": "prose", "from": "", "to": "", "note": "edit"}
 {"when": "2026-09-30T00:26:29Z", "item": "db-03", "action": "set", "from": "", "to": "", "note": "title DataBall snowflake `parent` and a perf guard→DataBall snowflake `parent` and a perf measurement; short_title DataBall snowflake `parent` and a perf guard→DataBall snowflake `parent` and a perf measurement"}
+{"when": "2026-09-30T00:33:35Z", "item": "db-04", "action": "add", "from": "", "to": "open", "note": "DataBall v1.3.0 must be tagged and released"}
+{"when": "2026-09-30T00:33:35Z", "item": "db-04", "action": "set", "from": "", "to": "", "note": "flags -→OWNER"}
+{"when": "2026-09-30T00:33:35Z", "item": "db-04", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-09-30T00:33:46Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-09-30T00:33:46Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}
