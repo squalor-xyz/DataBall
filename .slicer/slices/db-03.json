@@ -1,6 +1,6 @@
 {
   "id": "db-03",
-  "title": "DataBall snowflake `parent` and a perf guard",
+  "title": "DataBall snowflake `parent` and a perf measurement",
   "lead": [],
   "depends_note": null,
   "findings_note": "owner charter (2026-09-23) (was suite S49)",

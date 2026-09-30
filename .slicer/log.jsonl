@@ -7,3 +7,4 @@
 {"when": "2026-09-29T23:54:21Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
 {"when": "2026-09-29T23:54:21Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}
 {"when": "2026-09-29T23:54:21Z", "item": "preamble", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-09-30T00:26:29Z", "item": "db-03", "action": "set", "from": "", "to": "", "note": "title DataBall snowflake `parent` and a perf guard→DataBall snowflake `parent` and a perf measurement; short_title DataBall snowflake `parent` and a perf guard→DataBall snowflake `parent` and a perf measurement"}

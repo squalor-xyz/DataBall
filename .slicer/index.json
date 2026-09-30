@@ -60,8 +60,8 @@
     },
     {
       "id": "db-03",
-      "title": "DataBall snowflake `parent` and a perf guard",
-      "short_title": "DataBall snowflake `parent` and a perf guard",
+      "title": "DataBall snowflake `parent` and a perf measurement",
+      "short_title": "DataBall snowflake `parent` and a perf measurement",
       "status": "open",
       "has_slice": true,
       "depends_on": [
