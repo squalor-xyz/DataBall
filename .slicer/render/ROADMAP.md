@@ -21,11 +21,11 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), streaming `Query`, Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing.
 
-4 items · — 4
+4 items · — 3 · done 1
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | — |
+| 1 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
 | 2 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | — |
 | 3 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
 | 4 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | — |

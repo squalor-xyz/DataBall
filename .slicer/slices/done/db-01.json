@@ -1,0 +1,39 @@
+{
+  "id": "db-01",
+  "title": "DataBall Bounce and column edits must work on layouts",
+  "lead": [],
+  "depends_note": null,
+  "findings_note": "owner charter (2026-09-23) (was suite S48)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** `parent` (db-03); dimension growth on append — a new dimension, a new dimension column, metadata demoted into a dimension (db-02).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "After suite S47 a layout session still throws on `Bounce` / `Squish`, `AddColumn`, `RemoveColumn`, and adopting `tables` onto existing wide data. Bounce is the suite's compaction step before parking; it must not be a dead end for layout sessions."
+    },
+    {
+      "heading": "Files",
+      "body": "- `databall/src/DataBall/DataBall.cs` — `BounceLayout()`: `MaterializeWide(\"_bounce\")` → today's constant-extraction loop against `_bounce` → `DISTINCT` → `DropDataRelation()` → re-split (regenerates `_row`; documented, not a public key); `ApplyImportedConfig` with `tables` onto wide data → adopt via the same path\n- `databall/src/DataBall/DuckDbStore.Layout.cs` — `MaterializeWide`; `AddColumn` aligned `ORDER BY \"_row\"` into `TableFor(name)` (into a dimension → re-materialize); `RemoveColumn` from the owning table then `RefreshDataView()`; last column gone → drop view + tables so `DataTableExists()` is false as today\n- Squish hive write already reads the view (no change)"
+    },
+    {
+      "heading": "Failing tests",
+      "body": "`Bounce_WithLayout_ExtractsTeststand_DropsFromSetup_Distinct`, `Bounce_WithLayout_AllConstant_DropsViewAndTables`, `Squish_WithLayout_HivePartitionByTemp_Roundtrips`, `AddColumn_WithLayout_AlignsByRow`, `AddColumn_ToDimension_RematerializesAndSplits`, `RemoveColumn_WithLayout_DropsFromOwningTable_ViewRefreshed`, `ApplyImportedConfig_TablesOntoWideData_AdoptsLayout`; plus `AddColumn_LayoutDeclared_NoData_SplitsOnFirstColumn`, `RemoveColumn_WithLayout_LastColumn_DropsViewAndTables`, `RemoveColumn_WithLayout_UnknownColumn_Throws_SessionIntact` (rollback), `Bounce_WithLayout_ConstantDeclaredKeyColumn_StaysData`, `RemoveColumn_WithLayout_DeclaredKeyColumn_ThrowsClearly_SessionIntact`, `AddColumn_ToDimension_KeyConflict_Throws_SessionIntact` (rollback)."
+    },
+    {
+      "heading": "Implement",
+      "body": "One round-trip for every layout operation (owner decision 2026-09-29; no in-place spine path).\n\n1. **`DuckDbStore.UnsplitLayout()`** (`DuckDbStore.Layout.cs`), inside the caller's transaction:\n   - `CREATE TEMP TABLE \"_unsplit\" AS <TableLayout.BuildOrderedViewSelect()>` (the view ordered by spine `_row`);\n   - `DropDataRelation()`;\n   - `CREATE TABLE \"data\"` from it;\n   - drop the temp; `ClearLayout()`.\n\n   Insertion order = old `_row` order, and the re-split numbers rows by `rowid`.\n2. **`DataBall.OnWideData(Action)`:**\n   - with no `tables` config, run the operation as before;\n   - otherwise snapshot, then one `InTransaction`: `UnsplitLayout()` (if a layout is bound) → the unchanged wide operation → `SplitIfLayout()`;\n   - on failure, `RestoreSnapshot` and rethrow.\n\n   When the operation dropped `\"data\"`, nothing is re-split, and no view or tables remain.\n3. `Bounce` / `Squish` (constant extraction + `DISTINCT`), `AddColumn` (both overloads) and `RemoveColumn` go through `OnWideData`. On a layout, Bounce never extracts a declared `key` column (the re-split needs it), and `RemoveColumn` of a declared `key` column throws before any write (review finding). `ThrowIfLayoutDeclared` / `ThrowIfMultiTable` are deleted.\n4. Adopting `tables` onto wide data already worked (via `RunImport` → `SplitIfLayout`). Its test is a pin.\n5. Delete the `UnsupportedOps` Theory and `AddColumn_OnEmptyLayoutSession_ThrowsNotYet` (they pinned the removed throws).\n6. **Docs:**\n   - `README.md` Tables: the ops work on layouts, and `_row` is regenerated and not a public key. Bounce section: the note is removed. Append dimension growth is still \"not yet\" (db-02).\n   - Suite `AGENTS.md`: the \"Not yet on a layout session\" list keeps only the db-02 items."
+    },
+    {
+      "heading": "Check",
+      "body": "`BounceSquishTests` unchanged; README Bounce note removed; `UnsupportedOps` Theory shrinks to nothing (delete it)."
+    },
+    {
+      "heading": "Git",
+      "body": "`databall/` then suite gitlink."
+    }
+  ],
+  "notes": []
+}

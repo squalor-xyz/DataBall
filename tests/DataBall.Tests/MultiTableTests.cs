@@ -13,8 +13,8 @@ namespace squalor.DataBall.Tests
     /// <summary>
     /// Config-declared layout. S46: import splits into tables behind the "data" view; reads,
     /// filter, export, and .ball work through the view. S47: row writes, append import, and
-    /// MergeOrAppend route into the tables. AddColumn / RemoveColumn / Bounce on a layout throw
-    /// a clear message until S48.
+    /// MergeOrAppend route into the tables. db-01: Bounce / Squish / AddColumn / RemoveColumn
+    /// work on a layout by materializing it wide, running the wide operation, and re-splitting.
     /// </summary>
     public class MultiTableTests
     {
@@ -272,28 +272,6 @@ namespace squalor.DataBall.Tests
             {
                 TryDeleteDir(dir);
             }
-        }
-
-        public static IEnumerable<object[]> UnsupportedOps()
-        {
-            yield return new object[] { "AddColumn<int>", new Action<DataBall>(db => db.AddColumn<int>("X", Enumerable.Repeat(1, 81))) };
-            yield return new object[] { "AddColumn", new Action<DataBall>(db => db.AddColumn("X", Enumerable.Repeat("a", 81))) };
-            yield return new object[] { "RemoveColumn", new Action<DataBall>(db => db.RemoveColumn("EVM")) };
-            yield return new object[] { "Bounce", new Action<DataBall>(db => db.Bounce().GetAwaiter().GetResult()) };
-            yield return new object[] { "Squish", new Action<DataBall>(db => db.Squish().GetAwaiter().GetResult()) };
-        }
-
-        [Theory]
-        [MemberData(nameof(UnsupportedOps))]
-        public async Task Tables_UnsupportedOps_ThrowClearMessage(string name, Action<DataBall> op)
-        {
-            using var db = new DataBall(TablesConfig());
-            await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-            var ex = Assert.Throws<DataBallException>(() => op(db));
-            Assert.Contains("not supported on a multi-table session yet", ex.Message, StringComparison.Ordinal);
-            Assert.Equal("VIEW", TableType(db, "data"));
-            Assert.Equal(81, Count(db, "data"));
-            _ = name;
         }
 
         [Fact]
@@ -1266,15 +1244,6 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void AddColumn_OnEmptyLayoutSession_ThrowsNotYet()
-        {
-            using var db = new DataBall(TablesConfig());
-            var ex = Assert.Throws<DataBallException>(() => db.AddColumn("Site", new[] { "A" }));
-            Assert.Contains("not supported on a multi-table session yet", ex.Message, StringComparison.Ordinal);
-            Assert.Equal("", TableType(db, "data"));
-        }
-
-        [Fact]
         public async Task Ball_ConfigMetadata_StillWinsOverMetadataJson()
         {
             var dir = TempDir();
@@ -1297,6 +1266,385 @@ namespace squalor.DataBall.Tests
             {
                 Directory.Delete(dir, true);
             }
+        }
+
+        // ---- db-01: Bounce / Squish / AddColumn / RemoveColumn on a layout ----
+
+        [Fact]
+        public async Task Bounce_WithLayout_ExtractsTeststand_DropsFromSetup_Distinct()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var wide = new DataBall(WideTwinConfig(dir));
+                await wide.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                await wide.Bounce();
+
+                using var db = new DataBall(TablesConfig());
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                await db.Bounce();
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(wide.Metadata["Teststand"], db.Metadata["Teststand"]);
+                Assert.Equal(wide.Metadata["SN"], db.Metadata["SN"]);
+                // SN was the master's only column, so the master is gone; setup keeps Temp and Vcc.
+                Assert.Equal(new[] { "dc", "rf", "setup", "sweep" }, BaseTables(db));
+                Assert.Equal(new[] { "setup_key", "Temp", "Vcc" }, TableColumns(db, "setup"));
+                AssertSameRows(wide, db, "SELECT * FROM \"data\" ORDER BY ALL");
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task Bounce_WithLayout_AllConstant_DropsViewAndTables()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "const.csv");
+                File.WriteAllText(csv, "Site,M\nA,1\nA,1\n");
+                var config = WriteConfig(dir, """{ "tables": { "site": { "kind": "dimension", "columns": ["Site"] } } }""");
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                Assert.Equal("VIEW", TableType(db, "data"));
+
+                await db.Bounce();
+
+                Assert.Equal("", TableType(db, "data"));
+                Assert.Empty(BaseTables(db));
+                Assert.Equal("A", db.Metadata["Site"]);
+                Assert.Equal(1L, Convert.ToInt64(db.Metadata["M"]));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task Squish_WithLayout_HivePartitionByTemp_Roundtrips()
+        {
+            var dir = TempDir();
+            try
+            {
+                var hive = Path.Combine(dir, "hive");
+                using var db = new DataBall(TablesConfig());
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                await db.Squish(hive, new[] { "Temp" });
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                var partitions = Directory.GetDirectories(hive).Select(Path.GetFileName).ToList();
+                Assert.Equal(3, partitions.Count);
+                Assert.All(partitions, p => Assert.StartsWith("Temp=", p, StringComparison.Ordinal));
+
+                using var back = new DataBall();
+                await back.ImportAsync(hive);
+                var cols = string.Join(", ", ViewColumns(db).OrderBy(c => c, StringComparer.Ordinal).Select(c => $"\"{c}\""));
+                AssertSameRows(db, back, $"SELECT {cols} FROM \"data\" ORDER BY ALL");
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task AddColumn_WithLayout_AlignsByRow()
+        {
+            var dir = TempDir();
+            try
+            {
+                var idx = Enumerable.Range(0, 81).ToList();
+                using var wide = new DataBall(WideTwinConfig(dir));
+                await wide.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                wide.AddColumn<int>("Idx", idx);
+
+                using var db = new DataBall(TablesConfig());
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                db.AddColumn<int>("Idx", idx);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Contains("Idx", TableColumns(db, "sweep"));
+                // Rows are unique on (stimulusGrp, sweep), so an equal multiset means Idx landed on the same rows.
+                AssertSameRows(wide, db, "SELECT * FROM \"data\" ORDER BY ALL");
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task AddColumn_ToDimension_RematerializesAndSplits()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, """
+                    {
+                      "stimulus": ["Frequency", "Temp", "Vcc"],
+                      "parameters": { "stimulusGrp": { "role": "identity" }, "sweep": { "role": "identity" } },
+                      "tables": {
+                        "device": { "kind": "master",       "columns": ["SN"] },
+                        "setup":  { "kind": "dimension",    "columns": ["Teststand", "Temp", "Vcc", "Chamber"] },
+                        "sweep":  { "kind": "rows",         "roles":   ["identity", "stimulus"], "columns": ["Date"] },
+                        "rf":     { "kind": "measurements", "columns": ["Pout", "Pin", "Gain", "EVM"] },
+                        "dc":     { "kind": "measurements", "columns": ["I_Total"] }
+                      }
+                    }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                var setupRows = Count(db, "setup");
+
+                // Chamber is the CSV's own Temp text, row for row, so it is determined by the setup key.
+                db.AddColumn("Chamber", CsvColumn(Fixture("semiconductor-sweep.csv"), "Temp(degC)"));
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Contains("Chamber", TableColumns(db, "setup"));
+                Assert.Equal(setupRows, Count(db, "setup"));
+                Assert.Equal(81, Count(db, "data"));
+                var mismatched = db.Query("SELECT COUNT(*) AS c FROM \"data\" WHERE CAST(\"Chamber\" AS DOUBLE) <> \"Temp\"");
+                Assert.Equal(0L, Convert.ToInt64(mismatched[0]["c"]));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public void AddColumn_LayoutDeclared_NoData_SplitsOnFirstColumn()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, """{ "tables": { "site": { "kind": "dimension", "columns": ["Site"] } } }""");
+                using var db = new DataBall(config);
+                db.AddColumn("Site", new[] { "A", "B", "A" });
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(2, Count(db, "site"));
+                Assert.Equal(3, Count(db, "data"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task RemoveColumn_WithLayout_DropsFromOwningTable_ViewRefreshed()
+        {
+            using var db = new DataBall(TablesConfig());
+            await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+
+            db.RemoveColumn("EVM");
+
+            Assert.Equal("VIEW", TableType(db, "data"));
+            Assert.Equal(FixtureTables, BaseTables(db));
+            Assert.DoesNotContain("EVM", TableColumns(db, "rf"));
+            Assert.DoesNotContain("EVM", ViewColumns(db));
+            Assert.Equal(81, Count(db, "data"));
+        }
+
+        [Fact]
+        public async Task RemoveColumn_WithLayout_LastColumn_DropsViewAndTables()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "two.csv");
+                File.WriteAllText(csv, "Site,M\nA,1\nB,2\n");
+                var config = WriteConfig(dir, """{ "tables": { "site": { "kind": "dimension", "columns": ["Site"] }, "g": { "kind": "measurements", "columns": ["M"] } } }""");
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+
+                db.RemoveColumn("M");
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(new[] { "rows", "site" }, BaseTables(db));
+
+                db.RemoveColumn("Site");
+                Assert.Equal("", TableType(db, "data"));
+                Assert.Empty(BaseTables(db));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task RemoveColumn_WithLayout_UnknownColumn_Throws_SessionIntact()
+        {
+            using var db = new DataBall(TablesConfig());
+            await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+            var columns = ViewColumns(db);
+
+            var ex = Assert.Throws<DataBallException>(() => db.RemoveColumn("Nope"));
+            Assert.Contains("does not exist", FullMessage(ex), StringComparison.Ordinal);
+
+            Assert.Equal("VIEW", TableType(db, "data"));
+            Assert.Equal(FixtureTables, BaseTables(db));
+            Assert.Equal(columns, ViewColumns(db));
+            Assert.Equal(81, Count(db, "data"));
+            // The in-memory layout is still bound: a row write routes into the tables.
+            db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
+            Assert.Equal(82, Count(db, "data"));
+        }
+
+        [Fact]
+        public async Task Bounce_WithLayout_ConstantDeclaredKeyColumn_StaysData()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall(KeyedSetupConfig(dir));
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+
+                await db.Bounce();
+
+                // Teststand is constant but part of setup's declared key, so it stays a column.
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.False(db.Metadata.ContainsKey("Teststand"));
+                Assert.Contains("Teststand", TableColumns(db, "setup"));
+                Assert.Equal(81, Count(db, "data"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task RemoveColumn_WithLayout_DeclaredKeyColumn_ThrowsClearly_SessionIntact()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall(KeyedSetupConfig(dir));
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                var columns = ViewColumns(db);
+
+                var ex = Assert.Throws<DataBallException>(() => db.RemoveColumn("Temp"));
+                Assert.Contains("declared key of table 'setup'", FullMessage(ex), StringComparison.Ordinal);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(columns, ViewColumns(db));
+                Assert.Equal(81, Count(db, "data"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task AddColumn_ToDimension_KeyConflict_Throws_SessionIntact()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall(KeyedSetupConfig(dir, extraSetupColumn: "Chamber"));
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                var columns = ViewColumns(db);
+                var setupRows = Count(db, "setup");
+
+                // One Chamber value per row: the setup key no longer determines its columns.
+                var ex = Assert.Throws<DataBallException>(() => db.AddColumn("Chamber", Enumerable.Range(0, 81).Select(i => (string?)("C" + i))));
+                Assert.Contains("do not determine", FullMessage(ex), StringComparison.Ordinal);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(columns, ViewColumns(db));
+                Assert.Equal(setupRows, Count(db, "setup"));
+                Assert.Equal(81, Count(db, "data"));
+                db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
+                Assert.Equal(82, Count(db, "data"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task ApplyImportedConfig_TablesOntoWideData_AdoptsLayout()
+        {
+            var dir = TempDir();
+            try
+            {
+                var ball = Path.Combine(dir, "layout.ball");
+                using (var src = new DataBall(TablesConfig()))
+                {
+                    await src.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                    await src.SaveAsync(ball);
+                }
+
+                using var db = new DataBall(WideTwinConfig(dir));
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                Assert.Equal("BASE TABLE", TableType(db, "data"));
+
+                await db.ImportAsync(ball, new ImportOptions { Append = true });
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(FixtureTables, BaseTables(db));
+                Assert.Equal(162, Count(db, "data"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        /// <summary>The fixture config without its <c>tables</c> section: same types and roles, one wide table.</summary>
+        private static string WideTwinConfig(string dir)
+        {
+            return WriteConfig(dir, """
+                {
+                  "stimulus": ["Frequency", "Temp", "Vcc"],
+                  "parameters": { "stimulusGrp": { "role": "identity" }, "sweep": { "role": "identity" } }
+                }
+                """);
+        }
+
+        /// <summary>The fixture layout with setup's key declared explicitly as (Teststand, Temp, Vcc).</summary>
+        private static string KeyedSetupConfig(string dir, string? extraSetupColumn = null)
+        {
+            var extra = extraSetupColumn is null ? "" : $", \"{extraSetupColumn}\"";
+            return WriteConfig(dir, $$"""
+                {
+                  "stimulus": ["Frequency", "Temp", "Vcc"],
+                  "parameters": { "stimulusGrp": { "role": "identity" }, "sweep": { "role": "identity" } },
+                  "tables": {
+                    "device": { "kind": "master",       "columns": ["SN"] },
+                    "setup":  { "kind": "dimension",    "columns": ["Teststand", "Temp", "Vcc"{{extra}}], "key": ["Teststand", "Temp", "Vcc"] },
+                    "sweep":  { "kind": "rows",         "roles":   ["identity", "stimulus"], "columns": ["Date"] },
+                    "rf":     { "kind": "measurements", "columns": ["Pout", "Pin", "Gain", "EVM"] },
+                    "dc":     { "kind": "measurements", "columns": ["I_Total"] }
+                  }
+                }
+                """);
+        }
+
+        private static List<string> TableColumns(DataBall db, string table)
+        {
+            return db.Query($"""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'main' AND table_name = '{table}'
+                ORDER BY ordinal_position
+                """).Select(r => (string)r["column_name"]!).ToList();
+        }
+
+        /// <summary>Raw text of one CSV column in file order (the fixture has no quoted fields).</summary>
+        private static List<string?> CsvColumn(string path, string header)
+        {
+            var lines = File.ReadAllLines(path).Where(l => l.Length > 0).ToList();
+            var index = Array.IndexOf(lines[0].Split(','), header);
+            Assert.True(index >= 0, "missing CSV column " + header);
+            return lines.Skip(1).Select(l => (string?)l.Split(',')[index]).ToList();
         }
 
         private static Dictionary<string, object?> Point(long grp, long sweep, double temp, double vcc, double evm)

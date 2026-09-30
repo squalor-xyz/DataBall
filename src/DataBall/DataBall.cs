@@ -134,11 +134,10 @@ namespace squalor.DataBall
         public void AddColumn<T>(string name, IEnumerable<T> values) where T : struct
         {
             ThrowIfDisposed();
-            ThrowIfLayoutDeclared("AddColumn");
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(T));
             var list = values as IReadOnlyList<T> ?? values.ToList();
-            _store.AddColumn(name, list);
+            OnWideData(() => _store.AddColumn(name, list));
             _expectedColumnTypes[name] = typeof(T);
             RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
@@ -151,11 +150,10 @@ namespace squalor.DataBall
         public void AddColumn(string name, IEnumerable<string?> values)
         {
             ThrowIfDisposed();
-            ThrowIfLayoutDeclared("AddColumn");
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(string));
             var list = values as IReadOnlyList<string?> ?? values.ToList();
-            _store.AddColumn(name, list);
+            OnWideData(() => _store.AddColumn(name, list));
             _expectedColumnTypes[name] = typeof(string);
             RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
@@ -167,8 +165,8 @@ namespace squalor.DataBall
         public void RemoveColumn(string name)
         {
             ThrowIfDisposed();
-            ThrowIfLayoutDeclared("RemoveColumn");
-            _store.RemoveColumn(name);
+            ThrowIfDeclaredKey(name);
+            OnWideData(() => _store.RemoveColumn(name));
             _expectedColumnTypes.Remove(name);
         }
 
@@ -284,7 +282,6 @@ namespace squalor.DataBall
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
-            ThrowIfMultiTable("Bounce");
             _logger.LogInformation("Starting Bounce operation");
             try
             {
@@ -299,22 +296,37 @@ namespace squalor.DataBall
                 if (writePartitioned)
                     _store.ResolvePartitionColumns(partitionColumns!);
 
-                var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
-                try
+                if (HasLayoutConfig)
                 {
-                    _store.InTransaction(() =>
+                    // A declared key column stays data even when constant: the re-split needs it.
+                    var keep = (partitionColumns ?? Array.Empty<string>())
+                        .Concat(_config.Tables.Values.SelectMany(t => t.Key))
+                        .ToArray();
+                    OnWideData(() =>
                     {
-                        ExtractConstantsToMetadataSql(partitionColumns);
+                        ExtractConstantsToMetadataSql(keep);
                         DistinctInPlace();
                     });
                 }
-                catch
+                else
                 {
-                    _store.ReloadMetadata();
-                    _expectedColumnTypes.Clear();
-                    foreach (var pair in expectedSnap)
-                        _expectedColumnTypes[pair.Key] = pair.Value;
-                    throw;
+                    var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
+                    try
+                    {
+                        _store.InTransaction(() =>
+                        {
+                            ExtractConstantsToMetadataSql(partitionColumns);
+                            DistinctInPlace();
+                        });
+                    }
+                    catch
+                    {
+                        _store.ReloadMetadata();
+                        _expectedColumnTypes.Clear();
+                        foreach (var pair in expectedSnap)
+                            _expectedColumnTypes[pair.Key] = pair.Value;
+                        throw;
+                    }
                 }
 
                 PruneLastCommittedRow();
@@ -836,16 +848,50 @@ namespace squalor.DataBall
             }
         }
 
-        private void ThrowIfLayoutDeclared(string operation)
+        /// <summary>
+        /// A column named in a table's declared <c>key</c> cannot be removed while the config
+        /// declares it: the re-split would have no key. Checked before anything is written.
+        /// </summary>
+        private void ThrowIfDeclaredKey(string column)
         {
-            if (HasLayoutConfig)
-                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
+            foreach (var (table, spec) in _config.Tables)
+            {
+                if (spec.Key.Any(k => k.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                    throw new DataBallException($"Column '{column}' is part of the declared key of table '{table}'; change the 'tables' config before removing it");
+            }
         }
 
-        private void ThrowIfMultiTable(string operation)
+        /// <summary>
+        /// Runs a wide-table operation. On a layout session it runs inside one transaction: the
+        /// layout is materialized back into one wide <c>"data"</c> table (row-key order), the
+        /// operation runs unchanged, and the result is re-split (or nothing remains when it
+        /// dropped <c>"data"</c>). The row key <c>_row</c> is regenerated. On failure the store
+        /// rolls back and the in-memory mirrors are restored, as for an import.
+        /// </summary>
+        private void OnWideData(Action wideOperation)
         {
-            if (_store.DataIsView())
-                throw new DataBallException($"{operation} is not supported on a multi-table session yet");
+            if (!HasLayoutConfig)
+            {
+                wideOperation();
+                return;
+            }
+
+            var snapshot = TakeSnapshot();
+            try
+            {
+                _store.InTransaction(() =>
+                {
+                    if (_store.Layout is not null)
+                        _store.UnsplitLayout();
+                    wideOperation();
+                    SplitIfLayout();
+                });
+            }
+            catch
+            {
+                RestoreSnapshot(snapshot);
+                throw;
+            }
         }
 
         private void ThrowIfDisposed()

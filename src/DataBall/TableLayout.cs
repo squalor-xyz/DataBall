@@ -367,6 +367,13 @@ namespace squalor.DataBall
             return sb.ToString();
         }
 
+        /// <summary>Every wide row in row-key order (the order the rows were written).</summary>
+        internal string BuildOrderedViewSelect()
+        {
+            return BuildViewSelect()
+                + $" ORDER BY {DuckDbStore.QuoteIdent(Spine.Name)}.{DuckDbStore.QuoteIdent(RowKey)}";
+        }
+
         /// <summary>The wide row with the highest row key (the last committed row).</summary>
         internal string BuildLastRowSelect()
         {

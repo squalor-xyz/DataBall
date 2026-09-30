@@ -356,7 +356,8 @@ namespace squalor.DataBall
                 }
                 finally
                 {
-                    Execute("DROP TABLE IF EXISTS \"_addcol\"");
+                    // Best effort: inside a joined transaction that an error aborted, plain SQL here would hide the original exception.
+                    DropTemp("_addcol");
                 }
             });
         }

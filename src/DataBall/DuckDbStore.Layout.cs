@@ -19,6 +19,7 @@ namespace squalor.DataBall
         private const string WideTemp = "_wide";
         private const string CastTemp = "_cast";
         private const string RowsTemp = "_rows";
+        private const string UnsplitTemp = "_unsplit";
 
         /// <summary>Layout bound to this store, or null for a single wide table.</summary>
         internal TableLayout? Layout { get; private set; }
@@ -253,6 +254,30 @@ namespace squalor.DataBall
             }
 
             Execute("DROP TABLE IF EXISTS \"data\"");
+        }
+
+        /// <summary>
+        /// Turns the bound layout back into one wide base table <c>"data"</c>, rows in row-key
+        /// order, and forgets the layout. Runs inside the caller's transaction, which re-splits
+        /// afterwards (or restores the snapshot on rollback). The re-split numbers rows with
+        /// <c>row_number() OVER (ORDER BY rowid)</c>, so insertion order keeps row order.
+        /// </summary>
+        internal void UnsplitLayout()
+        {
+            ThrowIfDisposed();
+            var layout = Layout ?? throw new DataBallException("No table layout is bound");
+            try
+            {
+                Execute($"CREATE OR REPLACE TEMP TABLE {QuoteIdent(UnsplitTemp)} AS {layout.BuildOrderedViewSelect()}");
+                DropDataRelation();
+                Execute($"CREATE TABLE \"data\" AS SELECT * FROM {QuoteIdent(UnsplitTemp)}");
+            }
+            finally
+            {
+                DropTemp(UnsplitTemp);
+            }
+
+            ClearLayout();
         }
 
         /// <summary>

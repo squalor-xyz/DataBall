@@ -10,7 +10,7 @@
       "id": "db-01",
       "title": "DataBall Bounce and column edits must work on layouts",
       "short_title": "DataBall Bounce and column edits must work on layouts",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [],
       "notes": [],

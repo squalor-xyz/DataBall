@@ -13,3 +13,9 @@
 {"when": "2026-09-30T00:33:35Z", "item": "db-04", "action": "promote", "from": "", "to": "", "note": ""}
 {"when": "2026-09-30T00:33:46Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
 {"when": "2026-09-30T00:33:46Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-09-30T00:44:40Z", "item": "db-01", "action": "status", "from": "open", "to": "started", "note": ""}
+{"when": "2026-09-30T00:54:52Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Implement"}
+{"when": "2026-09-30T00:54:53Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Failing tests"}
+{"when": "2026-09-30T01:07:21Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Implement"}
+{"when": "2026-09-30T01:07:22Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Failing tests"}
+{"when": "2026-09-30T01:16:34Z", "item": "db-01", "action": "status", "from": "started", "to": "done", "note": "Bounce/Squish, AddColumn, RemoveColumn work on layouts via one round-trip (UnsplitLayout -> wide op -> re-split, one transaction, snapshot restore). 12 new tests; review fixes: declared key columns kept by Bounce and refused by RemoveColumn; _addcol cleanup via DropTemp. check.sh green."}
