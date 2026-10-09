@@ -16,7 +16,7 @@
   "sections": [
     {
       "heading": "Why",
-      "body": "After db-01–db-03 the 1.3.0 multi-table layout is complete, but it is unreleased. The last tag is `v1.2.0`. Standalone squalplot / squaltest clones `PackageReference` `squalor.DataBall` + `squalor.DataBall.Handlers` **1.2.0** and cannot use layouts until a `v1.3.0` tag packs. A `v*` tag is the only release trigger (`.github/workflows/release.yml`)."
+      "body": "After db-01 and db-02 the 1.3.0 multi-table layout is usable, but it is unreleased. The last tag is `v1.2.0`. Standalone squalplot / squaltest clones `PackageReference` `squalor.DataBall` + `squalor.DataBall.Handlers` **1.2.0** and cannot use layouts until a `v1.3.0` tag packs. A `v*` tag is the only release trigger (`.github/workflows/release.yml`).\n\nSnowflake `parent` (db-03) moved past this tag into the v1.4.0 plan (owner 2026-10-08; suite `docs/databall-v1.4-alignment.md`)."
     },
     {
       "heading": "Files",
@@ -28,7 +28,7 @@
     },
     {
       "heading": "Implement",
-      "body": "1. Confirm db-01, db-02 and db-03 are done (`slicer list --all`, `git log`), and that `main` CI is green.\n2. Local pack exactly as README \"Install\" says (three `dotnet pack … -c Release -o artifacts`). Inspect as README says:\n   - library nupkg has `lib/net10.0/DataBall.dll` and no `runtimes/`;\n   - tool nupkg has `runtimes/{linux-x64,linux-arm64,osx,win-x64,win-arm64}/native/`.\n\n   Install the CLI from `./artifacts` and run `databall --help`.\n3. Docs, in one databall commit on `main`, before the tag:\n   - README tag line → `v1.3.0` is the last release.\n   - Keep the \"not on nuget.org\" wording unless the owner confirms the key is set.\n4. **Owner decision before tagging:** is `NUGET_API_KEY` set on the DataBall repo? If it is, the tag also lists 1.3.0 on nuget.org, which the non-goals exclude (\"nuget.org listing\"). The owner either removes the secret first or changes that non-goal.\n5. The owner (or the agent, on explicit request) tags the docs commit: `git tag -a v1.3.0 -m \"DataBall 1.3.0\"`, then `git push origin v1.3.0`.\n6. Watch the release run through ancestor check → test → pack → GitHub Release."
+      "body": "1. Confirm db-01 and db-02 are done (`slicer list --all`, `git log`), and that `main` CI is green.\n2. Local pack exactly as README \"Install\" says (three `dotnet pack … -c Release -o artifacts`). Inspect as README says:\n   - library nupkg has `lib/net10.0/DataBall.dll` and no `runtimes/`;\n   - tool nupkg has `runtimes/{linux-x64,linux-arm64,osx,win-x64,win-arm64}/native/`.\n\n   Install the CLI from `./artifacts` and run `databall --help`.\n3. Docs, in one databall commit on `main`, before the tag:\n   - README tag line → `v1.3.0` is the last release.\n   - Keep the \"not on nuget.org\" wording unless the owner confirms the key is set.\n4. **Owner decision before tagging:** is `NUGET_API_KEY` set on the DataBall repo? If it is, the tag also lists 1.3.0 on nuget.org, which the non-goals exclude (\"nuget.org listing\"). The owner either removes the secret first or changes that non-goal.\n5. The owner (or the agent, on explicit request) tags the docs commit: `git tag -a v1.3.0 -m \"DataBall 1.3.0\"`, then `git push origin v1.3.0`.\n6. Watch the release run through ancestor check → test → pack → GitHub Release."
     },
     {
       "heading": "Check",

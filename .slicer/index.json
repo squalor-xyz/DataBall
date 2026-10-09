@@ -1,8 +1,8 @@
 {
-  "version": 2,
+  "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 5,
+  "next_id": 18,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -13,7 +13,7 @@
       "status": "done",
       "has_slice": true,
       "depends_on": [],
-      "notes": [],
+      "note_records": [],
       "claim": null,
       "fields": {
         "size": "M",
@@ -23,12 +23,16 @@
         ],
         "trees_literal": false,
         "findings": "owner charter (2026-09-23) (was suite S48)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
         "pass": "",
         "group": "",
         "reason": "",
         "importance": 3,
         "urgency": 3,
-        "effort": 3
+        "effort": 3,
+        "attempts": 0
       }
     },
     {
@@ -40,7 +44,7 @@
       "depends_on": [
         "db-01"
       ],
-      "notes": [],
+      "note_records": [],
       "claim": null,
       "fields": {
         "size": "M",
@@ -50,40 +54,16 @@
         ],
         "trees_literal": false,
         "findings": "owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
         "pass": "",
         "group": "",
         "reason": "",
         "importance": 2,
         "urgency": 2,
-        "effort": 2
-      }
-    },
-    {
-      "id": "db-03",
-      "title": "DataBall snowflake `parent` and a perf measurement",
-      "short_title": "DataBall snowflake `parent` and a perf measurement",
-      "status": "open",
-      "has_slice": true,
-      "depends_on": [
-        "db-01",
-        "db-02"
-      ],
-      "notes": [],
-      "claim": null,
-      "fields": {
-        "size": "M",
-        "flags": [],
-        "trees": [
-          "databall,suite"
-        ],
-        "trees_literal": false,
-        "findings": "owner charter (2026-09-23) (was suite S49)",
-        "pass": "",
-        "group": "",
-        "reason": "",
-        "importance": 2,
-        "urgency": 2,
-        "effort": 3
+        "effort": 2,
+        "attempts": 0
       }
     },
     {
@@ -93,9 +73,9 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [
-        "db-03"
+        "db-02"
       ],
-      "notes": [],
+      "note_records": [],
       "claim": null,
       "fields": {
         "size": "S",
@@ -107,16 +87,474 @@
         ],
         "trees_literal": false,
         "findings": "owner request (2026-09-29)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
         "pass": "",
         "group": "",
         "reason": "",
         "importance": 2,
         "urgency": 2,
-        "effort": 1
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-05",
+      "title": "DataBall `.ball` as a DuckDB file must be measured before it ships",
+      "short_title": "Trial: .ball as a DuckDB file",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-04"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 3,
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-06",
+      "title": "DataBall `.ball` v3 must be a DuckDB file",
+      "short_title": "DataBall `.ball` v3 must be a DuckDB file",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-05"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "L",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 3,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-07",
+      "title": "DataBall must choose its store by size and take engine settings",
+      "short_title": "DataBall must choose its store by size and take engine settings",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-06"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-08",
+      "title": "DataBall must return columnar and streaming reads",
+      "short_title": "DataBall must return columnar and streaming reads",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-04"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-09",
+      "title": "DataBall must attach Parquet and hive inputs as views",
+      "short_title": "DataBall must attach Parquet and hive inputs as views",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-06"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-10",
+      "title": "DataBall must score format detection and explain it",
+      "short_title": "DataBall must score format detection and explain it",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-04"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-11",
+      "title": "DataBall must open many files into one session",
+      "short_title": "DataBall must open many files into one session",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-07",
+        "db-09",
+        "db-10"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "L",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 3,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-12",
+      "title": "DataBall CSV must handle preambles, trailers and strict casts",
+      "short_title": "DataBall CSV must handle preambles, trailers and strict casts",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-10"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-13",
+      "title": "DataBall must apply declarative transforms from config",
+      "short_title": "DataBall must apply declarative transforms from config",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-11"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 1,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-14",
+      "title": "DataBall must join, dedupe and aggregate across sources",
+      "short_title": "DataBall must join, dedupe and aggregate across sources",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-11"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 1,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-15",
+      "title": "DataBall export must support profiles and content splits",
+      "short_title": "DataBall export must support profiles and content splits",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-06"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 1,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-16",
+      "title": "DataBall API must have one clear way in and out",
+      "short_title": "DataBall API must have one clear way in and out",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-08",
+        "db-11"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-03",
+      "title": "DataBall snowflake `parent` and a perf measurement",
+      "short_title": "DataBall snowflake `parent` and a perf measurement",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-04",
+        "db-07"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall,suite"
+        ],
+        "trees_literal": false,
+        "findings": "owner charter (2026-09-23) (was suite S49)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 3,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-17",
+      "title": "DataBall v1.4.0 must be tagged and released",
+      "short_title": "Tag and release DataBall v1.4.0",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-03",
+        "db-06",
+        "db-07",
+        "db-09",
+        "db-12",
+        "db-13",
+        "db-14",
+        "db-15",
+        "db-16"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [
+          "OWNER"
+        ],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner interview (2026-10-08)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 1,
+        "attempts": 0
       }
     }
   ],
   "epilogue": "",
-  "goals": "DataBall is the session engine of the squalor semiconductor suite, co-developed with `squalor-xyz/suite` and shared by its hosts. One run lives in one DataBall: in-memory DuckDB by default, file-backed on request. It sits behind the wide `\"data\"` relation plus `\"meta\"`, and is parked to a file and reopened from one.\n\n- **ATE spirit:** sequential test-executive tables; DuckDB is the only SQL engine; interchange is CSV / Parquet / `.ball` / zip-tar.gz.\n- **One way in:** `Open` detects the format and hands lab dialects to an `IFormatHandler`. Parsers never go in the store.\n- **Schema from config, not sniffing:** types, units, roles, and metadata fields come from the default profile plus overlay config. A config-declared multi-table layout (`tables`) sits behind the same `\"data\"` view, so readers never see the split.\n- **Now:** finish the 1.3.0 layout (Bounce, column edits, dimension growth, snowflake `parent`; db-01–db-03) and release it as `v1.3.0` (db-04).\n\nLicense: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).",
-  "non_goals": "Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `\"data\"`), streaming `Query`, Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures, nuget.org listing."
+  "goals": "DataBall is the session engine of the squalor semiconductor suite, co-developed with `squalor-xyz/suite` and shared by its hosts. One run lives in one DataBall: in-memory DuckDB by default, file-backed on request. It sits behind the wide `\"data\"` relation plus `\"meta\"`, and is parked to a file and reopened from one.\n\n- **ATE spirit:** sequential test-executive tables; DuckDB is the only SQL engine; interchange is CSV / Parquet / `.ball` / zip-tar.gz.\n- **One way in:** `Open` detects the format and hands lab dialects to an `IFormatHandler`. Parsers never go in the store.\n- **Schema from config, not sniffing:** types, units, roles, and metadata fields come from the default profile plus overlay config. A config-declared multi-table layout (`tables`) sits behind the same `\"data\"` view, so readers never see the split.\n- **Now:** finish dimension growth (db-02) and release `v1.3.0` (db-04).\n- **Next, v1.4.0 (planned, not shipped; suite `docs/databall-v1.4-alignment.md`):** one session holds one or more runs through a run/source dimension; `.ball` becomes a DuckDB file (db-05 trial first); the store is in-memory or file-backed by size, so data larger than RAM works; hosts read typed columns or streamed rows with projection and filter pushdown; `Open` scores detection and opens many files; declarative transforms, combine ops, and export profiles fold in from the Conflux spec (db-05–db-17, snowflake `parent` db-03 included).\n\nLicense: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).",
+  "non_goals": "Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `\"data\"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).",
+  "catalog": {
+    "next_id": 1,
+    "id_prefix": "C",
+    "id_width": 2,
+    "records": []
+  }
 }

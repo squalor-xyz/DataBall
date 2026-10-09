@@ -1,0 +1,41 @@
+{
+  "id": "db-07",
+  "title": "DataBall must choose its store by size and take engine settings",
+  "lead": [
+    "Non-`.ball` opens use in-memory DuckDB below a threshold and a file-backed store above it. `memory_limit`, `threads`, and `temp_directory` come from config. Larger-than-RAM data is a goal; the threshold and temp location are open owner questions."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

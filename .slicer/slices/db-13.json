@@ -1,0 +1,41 @@
+{
+  "id": "db-13",
+  "title": "DataBall must apply declarative transforms from config",
+  "lead": [
+    "rename / select / derive / filter / map / lookup / unpivot steps compiled to SQL and declared in config. Where the JSON lives (a `Config` section or a separate file) is an open owner question."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

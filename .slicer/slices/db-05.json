@@ -1,0 +1,41 @@
+{
+  "id": "db-05",
+  "title": "DataBall `.ball` as a DuckDB file must be measured before it ships",
+  "lead": [
+    "Trial for the owner's decision that `.ball` becomes a DuckDB database file (suite `docs/databall-v1.4-alignment.md`). Measure storage version, cross-process read-only open, size against today's `.ball` and Parquet, and a round-trip, then write a decision record for db-06."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "S",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** any production change to `Open`, `SaveAsync` or the `.ball` format (db-06); store selection (db-07).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "The owner chose `.ball` = DuckDB file on 2026-10-08: the session store and the parked file become the same file, so capture appends in place and reads load only what they need. These points come from general DuckDB knowledge and are unverified here. db-06 depends on them:\n\n- which storage format version DuckDB.NET.Data.Full **1.5.5** writes, and what DuckDB documents about older builds reading newer files;\n- whether a second **process** can open the file read-only while a writer holds it (squalplot reading while squaltest captures);\n- file size against today's ZIP `.ball` (`SaveAsync`) and DataBall's Parquet export (`ExportAsync`, DuckDB default codec; DataBall sets no compression option today, `DuckDbStore.cs:722`);\n- that a file-backed session reopened from its file returns the same rows."
+    },
+    {
+      "heading": "Files",
+      "body": "- `databall/tests/DataBall.Tests/BallDuckDbTrialTests.cs` (new)\n- A child-process helper for the read-only check. `databall query` imports a file instead of attaching a database (`CliApp.QueryAsync`), so it cannot be the child. Pick the smallest option and record the choice: a test-only console project under `databall/tests/`, or relaunching the test host with an argument.\n- `databall/docs/ball-v3-trial.md` (new decision record)\n- No production code."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "- `Trial_DuckDbFile_RoundTrip_SameRowsAsWideSession`: **asserts**. Build a file-backed session (`new DataBall(databasePath: …)`), dispose it, reopen the same file, compare `SELECT * FROM data` with the source rows.\n- `Trial_DuckDbFile_SizeVsBallAndParquet_LogsRatios`: logged, no assert.\n- `Trial_DuckDbFile_ReadOnlyOpenWhileWriterHolds_LogsOutcome`: logged, no assert. The child process attempts a read-only open while this process holds the writer.\n- `Trial_DuckDbFile_StorageVersion_Logged`: logged, no assert. Query DuckDB for the storage version of the written file."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Generate a 50k-row fixture in the test (no GB fixture; non-goals), shaped like a capture: `groupId`, `sweepId`, Pout, EVM, current.\n2. Write it three ways: a file-backed session, `SaveAsync` (ZIP `.ball`), and `ExportAsync` Parquet. Log the byte sizes and ratios to `ITestOutputHelper`.\n3. Read-only open from a child process while the writer is open. Log success or the exact DuckDB error. Repeat after the writer disposes.\n4. Log the storage version and the DuckDB library version.\n5. Write `databall/docs/ball-v3-trial.md`:\n   - the measurements;\n   - links to DuckDB's storage-compatibility documentation;\n   - a recommendation for each db-06 question: read-only default on open, snapshot policy so a reader can see an in-progress capture, compatibility stance, and whether `.ball` keeps a ZIP fallback."
+    },
+    {
+      "heading": "Check",
+      "body": "- `./scripts/check.sh`.\n- The four logged values appear in test output.\n- The decision record answers each db-06 question. The owner reads it before db-06 gets a full spec.\n- `slicer check`."
+    },
+    {
+      "heading": "Git",
+      "body": "`databall/` (tests + decision record) then the suite gitlink."
+    }
+  ],
+  "notes": []
+}

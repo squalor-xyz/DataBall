@@ -1,0 +1,41 @@
+{
+  "id": "db-08",
+  "title": "DataBall must return columnar and streaming reads",
+  "lead": [
+    "`Filter` returns a fully loaded `List<Dictionary>` today (`DataBall.Filter.cs:45`), and a handler's rows are all buffered before `AddRows` (`DataBall.Open.cs:70`). Add `ReadColumns(filter, cols)` (typed arrays for plots) and `ReadRowsAsync` (streaming rows), and batch handler writes."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

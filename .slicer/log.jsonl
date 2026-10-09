@@ -19,3 +19,44 @@
 {"when": "2026-09-30T01:07:21Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Implement"}
 {"when": "2026-09-30T01:07:22Z", "item": "db-01", "action": "edit", "from": "", "to": "", "note": "Failing tests"}
 {"when": "2026-09-30T01:16:34Z", "item": "db-01", "action": "status", "from": "started", "to": "done", "note": "Bounce/Squish, AddColumn, RemoveColumn work on layouts via one round-trip (UnsplitLayout -> wide op -> re-split, one transaction, snapshot restore). 12 new tests; review fixes: declared key columns kept by Bounce and refused by RemoveColumn; _addcol cleanup via DropTemp. check.sh green."}
+{"when": "2026-10-09T03:18:38Z", "item": "db-05", "action": "add", "from": "", "to": "open", "note": "DataBall `.ball` as a DuckDB file must be measured before it ships"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-06", "action": "add", "from": "", "to": "open", "note": "DataBall `.ball` v3 must be a DuckDB file"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-07", "action": "add", "from": "", "to": "open", "note": "DataBall must choose its store by size and take engine settings"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-08", "action": "add", "from": "", "to": "open", "note": "DataBall must return columnar and streaming reads"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-09", "action": "add", "from": "", "to": "open", "note": "DataBall must attach Parquet and hive inputs as views"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-10", "action": "add", "from": "", "to": "open", "note": "DataBall must score format detection and explain it"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-11", "action": "add", "from": "", "to": "open", "note": "DataBall must open many files into one session"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-12", "action": "add", "from": "", "to": "open", "note": "DataBall CSV must handle preambles, trailers and strict casts"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-13", "action": "add", "from": "", "to": "open", "note": "DataBall must apply declarative transforms from config"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-14", "action": "add", "from": "", "to": "open", "note": "DataBall must join, dedupe and aggregate across sources"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-15", "action": "add", "from": "", "to": "open", "note": "DataBall export must support profiles and content splits"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-16", "action": "add", "from": "", "to": "open", "note": "DataBall API must have one clear way in and out"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-17", "action": "add", "from": "", "to": "open", "note": "DataBall v1.4.0 must be tagged and released"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "short_title DataBall v1.4.0 must be tagged and released→Tag and release DataBall v1.4.0; flags -→OWNER"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-05", "action": "set", "from": "", "to": "", "note": "short_title DataBall `.ball` as a DuckDB file must be measured before it ships→Trial: .ball as a DuckDB file"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-04", "action": "set", "from": "", "to": "", "note": "depends_on db-03→db-02"}
+{"when": "2026-10-09T03:18:38Z", "item": "db-03", "action": "set", "from": "", "to": "", "note": "depends_on db-01,db-02→db-04,db-07"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-04", "action": "edit", "from": "", "to": "", "note": "Why"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-04", "action": "edit", "from": "", "to": "", "note": "Implement"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-03", "action": "edit", "from": "", "to": "", "note": "Why"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-03", "action": "edit", "from": "", "to": "", "note": "Implement"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-03", "action": "edit", "from": "", "to": "", "note": "Check"}
+{"when": "2026-10-09T03:18:57Z", "item": "db-03", "action": "edit", "from": "", "to": "", "note": "boundary"}
+{"when": "2026-10-09T03:19:41Z", "item": "db-05", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-10-09T03:19:53Z", "item": "db-04", "action": "move", "from": "4", "to": "3", "note": ""}
+{"when": "2026-10-09T03:19:54Z", "item": "db-05", "action": "move", "from": "5", "to": "4", "note": ""}
+{"when": "2026-10-09T03:19:55Z", "item": "db-06", "action": "move", "from": "6", "to": "5", "note": ""}
+{"when": "2026-10-09T03:19:55Z", "item": "db-07", "action": "move", "from": "7", "to": "6", "note": ""}
+{"when": "2026-10-09T03:19:56Z", "item": "db-08", "action": "move", "from": "8", "to": "7", "note": ""}
+{"when": "2026-10-09T03:19:57Z", "item": "db-09", "action": "move", "from": "9", "to": "8", "note": ""}
+{"when": "2026-10-09T03:19:57Z", "item": "db-10", "action": "move", "from": "10", "to": "9", "note": ""}
+{"when": "2026-10-09T03:19:58Z", "item": "db-11", "action": "move", "from": "11", "to": "10", "note": ""}
+{"when": "2026-10-09T03:19:59Z", "item": "db-12", "action": "move", "from": "12", "to": "11", "note": ""}
+{"when": "2026-10-09T03:19:59Z", "item": "db-13", "action": "move", "from": "13", "to": "12", "note": ""}
+{"when": "2026-10-09T03:20:00Z", "item": "db-14", "action": "move", "from": "14", "to": "13", "note": ""}
+{"when": "2026-10-09T03:20:00Z", "item": "db-15", "action": "move", "from": "15", "to": "14", "note": ""}
+{"when": "2026-10-09T03:20:01Z", "item": "db-16", "action": "move", "from": "16", "to": "15", "note": ""}
+{"when": "2026-10-09T03:20:02Z", "item": "db-03", "action": "move", "from": "16", "to": "16", "note": ""}
+{"when": "2026-10-09T03:20:02Z", "item": "db-17", "action": "move", "from": "17", "to": "17", "note": ""}
+{"when": "2026-10-09T03:20:20Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-10-09T03:20:21Z", "item": "non_goals", "action": "prose", "from": "", "to": "", "note": "edit"}

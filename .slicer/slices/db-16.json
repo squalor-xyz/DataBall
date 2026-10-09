@@ -1,0 +1,41 @@
+{
+  "id": "db-16",
+  "title": "DataBall API must have one clear way in and out",
+  "lead": [
+    "Consolidate `Open` / `ImportAsync` / `ImportFromCsv` and the append flags. **Owner gate:** breaking changes need owner sign-off, including whether they ship in 1.4.0 or wait for a major version."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

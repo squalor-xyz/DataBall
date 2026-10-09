@@ -1,0 +1,41 @@
+{
+  "id": "db-11",
+  "title": "DataBall must open many files into one session",
+  "lead": [
+    "Paths, directories, globs, recursive. Each source becomes a row in a run/source dimension (path, hash, detected type, per-source meta) joined into the `\"data\"` view. Schema merge by default (union by name, nulls, numeric widening; other conflicts error). The caller chooses abort-all or skip-file for bad data."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "L",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

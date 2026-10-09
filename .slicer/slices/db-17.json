@@ -1,0 +1,43 @@
+{
+  "id": "db-17",
+  "title": "DataBall v1.4.0 must be tagged and released",
+  "lead": [
+    "**Owner gate:** tagging publishes a GitHub Release. Release slice for the v1.4.0 plan in suite `docs/databall-v1.4-alignment.md`."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "S",
+  "flags": [
+    "OWNER"
+  ],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

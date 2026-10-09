@@ -1,0 +1,41 @@
+{
+  "id": "db-06",
+  "title": "DataBall `.ball` v3 must be a DuckDB file",
+  "lead": [
+    "`Open` attaches a `.ball` with no import; the session store and the parked file are the same DuckDB file; `SaveAsync` checkpoints and copies; ZIP `.ball` v1/v2 still import. Read-only default and snapshot policy come from the db-05 decision record."
+  ],
+  "depends_note": null,
+  "findings_note": "owner interview (2026-10-08)",
+  "size": "L",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:**",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": ""
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": ""
+    },
+    {
+      "heading": "Check",
+      "body": ""
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}
