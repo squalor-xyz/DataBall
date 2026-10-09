@@ -70,16 +70,13 @@
       "id": "db-04",
       "title": "DataBall v1.3.0 must be tagged and released",
       "short_title": "Tag and release DataBall v1.3.0",
-      "status": "started",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-02"
       ],
       "note_records": [],
-      "claim": {
-        "owner": "Jon R",
-        "at": "2026-10-09T04:53:29Z"
-      },
+      "claim": null,
       "fields": {
         "size": "S",
         "flags": [
@@ -647,7 +644,7 @@
     }
   ],
   "epilogue": "",
-  "goals": "DataBall is the session engine of the squalor semiconductor suite, co-developed with `squalor-xyz/suite` and shared by its hosts. One run lives in one DataBall: in-memory DuckDB by default, file-backed on request. It sits behind the wide `\"data\"` relation plus `\"meta\"`, and is parked to a file and reopened from one.\n\n- **ATE spirit:** sequential test-executive tables; DuckDB is the only SQL engine; interchange is CSV / Parquet / `.ball` / zip-tar.gz.\n- **One way in:** `Open` detects the format and hands lab dialects to an `IFormatHandler`. Parsers never go in the store.\n- **Schema from config, not sniffing:** types, units, roles, and metadata fields come from the default profile plus overlay config. A config-declared multi-table layout (`tables`) sits behind the same `\"data\"` view, so readers never see the split.\n- **Now:** finish dimension growth (db-02) and release `v1.3.0` (db-04).\n- **Next, v1.4.0 (planned, not shipped; suite `docs/databall-v1.4-alignment.md`):** one session holds one or more runs through a run/source dimension; `.ball` becomes a DuckDB file (db-05 trial first); the store is in-memory or file-backed by size, so data larger than RAM works; hosts read typed columns or streamed rows with projection and filter pushdown; `Open` scores detection and opens many files; declarative transforms, combine ops, and export profiles fold in from the Conflux spec (db-05–db-17, snowflake `parent` db-03 included).\n\nLicense: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).",
+  "goals": "DataBall is the session engine of the squalor semiconductor suite, co-developed with `squalor-xyz/suite` and shared by its hosts. One run lives in one DataBall: in-memory DuckDB by default, file-backed on request. It sits behind the wide `\"data\"` relation plus `\"meta\"`, and is parked to a file and reopened from one.\n\n- **ATE spirit:** sequential test-executive tables; DuckDB is the only SQL engine; interchange is CSV / Parquet / `.ball` / zip-tar.gz.\n- **One way in:** `Open` detects the format and hands lab dialects to an `IFormatHandler`. Parsers never go in the store.\n- **Schema from config, not sniffing:** types, units, roles, and metadata fields come from the default profile plus overlay config. A config-declared multi-table layout (`tables`) sits behind the same `\"data\"` view, so readers never see the split.\n- **Now:** `v1.3.0` is released (db-04, 2026-10-09). Next is the v1.4.0 plan, starting with the db-05 trial (`.ball` as a DuckDB file).\n- **Next, v1.4.0 (planned, not shipped; suite `docs/databall-v1.4-alignment.md`):** one session holds one or more runs through a run/source dimension; `.ball` becomes a DuckDB file (db-05 trial first); the store is in-memory or file-backed by size, so data larger than RAM works; hosts read typed columns or streamed rows with projection and filter pushdown; `Open` scores detection and opens many files; declarative transforms, combine ops, and export profiles fold in from the Conflux spec (db-05–db-17, snowflake `parent` db-03 included).\n\nLicense: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).",
   "non_goals": "Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `\"data\"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).",
   "catalog": {
     "next_id": 1,
