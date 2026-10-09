@@ -22,29 +22,29 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-17 items · — 16 · done 1
+17 items · — 15 · done 2
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | — |
-| 2 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | — |
-| 3 | [db-05](slices/db-05.md) | Trial: .ball as a DuckDB file | S | 1 | databall | owner interview (2026-10-08) | — |
-| 4 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08) | — |
-| 5 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | — |
-| 6 | [db-08](slices/db-08.md) | DataBall must return columnar and streaming reads | M | 2 | databall | owner interview (2026-10-08) | — |
-| 7 | [db-09](slices/db-09.md) | DataBall must attach Parquet and hive inputs as views | M | 2 | databall | owner interview (2026-10-08) | — |
-| 8 | [db-10](slices/db-10.md) | DataBall must score format detection and explain it | M | 2 | databall | owner interview (2026-10-08) | — |
-| 9 | [db-11](slices/db-11.md) | DataBall must open many files into one session | L | 3 | databall | owner interview (2026-10-08) | — |
-| 10 | [db-12](slices/db-12.md) | DataBall CSV must handle preambles, trailers and strict casts | M | 2 | databall | owner interview (2026-10-08) | — |
-| 11 | [db-13](slices/db-13.md) | DataBall must apply declarative transforms from config | M | 2 | databall | owner interview (2026-10-08) | — |
-| 12 | [db-14](slices/db-14.md) | DataBall must join, dedupe and aggregate across sources | M | 2 | databall | owner interview (2026-10-08) | — |
-| 13 | [db-15](slices/db-15.md) | DataBall export must support profiles and content splits | M | 2 | databall | owner interview (2026-10-08) | — |
-| 14 | [db-16](slices/db-16.md) | DataBall API must have one clear way in and out | M | 2 | databall | owner interview (2026-10-08) | — |
-| 15 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
-| 16 | [db-17](slices/db-17.md) | Tag and release DataBall v1.4.0 | S `[OWNER]` | 1 | databall | owner interview (2026-10-08) | — |
+| 1 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | — |
+| 2 | [db-05](slices/db-05.md) | Trial: .ball as a DuckDB file | S | 1 | databall | owner interview (2026-10-08) | — |
+| 3 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08) | — |
+| 4 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | — |
+| 5 | [db-08](slices/db-08.md) | DataBall must return columnar and streaming reads | M | 2 | databall | owner interview (2026-10-08) | — |
+| 6 | [db-09](slices/db-09.md) | DataBall must attach Parquet and hive inputs as views | M | 2 | databall | owner interview (2026-10-08) | — |
+| 7 | [db-10](slices/db-10.md) | DataBall must score format detection and explain it | M | 2 | databall | owner interview (2026-10-08) | — |
+| 8 | [db-11](slices/db-11.md) | DataBall must open many files into one session | L | 3 | databall | owner interview (2026-10-08) | — |
+| 9 | [db-12](slices/db-12.md) | DataBall CSV must handle preambles, trailers and strict casts | M | 2 | databall | owner interview (2026-10-08) | — |
+| 10 | [db-13](slices/db-13.md) | DataBall must apply declarative transforms from config | M | 2 | databall | owner interview (2026-10-08) | — |
+| 11 | [db-14](slices/db-14.md) | DataBall must join, dedupe and aggregate across sources | M | 2 | databall | owner interview (2026-10-08) | — |
+| 12 | [db-15](slices/db-15.md) | DataBall export must support profiles and content splits | M | 2 | databall | owner interview (2026-10-08) | — |
+| 13 | [db-16](slices/db-16.md) | DataBall API must have one clear way in and out | M | 2 | databall | owner interview (2026-10-08) | — |
+| 14 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
+| 15 | [db-17](slices/db-17.md) | Tag and release DataBall v1.4.0 | S `[OWNER]` | 1 | databall | owner interview (2026-10-08) | — |
 
 ---
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 17 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
+| 16 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
+| 17 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | done |

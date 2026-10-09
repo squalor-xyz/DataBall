@@ -80,8 +80,17 @@ namespace squalor.DataBall
             if (_pendingRow.Count == 0 && !_store.DataTableExists())
                 throw new DataBallException("Cannot commit an empty row.");
 
-            EnsurePendingColumns();
-            _store.AddRow(_pendingRow, _expectedColumnTypes);
+            var addedTypes = EnsurePendingColumns();
+            try
+            {
+                _store.AddRow(_pendingRow, _expectedColumnTypes);
+            }
+            catch
+            {
+                ForgetUnstoredColumnTypes(addedTypes);
+                throw;
+            }
+
             RememberRow(_pendingRow);
             ClearPending();
             _logger.LogDebug("Committed row");
@@ -118,10 +127,12 @@ namespace squalor.DataBall
             }
         }
 
-        private void EnsurePendingColumns()
+        /// <summary>Returns the column names whose expected type this call recorded.</summary>
+        private List<string> EnsurePendingColumns()
         {
+            var added = new List<string>();
             if (_pendingRow is null)
-                return;
+                return added;
 
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (_store.DataTableExists())
@@ -145,8 +156,43 @@ namespace squalor.DataBall
 
                 _store.EnsureColumn(kv.Key, clrType);
                 if (!_expectedColumnTypes.ContainsKey(kv.Key))
+                {
                     _expectedColumnTypes[kv.Key] = clrType;
+                    added.Add(kv.Key);
+                }
                 existing.Add(kv.Key);
+            }
+
+            return added;
+        }
+
+        /// <summary>
+        /// After a failed commit, drops the expected types recorded for columns the store never
+        /// got (a layout write rolls its new columns back), so a stale type does not constrain later writes.
+        /// </summary>
+        private void ForgetUnstoredColumnTypes(IReadOnlyList<string> added)
+        {
+            if (added.Count == 0)
+                return;
+            // Runs in a catch: a cleanup failure must not replace the commit's exception.
+            try
+            {
+                var stored = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                if (_store.DataTableExists())
+                {
+                    foreach (var (name, _) in _store.GetColumns())
+                        stored.Add(name);
+                }
+
+                foreach (var name in added)
+                {
+                    if (!stored.Contains(name))
+                        _expectedColumnTypes.Remove(name);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not reconcile expected column types after a failed commit");
             }
         }
 

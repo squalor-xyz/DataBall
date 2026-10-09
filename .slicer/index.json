@@ -39,7 +39,7 @@
       "id": "db-02",
       "title": "DataBall dimension growth on append must work on layouts",
       "short_title": "DataBall dimension growth on append",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-01"
@@ -63,7 +63,7 @@
         "importance": 2,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -108,7 +108,19 @@
       "depends_on": [
         "db-04"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "10571ed9-5313-4e66-b621-966ce9959dd4",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): also log the DuckDB file size after a dimension-growth append (it rewrites every table); the file may not shrink after drops without CHECKPOINT/VACUUM (general DuckDB knowledge, unverified).",
+          "created_at": "2026-10-09T03:58:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "S",
@@ -139,7 +151,19 @@
       "depends_on": [
         "db-05"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "aea204f2-9a5c-4a37-949a-6e0c06789e3f",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): a dimension-growth re-split rewrites every layout table; in a file-backed .ball the file may not shrink without CHECKPOINT/VACUUM (general DuckDB knowledge, unverified). Include that in the save path.",
+          "created_at": "2026-10-09T03:59:16Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "L",
@@ -170,7 +194,19 @@
       "depends_on": [
         "db-06"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "4c36b074-667e-4fe1-b05c-385ed65323a7",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): a dimension-growth append re-splits the whole session in one transaction, holding about three wide copies (_unsplit TEMP, base data, _wide TEMP) plus the new tables; TEMP tables stay in memory unless temp_directory is set. Measure this. Options: drop the two TEMP copies in UnsplitLayout/SplitIntoLayout, or grow declared-key dimensions in place (ALTER dim ADD COLUMN + key check; new dimension = CREATE + spine key column + one UPDATE).",
+          "created_at": "2026-10-09T03:58:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -232,7 +268,19 @@
       "depends_on": [
         "db-06"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "e23987e0-6f87-4e28-91a9-0e48f746be7c",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): UnsplitLayout/DropDataRelation drop and copy physical tables, assuming the session owns them. Growth on an attached Parquet source would copy data in, defeating no-copy. Decide whether growth on attached sources is allowed.",
+          "created_at": "2026-10-09T03:58:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -296,7 +344,30 @@
         "db-09",
         "db-10"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "9be86f2f-9f98-4943-ae85-8da41508c4fa",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): each later file bringing a new per-source metadata key triggers another full re-split (cost ~ files x session size). Stage all sources first and split once, or use in-place dimension growth (see db-07 note). Also: a declared key column that arrives as metadata (constant in file 1) still throws 'tables.X.key ... is not in the data' in TableLayout.Build; the run key must handle this.",
+          "created_at": "2026-10-09T03:58:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "c7e41d88-3e4a-4e98-bfae-7eeadea82795",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 review (2026-10-08): layout physical types are fixed at first import and the re-split casts incoming data to existing types, which conflicts with db-11's planned numeric-widening schema merge. Decide how widening applies to layout sessions.",
+          "created_at": "2026-10-09T03:59:16Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "L",
@@ -452,7 +523,19 @@
         "db-08",
         "db-11"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "86b90893-0518-48b0-b717-d7de93ea45d8",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 architecture review (2026-10-09): three separate ways restore in-memory state after a failed write: TakeSnapshot/RestoreSnapshot (RunImport, OnWideData), the wide-Bounce expected-types copy (DataBall.cs ~313), and CommitRow's ForgetUnstoredColumnTypes. The store also restores Layout and reloads metadata itself. Root cause: wide-session EnsureColumn runs ALTER outside the write transaction. Move CommitRow column creation into the store write transaction, then CommitRow and Bounce can use TakeSnapshot/RestoreSnapshot.",
+          "created_at": "2026-10-09T04:08:03Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -484,7 +567,19 @@
         "db-04",
         "db-07"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "9c15c23b-7586-4646-ac43-64409631abb2",
+          "kind": "",
+          "text": "**2026-10-09** — From db-02 architecture review (2026-10-09): MultiTableTests.cs is ~2300 lines. Before adding snowflake parent tests, split it into partial classes by area (read/split, append, whole-table edits, growth) with shared helpers in one file, and derive counts from a 'before' query instead of hard-coded fixture numbers (81/82/13/14).",
+          "created_at": "2026-10-09T04:08:03Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",

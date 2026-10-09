@@ -122,8 +122,11 @@ namespace squalor.DataBall
         /// <summary>
         /// Routes the rows of a TEMP staging table into the bound layout: reconciles metadata
         /// columns, grows spine/group schema for new columns, casts to physical types, reuses
-        /// dimension keys, and refreshes the view when the wide column list changed. Atomic;
-        /// in-memory layout and metadata are restored when the transaction rolls back.
+        /// dimension keys, and refreshes the view when the wide column list changed. Growth a
+        /// dimension cannot take in place (a new dimension, a new dimension column, or metadata
+        /// that now varies into a dimension or group) re-splits the session through
+        /// <see cref="AppendByRematerializing"/>. Atomic; in-memory layout and metadata are
+        /// restored when the transaction rolls back.
         /// </summary>
         internal void AppendStagingIntoLayout(string staging)
         {
@@ -139,6 +142,12 @@ namespace squalor.DataBall
             {
                 InTransaction(() =>
                 {
+                    if (plan.NeedsRematerialize)
+                    {
+                        AppendByRematerializing(plan, staging, config);
+                        return;
+                    }
+
                     foreach (var (key, _) in plan.Demote)
                         RemoveMetadata(key);
 
@@ -160,6 +169,8 @@ namespace squalor.DataBall
             }
             catch
             {
+                // A re-split clears the in-memory layout before it can fail; no SQL here, the rollback undoes the tables.
+                RestoreLayout(current, config);
                 // Owning the transaction means it is rolled back already; a joined caller reloads after its own rollback.
                 if (_currentTx is null)
                     ReloadMetadata();
@@ -170,7 +181,46 @@ namespace squalor.DataBall
                 DropTemp(CastTemp);
             }
 
-            Layout = plan.Next;
+            // The re-split path binds its own layout.
+            if (!plan.NeedsRematerialize)
+                Layout = plan.Next;
+        }
+
+        /// <summary>
+        /// Append that a grow-in-place cannot express (a new dimension, a new dimension column, or
+        /// metadata that now varies into a dimension or group): materialize the layout wide, add
+        /// the new columns, append the staged rows, and split again. Runs inside the caller's
+        /// transaction; the split renumbers <c>_row</c> and dimension keys may change.
+        /// </summary>
+        private void AppendByRematerializing(AppendPlan plan, string staging, Config config)
+        {
+            // After UnsplitLayout "data" is a base table and Layout is null, so writing it by name is safe here.
+            UnsplitLayout();
+
+            var qData = "\"data\"";
+            var dataTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, type) in GetColumnsOf("data"))
+                dataTypes[name] = type;
+
+            foreach (var key in plan.Demote.Select(d => d.Key))
+                RemoveMetadata(key);
+            var demoted = plan.Demote.ToDictionary(d => d.Key, d => d.Value, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var column in plan.Next.WideColumns)
+            {
+                if (dataTypes.ContainsKey(column))
+                    continue;
+                var type = plan.Types[column];
+                Execute($"ALTER TABLE {qData} ADD COLUMN {QuoteIdent(column)} {type}");
+                dataTypes[column] = type;
+                if (demoted.TryGetValue(column, out var value))
+                    ExecuteParameterized($"UPDATE {qData} SET {QuoteIdent(column)} = $v", Param("v", value));
+            }
+
+            var select = string.Join(", ", plan.Incoming.Select(c => $"CAST({QuoteIdent(c.Staging)} AS {dataTypes[c.Wide]}) AS {QuoteIdent(c.Wide)}"));
+            Execute($"INSERT INTO {qData} BY NAME SELECT {select} FROM {QuoteIdent(staging)} ORDER BY rowid");
+
+            SplitIntoLayout(config);
         }
 
         /// <summary>
@@ -361,12 +411,13 @@ namespace squalor.DataBall
             bool WideChanged,
             IReadOnlyList<IncomingColumn> Incoming,
             IReadOnlyDictionary<string, string> Types,
-            IReadOnlyList<(string Key, object? Value)> Demote);
+            IReadOnlyList<(string Key, object? Value)> Demote,
+            bool NeedsRematerialize);
 
         /// <summary>
         /// Decides, without writing, how a staging table joins the layout: which staging columns
-        /// are metadata (equal → ignored; conflicting → demoted to a spine column, or ignored
-        /// under <c>metadataPolicy: first</c>), which wide columns are new, and the grown layout.
+        /// are metadata (equal → ignored; conflicting → demoted to a column of the table the config
+        /// assigns it to, or ignored under <c>metadataPolicy: first</c>), which wide columns are new, and the grown layout.
         /// </summary>
         private AppendPlan PlanAppend(
             TableLayout current,
@@ -431,28 +482,23 @@ namespace squalor.DataBall
                     throw new DataBallException($"Layout table '{g.Name}' changed; the session config no longer matches its tables");
             }
 
+            // A new dimension, a new dimension column, or a demoted key whose table is not the spine
+            // cannot grow in place; the append materializes the layout wide and splits it again.
+            var rematerialize = false;
             foreach (var d in next.Dimensions)
             {
                 var before = current.Dimensions.FirstOrDefault(x => x.Name.Equals(d.Name, StringComparison.OrdinalIgnoreCase));
-                if (before is null)
-                    throw new DataBallException($"Adding dimension '{d.Name}' to an existing layout is not supported on a multi-table session yet");
-                var added = d.Columns.FirstOrDefault(c => !before.Columns.Contains(c, StringComparer.OrdinalIgnoreCase));
-                if (added is not null)
-                    throw new DataBallException($"Adding column '{added}' to dimension '{d.Name}' is not supported on a multi-table session yet");
+                if (before is null || d.Columns.Any(c => !before.Columns.Contains(c, StringComparer.OrdinalIgnoreCase)))
+                    rematerialize = true;
             }
 
             foreach (var (key, _) in demote)
             {
-                var target = next.TableFor(key);
-                if (!target.Equals(next.Spine.Name, StringComparison.OrdinalIgnoreCase))
-                {
-                    var kind = next.PhysicalTables.First(t => t.Name == target).Kind;
-                    throw new DataBallException(
-                        $"Metadata '{key}' now varies and would become a column of {kind} table '{target}'; only spine columns are supported on a multi-table session yet");
-                }
+                if (!next.TableFor(key).Equals(next.Spine.Name, StringComparison.OrdinalIgnoreCase))
+                    rematerialize = true;
             }
 
-            return new AppendPlan(next, wideChanged, incoming, types, demote);
+            return new AppendPlan(next, wideChanged, incoming, types, demote, rematerialize);
         }
 
         /// <summary>Creates new spine/group tables and adds new spine/group columns. Dimensions never change here.</summary>

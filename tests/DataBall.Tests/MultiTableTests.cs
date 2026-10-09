@@ -15,6 +15,8 @@ namespace squalor.DataBall.Tests
     /// filter, export, and .ball work through the view. S47: row writes, append import, and
     /// MergeOrAppend route into the tables. db-01: Bounce / Squish / AddColumn / RemoveColumn
     /// work on a layout by materializing it wide, running the wide operation, and re-splitting.
+    /// db-02: an append that adds a dimension, adds a dimension column, or demotes metadata into
+    /// a dimension re-splits the same way.
     /// </summary>
     public class MultiTableTests
     {
@@ -863,19 +865,30 @@ namespace squalor.DataBall.Tests
             }
         }
 
+        // ---- db-02: dimension growth on append re-splits ----
+
         [Fact]
-        public async Task AddRow_WithLayout_NewDimensionColumn_ThrowsNotYet()
+        public async Task Append_NewDimension_CreatesTableAndKeysExistingRows()
         {
             var dir = TempDir();
             try
             {
-                var config = WriteConfig(dir, FixtureTablesJson().Replace("\"Teststand\", \"Temp\", \"Vcc\"", "\"Teststand\", \"Temp\", \"Vcc\", \"Humidity\"", StringComparison.Ordinal));
+                var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
                 using var db = new DataBall(config);
                 await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-                var ex = Assert.Throws<DataBallException>(() => db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 }));
-                Assert.Contains("dimension 'setup'", FullMessage(ex), StringComparison.Ordinal);
-                Assert.Equal(81, Count(db, "data"));
-                Assert.Equal(13, ViewColumns(db).Count);
+                Assert.DoesNotContain("env", BaseTables(db));
+
+                db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+
+                Assert.Contains("env", BaseTables(db));
+                Assert.Equal(2, Count(db, "env"));
+                Assert.Equal(0L, db.Query("SELECT COUNT(*) AS c FROM sweep WHERE \"env_key\" IS NULL")[0]["c"]);
+                Assert.Equal(new[] { 40.0 }, db.Query("SELECT Humidity FROM env WHERE Humidity IS NOT NULL").Select(r => (double)r["Humidity"]!));
+                Assert.Equal(82, Count(db, "data"));
+                Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
+                Assert.Equal(40.0, Assert.Single(db.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
+                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal("VIEW", TableType(db, "data"));
             }
             finally
             {
@@ -884,7 +897,277 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task AddRow_WithLayout_NewDimensionTable_ThrowsNotYet()
+        public async Task Append_NewColumnInDimension_RematerializesAndSplits()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson().Replace("\"Teststand\", \"Temp\", \"Vcc\"", "\"Teststand\", \"Temp\", \"Vcc\", \"Humidity\"", StringComparison.Ordinal));
+                using var db = new DataBall(config);
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                var before = db.Query("SELECT * FROM data ORDER BY stimulusGrp, sweep");
+                Assert.Equal(81, before.Count);
+                Assert.DoesNotContain("Humidity", TableColumns(db, "setup"));
+
+                db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+
+                Assert.Contains("Humidity", TableColumns(db, "setup"));
+                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal(10, Count(db, "setup"));
+                Assert.Equal("VIEW", TableType(db, "data"));
+
+                var after = db.Query("SELECT * FROM data ORDER BY stimulusGrp, sweep");
+                Assert.Equal(82, after.Count);
+                for (var i = 0; i < before.Count; i++)
+                {
+                    foreach (var key in before[i].Keys)
+                    {
+                        Assert.Equal(before[i][key], after[i][key]);
+                        Assert.Equal(before[i][key]?.GetType(), after[i][key]?.GetType());
+                    }
+                    Assert.Null(after[i]["Humidity"]);
+                }
+                Assert.Equal(40.0, after[81]["Humidity"]);
+                Assert.Equal(99L, after[81]["stimulusGrp"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_MetadataVaryingIntoDimension_Demotes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "first.csv");
+                File.WriteAllText(csv, "Tester,Meas\nT1,1\nT1,2\n");
+                var config = WriteConfig(dir, """
+                    { "columns": { "Meas": "long" }, "tables": { "g": { "kind": "measurements", "columns": ["Meas"] }, "who": { "kind": "dimension", "columns": ["Tester"] } } }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                Assert.Equal("T1", db.Metadata["Tester"]);
+
+                var more = Path.Combine(dir, "more.csv");
+                File.WriteAllText(more, "Tester,Meas\nT2,3\n");
+                await db.ImportAsync(more, new ImportOptions { Append = true });
+
+                Assert.False(db.Metadata.ContainsKey("Tester"));
+                Assert.Empty(db.Query("SELECT 1 AS one FROM meta WHERE \"key\" = 'Tester'"));
+                Assert.Contains("Tester", ViewColumns(db));
+                Assert.Equal(2, Count(db, "who"));
+                Assert.Equal(new[] { "T1", "T2" }, db.Query("SELECT Tester FROM who ORDER BY Tester").Select(r => (string)r["Tester"]!));
+                Assert.Equal(new[] { "T1", "T1", "T2" }, db.Query("SELECT Tester FROM data ORDER BY Meas").Select(r => (string)r["Tester"]!));
+                Assert.Equal("VIEW", TableType(db, "data"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_DimensionGrowth_KeyConflict_RollsBack()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "sites.csv");
+                File.WriteAllText(csv, "Site,Operator,Meas\nA,ann,1\nB,bob,2\n");
+                var config = WriteConfig(dir, """
+                    { "columns": { "Meas": "long" }, "tables": { "site": { "kind": "dimension", "columns": ["Site", "Operator", "Shift"], "key": ["Site"] } } }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                Assert.DoesNotContain("Shift", ViewColumns(db));
+
+                var viewColumns = ViewColumns(db);
+                var baseTables = BaseTables(db);
+                var metadata = db.Metadata.ToDictionary(p => p.Key, p => p.Value);
+                var counts = baseTables.Concat(new[] { "data" }).ToDictionary(t => t, t => Count(db, t));
+                var layoutShape = LayoutShape(db);
+                var tableColumns = baseTables.ToDictionary(t => t, t => string.Join(",", TableColumns(db, t)));
+                var dataBefore = db.Query("SELECT * FROM data ORDER BY Meas");
+
+                var ex = Assert.Throws<DataBallException>(() => db.AddRows(new[]
+                {
+                    new Dictionary<string, object?> { ["Site"] = "A", ["Operator"] = "ann", ["Shift"] = "night", ["Meas"] = 3L },
+                }));
+                Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(viewColumns, ViewColumns(db));
+                Assert.Equal(baseTables, BaseTables(db));
+                Assert.Equal(metadata, db.Metadata.ToDictionary(p => p.Key, p => p.Value));
+                Assert.Equal(counts, baseTables.Concat(new[] { "data" }).ToDictionary(t => t, t => Count(db, t)));
+                Assert.Equal(layoutShape, LayoutShape(db));
+                Assert.Equal(tableColumns, baseTables.ToDictionary(t => t, t => string.Join(",", TableColumns(db, t))));
+                var dataAfter = db.Query("SELECT * FROM data ORDER BY Meas");
+                Assert.Equal(dataBefore.Count, dataAfter.Count);
+                for (var i = 0; i < dataBefore.Count; i++)
+                    Assert.Equal(dataBefore[i], dataAfter[i]);
+
+                db.AddRows(new[] { new Dictionary<string, object?> { ["Site"] = "C", ["Operator"] = "cy", ["Meas"] = 4L } });
+                Assert.Equal(3, Count(db, "data"));
+                Assert.Equal(3, Count(db, "site"));
+                Assert.Equal("VIEW", TableType(db, "data"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_MetadataVaryingIntoMeasurementGroup_Demotes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "first.csv");
+                File.WriteAllText(csv, "Lot,Meas\nL1,1\nL1,2\n");
+                var config = WriteConfig(dir, """
+                    { "columns": { "Meas": "long" }, "tables": { "g": { "kind": "measurements", "columns": ["Meas", "Lot"] } } }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                Assert.Equal("L1", db.Metadata["Lot"]);
+
+                var more = Path.Combine(dir, "more.csv");
+                File.WriteAllText(more, "Lot,Meas\nL2,3\n");
+                await db.ImportAsync(more, new ImportOptions { Append = true });
+
+                Assert.False(db.Metadata.ContainsKey("Lot"));
+                Assert.Empty(db.Query("SELECT 1 AS one FROM meta WHERE \"key\" = 'Lot'"));
+                Assert.Contains("Lot", TableColumns(db, "g"));
+                Assert.Equal(3, Count(db, "g"));
+                Assert.Equal(new[] { "L1", "L1", "L2" }, db.Query("SELECT Lot FROM data ORDER BY Meas").Select(r => (string)r["Lot"]!));
+                Assert.Equal("VIEW", TableType(db, "data"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_MetadataVaryingIntoMeasurementGroup_OnlyColumn_CreatesTable()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "first.csv");
+                File.WriteAllText(csv, "Lot,Meas\nL1,1\nL1,2\n");
+                var config = WriteConfig(dir, """
+                    { "columns": { "Meas": "long" }, "tables": { "g": { "kind": "measurements", "columns": ["Meas"] }, "h": { "kind": "measurements", "columns": ["Lot"] } } }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+                Assert.Equal("L1", db.Metadata["Lot"]);
+                Assert.DoesNotContain("h", BaseTables(db));
+
+                var more = Path.Combine(dir, "more.csv");
+                File.WriteAllText(more, "Lot,Meas\nL2,3\n");
+                await db.ImportAsync(more, new ImportOptions { Append = true });
+
+                Assert.False(db.Metadata.ContainsKey("Lot"));
+                Assert.Empty(db.Query("SELECT 1 AS one FROM meta WHERE \"key\" = 'Lot'"));
+                Assert.Contains("h", BaseTables(db));
+                Assert.Equal(3, Count(db, "h"));
+                Assert.Equal(new[] { "L1", "L1", "L2" }, db.Query("SELECT Lot FROM data ORDER BY Meas").Select(r => (string)r["Lot"]!));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>Site dimension (key Site) plus a Tester constant that lands in Metadata; the layout has no Shift yet.</summary>
+        private static async Task<(DataBall Db, string Csv)> TesterSiteSession(string dir)
+        {
+            var csv = Path.Combine(dir, "sites.csv");
+            File.WriteAllText(csv, "Tester,Site,Operator,Meas\nT1,A,ann,1\nT1,B,bob,2\n");
+            var config = WriteConfig(dir, """
+                { "columns": { "Meas": "long" }, "tables": { "site": { "kind": "dimension", "columns": ["Site", "Operator", "Shift"], "key": ["Site"] } } }
+                """);
+            var db = new DataBall(config);
+            await db.ImportAsync(csv);
+            Assert.Equal("T1", db.Metadata["Tester"]);
+            return (db, csv);
+        }
+
+        private static void AssertTesterSessionIntact(DataBall db, List<string> viewColumns, List<string> layoutShape)
+        {
+            Assert.Equal("T1", db.Metadata["Tester"]);
+            Assert.Single(db.Query("SELECT 1 AS one FROM meta WHERE \"key\" = 'Tester'"));
+            Assert.Equal("VIEW", TableType(db, "data"));
+            Assert.Equal(viewColumns, ViewColumns(db));
+            Assert.Equal(layoutShape, LayoutShape(db));
+            Assert.Equal(new[] { "rows", "site" }, BaseTables(db));
+            Assert.Equal(2, Count(db, "data"));
+            Assert.Equal(2, Count(db, "site"));
+            Assert.Equal(2, Count(db, "rows"));
+        }
+
+        [Fact]
+        public async Task Append_DimensionGrowth_RollbackRestoresDemotedMetadata_AddRows()
+        {
+            var dir = TempDir();
+            try
+            {
+                var (db, _) = await TesterSiteSession(dir);
+                using (db)
+                {
+                    var viewColumns = ViewColumns(db);
+                    var layoutShape = LayoutShape(db);
+
+                    var ex = Assert.Throws<DataBallException>(() => db.AddRows(new[]
+                    {
+                        new Dictionary<string, object?> { ["Tester"] = "T2", ["Site"] = "A", ["Operator"] = "ann", ["Shift"] = "night", ["Meas"] = 3L },
+                    }));
+                    Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
+                    AssertTesterSessionIntact(db, viewColumns, layoutShape);
+
+                    db.AddRows(new[] { new Dictionary<string, object?> { ["Site"] = "C", ["Operator"] = "cy", ["Meas"] = 4L } });
+                    Assert.Equal(3, Count(db, "data"));
+                }
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_DimensionGrowth_RollbackRestoresDemotedMetadata_ImportAppend()
+        {
+            var dir = TempDir();
+            try
+            {
+                var (db, _) = await TesterSiteSession(dir);
+                using (db)
+                {
+                    var viewColumns = ViewColumns(db);
+                    var layoutShape = LayoutShape(db);
+
+                    var more = Path.Combine(dir, "more.csv");
+                    File.WriteAllText(more, "Tester,Site,Operator,Shift,Meas\nT2,A,ann,night,3\n");
+                    var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(more, new ImportOptions { Append = true }));
+                    Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
+                    AssertTesterSessionIntact(db, viewColumns, layoutShape);
+                }
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_DimensionGrowth_CastFailure_RollsBack()
         {
             var dir = TempDir();
             try
@@ -892,10 +1175,240 @@ namespace squalor.DataBall.Tests
                 var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
                 using var db = new DataBall(config);
                 await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-                var ex = Assert.Throws<DataBallException>(() => db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 }));
-                Assert.Contains("dimension 'env'", FullMessage(ex), StringComparison.Ordinal);
+                var viewColumns = ViewColumns(db);
+                var baseTables = BaseTables(db);
+                var layoutShape = LayoutShape(db);
+                var before = db.Query("SELECT * FROM data ORDER BY stimulusGrp, sweep");
+
+                // A wide session whose EVM is text: MergeOrAppend stages parquet without expected types,
+                // so the failing CAST to DOUBLE happens inside the re-split, not before PlanAppend.
+                using var other = new DataBall();
+                other.AddRows(new[]
+                {
+                    new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["EVM"] = "not-a-number", ["Humidity"] = 40.0 },
+                });
+                Assert.Equal("VARCHAR", other.Query("SELECT typeof(EVM) AS t FROM data")[0]["t"]);
+                var ex = Assert.Throws<DataBallException>(() => db.MergeOrAppend(other, append: true));
+                Assert.Contains("not-a-number", FullMessage(ex), StringComparison.Ordinal);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Equal(viewColumns, ViewColumns(db));
+                Assert.Equal(baseTables, BaseTables(db));
+                Assert.Equal(layoutShape, LayoutShape(db));
+                var after = db.Query("SELECT * FROM data ORDER BY stimulusGrp, sweep");
+                Assert.Equal(before.Count, after.Count);
+                for (var i = 0; i < before.Count; i++)
+                    Assert.Equal(before[i], after[i]);
+
+                db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+                Assert.Equal(82, Count(db, "data"));
+                Assert.Equal(2, Count(db, "env"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_NewDimension_SaveAsyncAndReopen_RoundTrips()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
+                var ball = Path.Combine(dir, "grown.ball");
+                using (var db = new DataBall(config))
+                {
+                    await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                    db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+                    await db.SaveAsync(ball);
+                }
+
+                using var reopened = DataBall.Open(ball, config);
+                Assert.Equal("VIEW", TableType(reopened, "data"));
+                Assert.Contains("env", BaseTables(reopened));
+                Assert.Equal(2, Count(reopened, "env"));
+                Assert.Equal(82, Count(reopened, "data"));
+                Assert.Equal(81L, reopened.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
+                Assert.Equal(40.0, Assert.Single(reopened.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_NewDimension_FileBacked_ReopenBindsNewTables()
+        {
+            var dir = TempDir();
+            var path = Path.Combine(dir, "session.duckdb");
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
+                using (var db = new DataBall(config, databasePath: path))
+                {
+                    await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                    db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+                }
+
+                using var reopened = new DataBall(config, databasePath: path);
+                Assert.NotNull(reopened.Layout);
+                Assert.Equal(2, Count(reopened, "env"));
+                Assert.Equal(82, Count(reopened, "data"));
+                reopened.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 2L, ["Humidity"] = 40.0 });
+                Assert.Equal(83, Count(reopened, "data"));
+                Assert.Equal(2, Count(reopened, "env"));
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task Append_DimensionGrowth_KeepsRowKeyOrder()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
+                using var db = new DataBall(config);
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                const string order = "SELECT stimulusGrp, sweep, \"Date\" FROM sweep ORDER BY \"_row\"";
+                var before = db.Query(order);
+
+                db.AddRows(new[]
+                {
+                    new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 },
+                    new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 2L, ["Humidity"] = 41.0 },
+                });
+
+                var after = db.Query(order);
+                Assert.Equal(before.Count + 2, after.Count);
+                for (var i = 0; i < before.Count; i++)
+                    Assert.Equal(before[i], after[i]);
+                Assert.Equal(99L, after[81]["stimulusGrp"]);
+                Assert.Equal(1L, after[81]["sweep"]);
+                Assert.Equal(2L, after[82]["sweep"]);
+                Assert.Equal(Enumerable.Range(1, 83).Select(i => (long)i), db.Query("SELECT \"_row\" FROM sweep ORDER BY \"_row\"").Select(r => (long)r["_row"]!));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task CommitRow_NewDimensionColumn_Rematerializes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson().Replace("\"Teststand\", \"Temp\", \"Vcc\"", "\"Teststand\", \"Temp\", \"Vcc\", \"Humidity\"", StringComparison.Ordinal));
+                using var db = new DataBall(config);
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+
+                db.InitializeRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+                db.CommitRow();
+
+                Assert.Equal(82, Count(db, "data"));
+                Assert.Contains("Humidity", TableColumns(db, "setup"));
+                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
+                Assert.Equal(40.0, Assert.Single(db.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
+                Assert.Equal("VIEW", TableType(db, "data"));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task CommitRow_NewDimensionColumn_DeclaredKeyConflict_Throws()
+        {
+            var dir = TempDir();
+            try
+            {
+                using var db = new DataBall(KeyedSetupConfig(dir, "Humidity"));
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                var viewColumns = ViewColumns(db);
+                var layoutShape = LayoutShape(db);
+
+                // The copied last row reuses an existing (Teststand, Temp, Vcc) key whose Humidity is NULL.
+                db.InitializeRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
+                var ex = Assert.Throws<DataBallException>(() => db.CommitRow());
+                Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
+
                 Assert.Equal(81, Count(db, "data"));
-                Assert.DoesNotContain("env", BaseTables(db));
+                Assert.Equal(viewColumns, ViewColumns(db));
+                Assert.Equal(layoutShape, LayoutShape(db));
+                Assert.False(db.ExpectedColumnTypes.ContainsKey("Humidity"));
+
+                // The pending row survived: a new key makes the same commit succeed.
+                db.ModifyField("Temp", 125.0);
+                db.CommitRow();
+                Assert.Equal(82, Count(db, "data"));
+                Assert.Equal(40.0, Assert.Single(db.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task MergeOrAppend_NewDimension_Rematerializes()
+        {
+            var dir = TempDir();
+            try
+            {
+                var config = WriteConfig(dir, FixtureTablesJson(extraTables: """, "env": { "kind": "dimension", "columns": ["Humidity"] }"""));
+                using var other = new DataBall();
+                await other.ImportAsync(Fixture("semiconductor-sweep.csv"));
+                other.AddColumn("Humidity", Enumerable.Repeat(40.0, 81).ToList());
+                using var db = new DataBall(config);
+                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
+
+                db.MergeOrAppend(other, append: true);
+
+                Assert.Equal("VIEW", TableType(db, "data"));
+                Assert.Contains("env", BaseTables(db));
+                Assert.Equal(2, Count(db, "env"));
+                Assert.Equal(162, Count(db, "data"));
+                Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
+                Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity = 40.0")[0]["c"]);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public async Task Append_MetadataPolicyFirst_DimensionKey_StaysMetadata()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "first.csv");
+                File.WriteAllText(csv, "Tester,Meas\nT1,1\nT1,2\n");
+                var config = WriteConfig(dir, """
+                    { "metadataPolicy": "first", "columns": { "Meas": "long" }, "tables": { "g": { "kind": "measurements", "columns": ["Meas"] }, "who": { "kind": "dimension", "columns": ["Tester"] } } }
+                    """);
+                using var db = new DataBall(config);
+                await db.ImportAsync(csv);
+
+                var more = Path.Combine(dir, "more.csv");
+                File.WriteAllText(more, "Tester,Meas\nT2,3\n");
+                await db.ImportAsync(more, new ImportOptions { Append = true });
+
+                Assert.Equal("T1", db.Metadata["Tester"]);
+                Assert.DoesNotContain("Tester", ViewColumns(db));
+                Assert.DoesNotContain("who", BaseTables(db));
+                Assert.Equal(3, Count(db, "data"));
             }
             finally
             {
@@ -1627,6 +2140,13 @@ namespace squalor.DataBall.Tests
                   }
                 }
                 """);
+        }
+
+        /// <summary>Bound layout as text: each physical table with its columns.</summary>
+        private static List<string> LayoutShape(DataBall db)
+        {
+            Assert.NotNull(db.Layout);
+            return db.Layout!.PhysicalTables.Select(t => t.Name + ":" + string.Join(",", t.Columns)).ToList();
         }
 
         private static List<string> TableColumns(DataBall db, string table)
