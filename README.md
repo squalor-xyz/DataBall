@@ -216,7 +216,7 @@ SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ 
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE) for details. Versions ≤ 1.0.0 were distributed under MPL-2.0; those releases remain available under those terms. 1.1.0+ is Apache-2.0. Git tags: `v1.2.0` (last release; this tree is 1.3.0, unreleased), `v1.0.0-mpl` (last MPL-2.0 commit).
+Apache License 2.0. See [LICENSE](LICENSE) for details. Versions ≤ 1.0.0 were distributed under MPL-2.0; those releases remain available under those terms. 1.1.0+ is Apache-2.0. Git tags: `v1.3.0` (last release), `v1.0.0-mpl` (last MPL-2.0 commit).
 
 ## Repository
 

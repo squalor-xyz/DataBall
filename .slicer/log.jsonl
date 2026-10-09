@@ -70,3 +70,4 @@
 {"when": "2026-10-09T04:08:03Z", "item": "db-16", "action": "note", "from": "", "to": "", "note": "From db-02 architecture review (2026-10-09): three separate ", "by": "Jon R"}
 {"when": "2026-10-09T04:08:03Z", "item": "db-03", "action": "note", "from": "", "to": "", "note": "From db-02 architecture review (2026-10-09): MultiTableTests", "by": "Jon R"}
 {"when": "2026-10-09T04:09:26Z", "item": "db-02", "action": "status", "from": "started", "to": "done", "note": "Shipped: appends on a layout session re-split (materialize wide, append, split) for a new dimension, a new dimension column, or metadata that now varies into a dimension/group; rollback restores layout and metadata. Tests: DataBall.Tests 382 passed, DataBall.Cli.Tests 30 passed, 0 failed.", "by": "Jon R"}
+{"when": "2026-10-09T04:53:29Z", "item": "db-04", "action": "status", "from": "open", "to": "started", "note": "", "by": "Jon R"}

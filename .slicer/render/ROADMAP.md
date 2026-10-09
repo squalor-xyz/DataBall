@@ -22,11 +22,11 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-17 items · — 15 · done 2
+17 items · — 14 · done 2 · started 1
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | — |
+| 1 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | started |
 | 2 | [db-05](slices/db-05.md) | Trial: .ball as a DuckDB file | S | 1 | databall | owner interview (2026-10-08) | — |
 | 3 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08) | — |
 | 4 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | — |

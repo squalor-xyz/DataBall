@@ -70,13 +70,16 @@
       "id": "db-04",
       "title": "DataBall v1.3.0 must be tagged and released",
       "short_title": "Tag and release DataBall v1.3.0",
-      "status": "open",
+      "status": "started",
       "has_slice": true,
       "depends_on": [
         "db-02"
       ],
       "note_records": [],
-      "claim": null,
+      "claim": {
+        "owner": "Jon R",
+        "at": "2026-10-09T04:53:29Z"
+      },
       "fields": {
         "size": "S",
         "flags": [
@@ -96,7 +99,7 @@
         "importance": 2,
         "urgency": 2,
         "effort": 1,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
