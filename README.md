@@ -1,5 +1,7 @@
 # DataBall
 
+<img src="assets/databall-512.png" alt="DataBall" width="128" />
+
 Apache-2.0 .NET library and `databall` CLI for **test-executive / ATE measurement tables**. Capture sequential test rows, propagate slowly changing setup fields, reset dependents from config relationships, store true constants in metadata (Bounce), and import/export CSV, Parquet, zip/tar of CSV, and `.ball`.
 
 ## Engine (DuckDB)
