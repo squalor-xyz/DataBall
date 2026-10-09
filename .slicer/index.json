@@ -618,7 +618,19 @@
         "db-15",
         "db-16"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "840ebd83-6614-4bc2-89c6-0d72b8e22e94",
+          "kind": "",
+          "text": "**2026-10-09** — Owner 2026-10-09: hosts track the latest DataBall release until the owner locks one. This release slice also bumps DataBallPackageVersion in squalplot/Directory.Build.props and squaltest/Directory.Build.props (and their README restore lines) to 1.4.0, verified by restoring both hosts from the Release nupkgs with UseLocalDataBall=false.",
+          "created_at": "2026-10-09T12:41:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "S",
