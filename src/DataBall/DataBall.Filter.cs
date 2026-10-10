@@ -148,7 +148,7 @@ namespace squalor.DataBall
             return _currentFilter is null ? null : BuildSelectSql(_currentFilter);
         }
 
-        private ParameterizedSql BuildSelectSql(SessionFilter filter)
+        internal ParameterizedSql BuildSelectSql(SessionFilter filter)
         {
             if (!_store.DataTableExists())
                 throw new DataBallException("No data to filter");

@@ -28,7 +28,7 @@ namespace squalor.DataBall.Import
             db.Logger.LogInformation("Importing Parquet from {Path}, append={Append}", path, append);
             try
             {
-                db.RunImport(append, () => db.Store.ImportParquet(path, append));
+                db.RunImport(append, () => db.ImportParquetWithMetadata(path, append));
                 db.Logger.LogInformation("Parquet import completed");
                 return Task.CompletedTask;
             }

@@ -321,6 +321,7 @@ namespace squalor.DataBall
             if (DataIsView())
             {
                 Execute("DROP VIEW \"data\"");
+                _isViewBacked = false;
                 if (Layout is not null)
                 {
                     foreach (var table in Layout.PhysicalTables)
@@ -330,6 +331,7 @@ namespace squalor.DataBall
             }
 
             Execute("DROP TABLE IF EXISTS \"data\"");
+            _isViewBacked = false;
         }
 
         /// <summary>

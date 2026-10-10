@@ -407,7 +407,7 @@
       "id": "db-09",
       "title": "DataBall must attach Parquet and hive inputs as views",
       "short_title": "DataBall must attach Parquet and hive inputs as views",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-06"
@@ -456,6 +456,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "3f0fe16c-b9db-4ed9-9551-b031a762424a",
+          "kind": "",
+          "text": "**2026-10-10** — Spec amended 2026-10-10 (orchestrator, after the implementer stopped on a scope gap): DataBall.RowBuilder.cs added to Files. InitializeRow materializes the view in its own transaction (a failed InitializeRow leaves the view); CommitRow then runs on a table-backed session unchanged. Test 7 (ViewSession_FailedWrite_StaysView) covers a failing InitializeRow, not a failing CommitRow after a successful InitializeRow.",
+          "created_at": "2026-10-10T18:48:17Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "23b416b3-1540-493d-b7ad-b7c60cbe7a54",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (db-09 review round 1): (1) Option C: a new default metadataPolicy 'liftConstant' for every format. A configured metadata field with one distinct non-null value moves to Metadata (nulls allowed, as requireConstant does); a field that varies stays a column and never throws. requireConstant, bounce and first stay as explicit opt-ins. This widens the Must-not-change exception: CSV and Parquet imports with a varying configured field now load (Lot as a column) instead of throwing. (2) Registered handlers keep precedence for files: Open asks FindHandler first and takes the Parquet view path only when no handler claims the file or it delegates to generic import.",
+          "created_at": "2026-10-10T19:54:54Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -476,7 +498,7 @@
         "importance": 2,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -494,6 +516,17 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): add Score(FileProbe) to IFormatHandler and keep CanHandle (default Score maps it to 1/0); JSON file types load from ~/.databall/types/, then ./databall/types/, then RegisterFileType; a later origin overrides the same id+version; origins are reported.",
           "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "938ed376-e2a9-43bd-bb65-ce6e635fa597",
+          "kind": "",
+          "text": "**2026-10-10** — From db-09 relay (2026-10-10): Open checks registered handlers first for files, then routes .parquet files and directories containing *.parquet to the built-in view path. Scored detection must make the built-in Parquet/hive path one scored candidate against handlers, and the view path must take the merged overlay config (a parquetColumns type's Overlay has to reach the view; compute HasLayoutConfig after the overlay merge).",
+          "created_at": "2026-10-10T19:54:54Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -605,6 +638,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-08 relay (2026-10-10): db-08 drains handlers in 10,000-row batches and widens a column created from an all-null batch when a later batch brings a typed value; db-11's numeric widening (INTEGER->BIGINT->DOUBLE) should use the same in-place path for later sources. Handler opens on a layout session split once after all batches (db-08); keep that when staging many sources.",
           "created_at": "2026-10-10T17:55:51Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "51cac061-2488-4a70-a357-ff6e1039d5e3",
+          "kind": "",
+          "text": "**2026-10-10** — From db-09 relay (2026-10-10): (1) The new default metadataPolicy 'liftConstant' (lift a field with one distinct value to Metadata, else keep it as a column, never throw) is the single-source case of db-11's three levels: constant everywhere -> Metadata, constant within a source but varying across sources -> source column, varying within a source -> row column. Extend it; don't replace it. (2) Open treats any directory with *.parquet at any depth as one hive source, viewed with one read_parquet glob without union_by_name; directory expansion must decide which directories stay one hive source. (3) IsViewBacked must not mistake a source-dimension view of data for an external Parquet view; Parquet views stay single-source. (4) A wide CSV append and a Parquet append reconcile differing stored metadata differently; unify when wide schema handling moves to staging.",
+          "created_at": "2026-10-10T19:54:54Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -871,6 +915,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "d2cbc241-9fc3-4189-833e-5f56b4c477ac",
+          "kind": "",
+          "text": "**2026-10-10** — From db-09 relay (2026-10-10): materialize-before-write sits at several call sites (store AddRow/AddRows, SaveTo in-place, RunImport, OnWideData, wide Bounce, InitializeRow); fold into one write-transaction entry point with the rollback unification. Decide whether SaveOptions.Link governs an in-place save of a linked .ball (today it embeds in place) and whether link paths may be relative to the .ball.",
+          "created_at": "2026-10-10T19:54:54Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "5853ecf0-4f4d-41a9-bf2c-9da63384b9c0",
+          "kind": "",
+          "text": "**2026-10-10** — From db-09 gate (2026-10-10): (1) the cached IsViewBacked flag goes stale after raw DDL on \"data\" through Query (every later write then fails); fold it into the Query write guard, or re-check DataIsView() in MaterializeView. (2) Under explicit requireConstant a wide Parquet append with a differing value demotes the field while the same CSV append throws (ImportParquetWithMetadata skips reconciled fields). (3) .ball files saved before db-09 store metadataPolicy requireConstant in their merged config and keep it; part of the stored-config decision.",
+          "created_at": "2026-10-10T20:17:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1040,6 +1106,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-06 architect gate (2026-10-10): SaveTo holds the process-wide FileGate for the whole copy (ATTACH, COPY FROM DATABASE, DETACH, File.Move), so every file-backed open, dispose or save in the process waits on it. Frequent snapshot publication should reserve the target in OpenFiles under the gate and release the gate during I/O.",
           "created_at": "2026-10-10T14:56:56Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "ff5cf3ca-945b-428a-8c8d-f97108bed8c8",
+          "kind": "",
+          "text": "**2026-10-10** — From db-09 relay (2026-10-10): for a view-backed session every embed SaveTo re-reads and re-encodes the whole external Parquet while holding the process-wide FileGate. Snapshot publication of a view-backed session should link, or materialize the live session once before the first snapshot.",
+          "created_at": "2026-10-10T19:54:54Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",

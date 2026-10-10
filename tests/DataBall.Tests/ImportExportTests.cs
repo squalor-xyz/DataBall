@@ -14,6 +14,63 @@ namespace squalor.DataBall.Tests
 {
     public class ImportExportTests
     {
+        [Theory]
+        [InlineData(false, false, false)]
+        [InlineData(true, false, false)]
+        [InlineData(false, true, false)]
+        [InlineData(true, true, false)]
+        [InlineData(false, false, true)]
+        [InlineData(true, false, true)]
+        [InlineData(false, true, true)]
+        [InlineData(true, true, true)]
+        public async Task ImportAsync_Parquet_ConfigMetadataFields_InMeta(bool hive, bool layout, bool manager)
+        {
+            using var f = new ParquetFixture();
+            using var db = new DataBall(f.Config(metadata: true, layout: layout));
+            var path = hive ? f.Hive : f.Source;
+            if (manager) await ImportManager.ImportFromParquet(db, path, false);
+            else await db.ImportAsync(path);
+            Assert.Equal("007", db.Metadata["Site"]);
+            Assert.DoesNotContain(db.Store.GetColumns(), c => c.Name == "Site");
+            Assert.Equal(new[] { 1, 2 }, ParquetViewTests.Ids(db));
+            await db.ImportAsync(path, new ImportOptions { Append = true });
+            Assert.Equal("007", db.Metadata["Site"]);
+            Assert.DoesNotContain(db.Store.GetColumns(), c => c.Name == "Site");
+            Assert.Equal(new[] { 1, 1, 2, 2 }, ParquetViewTests.Ids(db));
+            using (var writer = new DataBall())
+                writer.Query($"COPY (SELECT 3 AS Id, 'B' AS Site, DATE '2026-01-03' AS Day) TO {DuckDbStore.QuoteString(f.Source)} (FORMAT PARQUET)");
+            await db.ImportAsync(f.Source, new ImportOptions { Append = true });
+            Assert.False(db.Metadata.ContainsKey("Site"));
+            Assert.Equal(new[] { "007", "007", "007", "007", "B" }, db.Query("SELECT Site FROM data ORDER BY Id").Select(r => r["Site"]));
+            Assert.Equal(new[] { 1, 1, 2, 2, 3 }, ParquetViewTests.Ids(db));
+        }
+
+        [Fact]
+        public async Task ImportAsync_Parquet_MetadataOnlyAppend_Extracts()
+        {
+            using var f = new ParquetFixture();
+            using var db = new DataBall(f.Config(metadata: true));
+            db.SetMetadata("Site", "old");
+            await db.ImportAsync(f.Source, new ImportOptions { Append = true });
+            Assert.Equal(("007", "Id,Day", "1,2"),
+                (db.Metadata["Site"], string.Join(",", db.Store.GetColumns().Select(c => c.Name)), string.Join(",", ParquetViewTests.Ids(db))));
+        }
+
+        [Fact]
+        public void MergeOrAppend_DoesNotExtractConfigMetadata()
+        {
+            using var f = new ParquetFixture();
+            using var source = DataBall.Open(f.Source);
+            ParquetViewTests.AssertView(source);
+            using var destination = new DataBall(f.Config(metadata: true));
+            destination.MergeOrAppend(source, append: false);
+            ParquetViewTests.AssertTable(destination);
+            Assert.False(destination.Metadata.ContainsKey("Site"));
+            Assert.Equal(new[] { "007", "007" }, destination.Query("SELECT Site FROM data ORDER BY Id").Select(r => r["Site"]));
+            Assert.Equal(new[] { 1, 2 }, ParquetViewTests.Ids(destination));
+            ParquetViewTests.AssertView(source);
+        }
+
         [Fact]
         public void ExportToArchive_FailsMidWrite_LeavesExistingFileIntact()
         {
@@ -474,11 +531,12 @@ namespace squalor.DataBall.Tests
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(hive);
-                var rows = imported.Query("SELECT \"Site\", \"Lot\", \"Meas\" FROM \"data\" ORDER BY \"Meas\"");
-                Assert.Equal(3, rows.Count);
-                Assert.Equal("A", rows[0]["Site"]);
-                Assert.Equal("1", rows[0]["Lot"]);
-                Assert.Equal(10, Convert.ToInt32(rows[0]["Meas"]));
+                Assert.Equal(3L, imported.Count(new SessionFilter()));
+                Assert.Contains(imported.Store.GetColumns(), c => c.Name == "Lot");
+                Assert.False(imported.Metadata.ContainsKey("Lot"));
+                Assert.Equal(new[] { "A", "A", "B" }, imported.Query("SELECT Site FROM data ORDER BY Meas").Select(row => row["Site"]));
+                Assert.Equal(new[] { "1", "2", "1" }, imported.Query("SELECT Lot FROM data ORDER BY Meas").Select(row => row["Lot"]));
+                Assert.Equal(new[] { 10, 20, 30 }, imported.Query("SELECT Meas FROM data ORDER BY Meas").Select(row => Convert.ToInt32(row["Meas"])));
             }
             finally
             {

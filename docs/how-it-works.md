@@ -35,7 +35,7 @@ Compacting is optional. `ApplyFilter` limits CSV, Parquet, and archive exports; 
 
 ## 3. Where the data lives
 
-A non-native `Open` / `OpenAsync` compares input bytes on disk with `EngineOptions.InMemoryMaxBytes`: at or below the threshold it uses memory, above it a temporary file. The default threshold is 25% of GC available memory. `StoreMode.Memory` or `File` overrides this choice; an empty constructor starts in memory unless forced to file. Every CLI command applies the same size rule, recursively summing directory inputs; append import counts both inputs. On `import`, `export`, `query`, and `info`, `--store auto|memory|file` selects the rule or forces a store, and `--memory-limit`, `--threads`, and `--temp-dir` forward engine settings. Temporary files live under `TempDirectory` (OS temp by default) and their database, WAL, and default spill directory are cleaned up on disposal or constructor failure; cleanup failures are logged. `MemoryLimit`, `Threads`, and spill `TempDirectory` go through the DuckDB connection builder; null retains engine defaults. Engine options are never persisted in config. Native `.ball` opens ignore mode and threshold but apply the other settings. A `.ball` is a native DuckDB file: open it directly as a read-only session, or request `writable: true`. Save produces a compact whole-session copy.
+A non-native `Open` / `OpenAsync` compares input bytes on disk with `EngineOptions.InMemoryMaxBytes`: at or below the threshold it uses memory, above it a temporary file. The default threshold is 25% of GC available memory. `StoreMode.Memory` or `File` overrides this choice; an empty constructor starts in memory unless forced to file. Every CLI command applies the same size rule, recursively summing directory inputs; append import counts both inputs. On `import`, `export`, `query`, and `info`, `--store auto|memory|file` selects the rule or forces a store, and `--memory-limit`, `--threads`, and `--temp-dir` forward engine settings. Temporary files live under `TempDirectory` (OS temp by default) and their database, WAL, and default spill directory are cleaned up on disposal or constructor failure; cleanup failures are logged. `MemoryLimit`, `Threads`, and spill `TempDirectory` go through the DuckDB connection builder; null retains engine defaults. Engine options are never persisted in config. Native `.ball` opens ignore mode and threshold but apply the other settings. A `.ball` is a native DuckDB file: open it directly as a read-only session, or request `writable: true`. Save produces a compact whole-session copy. `Open` of a Parquet file or hive directory attaches a `read_parquet` view without copying rows, unless config declares `tables`. Projection and predicates push through the view to the scan. Store choice still uses source size at open. `ImportAsync` always copies.
 
 ```mermaid
 flowchart LR
@@ -54,7 +54,9 @@ flowchart LR
 
 ## 4. Imports are all-or-nothing
 
-Every import runs inside one transaction. If it fails, the session is left exactly as it was, and that includes config and metadata. Source: `DataBall.cs` (`RunImport`).
+Every import runs inside one transaction. If an import fails, the session is left exactly as it was, including config and metadata. Source: `DataBall.cs` (`RunImport`).
+
+An append or edit to an external Parquet view first materializes it inside the same transaction; a replace drops the view without reading the source. A failed write restores the view. `InitializeRow` validates and materializes in its own transaction before setting pending-row state; later `CommitRow` uses the existing table path. `SetMetadata` does not materialize.
 
 ```mermaid
 flowchart TD
@@ -84,7 +86,7 @@ flowchart TD
 
 \* `name_unit` splits only when the suffix is a known unit, so `I_Total` stays whole.
 
-Metadata fields (defaults `Lot`, `Tester`, `Program`) follow `metadataPolicy`. Under `requireConstant`, a field that varies throws. Under `first`, the first value always moves to meta.
+CSV and Parquet metadata fields (defaults `Lot`, `Tester`, `Program`) follow `metadataPolicy`. The default `liftConstant` lifts a field with one distinct non-null value, even when some rows are null; varying fields stay columns. Explicit `requireConstant` throws for varying fields. Under `first`, the first value always moves to meta. Parquet keeps source column names and types (DATE becomes TIMESTAMP); it skips CSV header canonicalization and coercion. For a view, extraction reads column aggregates and redefines the projection to exclude extracted fields. Imports extract after the wide merge, or on staging for a configured layout. Append reconciliation restores varying metadata as a column. `MergeOrAppend` copies without extraction.
 
 ## 6. Row builder: carry forward, reset on change
 
@@ -199,13 +201,13 @@ A `.ball` v3 is a DuckDB database. `Open` checks native magic before handlers, o
 flowchart LR
     subgraph ball["session.ball (DuckDB)"]
         meta["meta: key / value"]
-        data["data: wide table or layout view"]
+        data["data: table, layout or Parquet view"]
         cfg["_databall: versioned config JSON<br/>ball_format = 3, engine / storage versions, last-save timestamp"]
         tbl["physical layout tables"]
     end
 ```
 
-`SaveAsync` ignores session filters and saves all rows. It attaches a temporary destination, uses `COPY FROM DATABASE`, detaches it, and replaces the destination. Saving a writable session to its own live path runs `CHECKPOINT`. Filters apply to CSV, Parquet, and archive export.
+`SaveAsync` ignores session filters and saves all rows. It attaches a temporary destination, uses `COPY FROM DATABASE`, embeds external Parquet views as tables in the saved copy, detaches it, and replaces the destination. When saving to another path, the live view stays attached. A default save by a writable session to its own live path embeds the external Parquet in place before checkpointing. `SaveOptions.Link = true` instead keeps the external view with absolute paths; reopen validates that the source exists and reports its missing path. A linked save to the session's own live path preserves the view and runs `CHECKPOINT`. Filters apply to CSV, Parquet, and archive export.
 
 Native `ImportAsync` attaches the source read-only, merges the schema config subset, stages its wide `data`, routes rows through the existing merge/append path, and loads metadata with config metadata taking precedence. All changes commit together or roll back together. Detach runs after commit or rollback because DuckDB prohibits it while the transaction has outstanding reads.
 

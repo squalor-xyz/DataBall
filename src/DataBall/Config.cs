@@ -70,7 +70,7 @@ namespace squalor.DataBall
         public List<string> MetadataFieldsAdd { get; set; } = new();
 
         /// <summary>
-        /// Gets or sets metadata extraction policy: <c>requireConstant</c>, <c>first</c>, or <c>bounce</c>.
+        /// Gets or sets metadata extraction policy: <c>liftConstant</c> (default), <c>requireConstant</c>, <c>first</c>, or <c>bounce</c>.
         /// </summary>
         public string? MetadataPolicy { get; set; }
 
@@ -97,7 +97,7 @@ namespace squalor.DataBall
                         HeaderParser.NameOnly,
                     }
                 },
-                MetadataPolicy = "requireConstant",
+                MetadataPolicy = "liftConstant",
             };
 
             void Unit(string name, string type, params string[] aliases)
