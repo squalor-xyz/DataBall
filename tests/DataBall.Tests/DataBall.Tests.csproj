@@ -15,8 +15,15 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DataBall\DataBall.csproj" />
     <ProjectReference Include="..\..\src\DataBall.Handlers\DataBall.Handlers.csproj" />
+    <ProjectReference Include="../DataBall.TrialProbe/DataBall.TrialProbe.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <Target Name="CopyTrialProbe" AfterTargets="Build">
+    <ItemGroup>
+      <TrialProbeFiles Include="$(MSBuildThisFileDirectory)../DataBall.TrialProbe/bin/$(Configuration)/$(TargetFramework)/**/*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TrialProbeFiles)" DestinationFiles="@(TrialProbeFiles->'$(OutDir)TrialProbe/%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

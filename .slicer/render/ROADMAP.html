@@ -35,26 +35,26 @@
 - **Next, v1.4.0 (planned, not shipped; suite `docs/databall-v1.4-alignment.md`):** one session holds one or more runs through a run/source dimension; `.ball` becomes a DuckDB file (db-05 trial first); the store is in-memory or file-backed by size, so data larger than RAM works; hosts read typed columns or streamed rows with projection and filter pushdown; `Open` scores detection and opens many files; declarative transforms, combine ops, and export profiles fold in from the Conflux spec (db-05–db-17, snowflake `parent` db-03 included).</p>
 <p>License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).</p></div></section>
 <section><h2>Non-goals</h2><div class="prose"><p>Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `&quot;data&quot;`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).</p></div></section>
-<p class="summary">17 items · — 14 · done 3</p>
+<p class="summary">17 items · — 13 · done 4</p>
 <table><thead><tr><th>#</th><th>ID</th><th>Title</th><th>Size</th><th>Effort</th><th>Trees</th><th>Findings</th><th>Status</th></tr></thead><tbody>
-<tr class="open"><td>1</td><td>db-05</td><td>Trial: .ball as a DuckDB file</td><td>S</td><td>1</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>2</td><td>db-06</td><td>DataBall `.ball` v3 must be a DuckDB file</td><td>L</td><td>3</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>3</td><td>db-07</td><td>DataBall must choose its store by size and take engine settings</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>4</td><td>db-08</td><td>DataBall must return columnar and streaming reads</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>5</td><td>db-09</td><td>DataBall must attach Parquet and hive inputs as views</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>6</td><td>db-10</td><td>DataBall must score format detection and explain it</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>7</td><td>db-11</td><td>DataBall must open many files into one session</td><td>L</td><td>3</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>8</td><td>db-12</td><td>DataBall CSV must handle preambles, trailers and strict casts</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>9</td><td>db-13</td><td>DataBall must apply declarative transforms from config</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>10</td><td>db-14</td><td>DataBall must join, dedupe and aggregate across sources</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>11</td><td>db-15</td><td>DataBall export must support profiles and content splits</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>12</td><td>db-16</td><td>DataBall API must have one clear way in and out</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
-<tr class="open"><td>13</td><td>db-03</td><td>DataBall snowflake `parent` and a perf measurement</td><td>M</td><td>3</td><td>databall,suite</td><td>owner charter (2026-09-23) (was suite S49)</td><td class="status">—</td></tr>
-<tr class="open"><td>14</td><td>db-17</td><td>Tag and release DataBall v1.4.0</td><td>S [OWNER]</td><td>1</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>1</td><td>db-06</td><td>DataBall `.ball` v3 must be a DuckDB file</td><td>L</td><td>3</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>2</td><td>db-07</td><td>DataBall must choose its store by size and take engine settings</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>3</td><td>db-08</td><td>DataBall must return columnar and streaming reads</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>4</td><td>db-09</td><td>DataBall must attach Parquet and hive inputs as views</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>5</td><td>db-10</td><td>DataBall must score format detection and explain it</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>6</td><td>db-11</td><td>DataBall must open many files into one session</td><td>L</td><td>3</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>7</td><td>db-12</td><td>DataBall CSV must handle preambles, trailers and strict casts</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>8</td><td>db-13</td><td>DataBall must apply declarative transforms from config</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>9</td><td>db-14</td><td>DataBall must join, dedupe and aggregate across sources</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>10</td><td>db-15</td><td>DataBall export must support profiles and content splits</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>11</td><td>db-16</td><td>DataBall API must have one clear way in and out</td><td>M</td><td>2</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
+<tr class="open"><td>12</td><td>db-03</td><td>DataBall snowflake `parent` and a perf measurement</td><td>M</td><td>3</td><td>databall,suite</td><td>owner charter (2026-09-23) (was suite S49)</td><td class="status">—</td></tr>
+<tr class="open"><td>13</td><td>db-17</td><td>Tag and release DataBall v1.4.0</td><td>S [OWNER]</td><td>1</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">—</td></tr>
 </tbody></table>
 <table><thead><tr><th>#</th><th>ID</th><th>Title</th><th>Size</th><th>Effort</th><th>Trees</th><th>Findings</th><th>Status</th></tr></thead><tbody>
-<tr class="done"><td>15</td><td>db-01</td><td>DataBall Bounce and column edits must work on layouts</td><td>M</td><td>3</td><td>databall</td><td>owner charter (2026-09-23) (was suite S48)</td><td class="status">done</td></tr>
-<tr class="done"><td>16</td><td>db-02</td><td>DataBall dimension growth on append</td><td>M</td><td>2</td><td>databall</td><td>owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50)</td><td class="status">done</td></tr>
-<tr class="done"><td>17</td><td>db-04</td><td>Tag and release DataBall v1.3.0</td><td>S [OWNER]</td><td>1</td><td>databall</td><td>owner request (2026-09-29)</td><td class="status">done</td></tr>
+<tr class="done"><td>14</td><td>db-01</td><td>DataBall Bounce and column edits must work on layouts</td><td>M</td><td>3</td><td>databall</td><td>owner charter (2026-09-23) (was suite S48)</td><td class="status">done</td></tr>
+<tr class="done"><td>15</td><td>db-02</td><td>DataBall dimension growth on append</td><td>M</td><td>2</td><td>databall</td><td>owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50)</td><td class="status">done</td></tr>
+<tr class="done"><td>16</td><td>db-04</td><td>Tag and release DataBall v1.3.0</td><td>S [OWNER]</td><td>1</td><td>databall</td><td>owner request (2026-09-29)</td><td class="status">done</td></tr>
+<tr class="done"><td>17</td><td>db-05</td><td>Trial: .ball as a DuckDB file</td><td>S</td><td>1</td><td>databall</td><td>owner interview (2026-10-08)</td><td class="status">done</td></tr>
 </tbody></table>
 </body></html>

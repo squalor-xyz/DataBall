@@ -13,6 +13,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataBall.Cli", "src\DataBal
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataBall.Cli.Tests", "tests\DataBall.Cli.Tests\DataBall.Cli.Tests.csproj", "{5FFDA196-ABFD-4AC9-8418-5DCE741DB765}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DataBall.TrialProbe", "tests\DataBall.TrialProbe\DataBall.TrialProbe.csproj", "{3721B52F-8F43-4BF3-BF21-163349F2D978}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -39,6 +41,10 @@ Global
 		{5FFDA196-ABFD-4AC9-8418-5DCE741DB765}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5FFDA196-ABFD-4AC9-8418-5DCE741DB765}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5FFDA196-ABFD-4AC9-8418-5DCE741DB765}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3721B52F-8F43-4BF3-BF21-163349F2D978}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3721B52F-8F43-4BF3-BF21-163349F2D978}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3721B52F-8F43-4BF3-BF21-163349F2D978}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3721B52F-8F43-4BF3-BF21-163349F2D978}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -49,5 +55,6 @@ Global
 		{641C14BA-7970-4628-B86D-B58C5394CCCE} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{7086103D-01DD-4F78-8A0B-4FC4732A4FA9} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{5FFDA196-ABFD-4AC9-8418-5DCE741DB765} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{3721B52F-8F43-4BF3-BF21-163349F2D978} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 	EndGlobalSection
 EndGlobal

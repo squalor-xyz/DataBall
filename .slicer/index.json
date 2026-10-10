@@ -103,7 +103,7 @@
       "id": "db-05",
       "title": "DataBall `.ball` as a DuckDB file must be measured before it ships",
       "short_title": "Trial: .ball as a DuckDB file",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-04"
@@ -115,6 +115,17 @@
           "text": "**2026-10-09** — From db-02 review (2026-10-08): also log the DuckDB file size after a dimension-growth append (it rewrites every table); the file may not shrink after drops without CHECKPOINT/VACUUM (general DuckDB knowledge, unverified).",
           "created_at": "2026-10-09T03:58:59Z",
           "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "ad928361-c9e3-4bab-ab6a-310089440891",
+          "kind": "",
+          "text": "**2026-10-10** — The four trial tests cover a round-trip that asserts the reopened rows and columns against both the generated source rows and the wide session, while the size, read-only open, and storage-version tests log their measurements. DuckDB measured 798,720 B, ZIP .ball 14,839 B, and Parquet 28,451 B; all measured DuckDB main-file sizes are whole 256 KiB blocks plus a 12 KiB header, so these ratios are not at-scale estimates. The writer-held read-only child open gets a conflicting lock and succeeds after writer disposal. The measured storage tag is v1.0.0+, the numeric header version is 64, and DuckDB is v1.5.5. The dimension-growth append grows the WAL, and CHECKPOINT does not shrink the main file. The child helper is the test-only tests/DataBall.TrialProbe console project. docs/ball-v3-trial.md answers the four db-06 questions. Deviation: the round-trip also compares with the wide session.",
+          "created_at": "2026-10-10T02:48:17Z",
+          "attempt": 1,
           "by": "Jon R",
           "verified_by": "",
           "verified_at": "",
@@ -139,7 +150,7 @@
         "importance": 3,
         "urgency": 3,
         "effort": 1,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -157,6 +168,17 @@
           "kind": "",
           "text": "**2026-10-09** — From db-02 review (2026-10-08): a dimension-growth re-split rewrites every layout table; in a file-backed .ball the file may not shrink without CHECKPOINT/VACUUM (general DuckDB knowledge, unverified). Include that in the save path.",
           "created_at": "2026-10-09T03:59:16Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "63c54d51-2871-4817-9c3c-dbbca704a2c8",
+          "kind": "",
+          "text": "**2026-10-10** — From db-05 review (2026-10-09): read-only opens must also pass the in-process gate, since DuckDbStore (src/DataBall/DuckDbStore.cs:36-41) rejects a second DataBall on the same path regardless of mode, and every open writes meta (:51-56). db-05 DuckDB sizes are whole 256 KiB blocks plus a 12 KiB header, so measure size at a realistic row count before choosing the ZIP-fallback default. DuckDB's concurrency page mentions the Quack remote protocol (beta as of v1.5.2) for multi-process access; the snapshot recommendation assumes it is not used.",
+          "created_at": "2026-10-10T02:39:46Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
