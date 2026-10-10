@@ -57,7 +57,7 @@ What this repo adds:
 
 - **Worktree:** `.worktrees/<id>` on branch `<id>`, created by the orchestrator before the implementer starts.
 - **Briefs:** the slice from `slicer show <id> --json --lean`; for reviewers also the direction sources, `slicer goals --json --lean` and `slicer list --json --lean`, plus `docs/how-it-works.md`.
-- **Checks:** the build, test and format commands above, plus the slice's own Check list. The orchestrator reruns the tests before review and runs the full check before committing.
+- **Checks:** the build, test and format commands above, plus the slice's own Check list. The orchestrator runs the tests before review, and the gate relies on that run instead of repeating it. After merging, the orchestrator reruns build, test and format only if `main` gained code changes since the slice branched; `slicer check` always runs.
 - **Size S** slices run a lite relay without the architect; M and L run the full relay.
 - **Models:** the owner picks the vendor, model and effort for each role.
 - **Agents** never commit; the orchestrator commits and merges after the gate passes and the owner agrees. Findings that belong to other slices are filed with `slicer note <id>` by the orchestrator, not by reviewers.
