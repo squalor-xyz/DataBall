@@ -35,6 +35,14 @@
     {
       "heading": "Git",
       "body": "One DataBall commit on branch `db-09` (worktree `.worktrees/db-09`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `Open`/`OpenAsync` (`src/DataBall/DataBall.Open.cs:60-125`): the native-magic sniff, then the db-07 store resolver (`EngineOptions.ResolveStore`, `:84`), which sizes the input and may create a temp file store before any view exists (db-09 note on this item).\n- `ImportAsync` → `DuckDbStore.ImportParquet`/`ImportHiveParquet` (`src/DataBall/DuckDbStore.cs:947-975`): the copy path that stays, plus its date promotion (`PromoteDateColumns`, `:1184`), which the view must reproduce.\n- `MergeOrAppend` (`src/DataBall/DataBall.cs:~275-310`) hands another session over as a temp Parquet file through `ImportParquet`. It must keep copying and never attach a view to a file it deletes afterwards.\n- Every write path that must materialize first: `AddRow(s)`, `AddColumn`, `RemoveColumn`, `ImportAsync`, `MergeOrAppend`, `Bounce`/`Squish`, `InitializeRow`/`CommitRow`, and the layout helpers `UnsplitLayout`/`DropDataRelation` (`src/DataBall/DuckDbStore.Layout.cs:292-330`), which assume physical tables.\n- db-08 reads: `ReadColumns`, `ReadRowsAsync` and the store-owned open-stream guard. Materializing on first write must go through the guard, never around it.\n- `SaveTo` (`DuckDbStore.cs:154-230`): `COPY FROM DATABASE` copies view definitions, not data, so embed must turn the view into a table in the saved copy.\n- The CLI (`src/DataBall.Cli/CliApp.cs`) builds sessions with `new DataBall` + `ImportAsync`, so CLI commands never see views unless they switch to `Open`.\n- Native `.ball` open, stored config, and the read-only guard."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- `ImportAsync` of a `.parquet` file or a hive directory still copies, with the same rows, column order and column types as today.\n- **Verify first:** configured metadata fields are extracted only on the CSV path today (`ApplyCsvSchema` → `ExtractConfiguredMetadata`, `src/DataBall/DataBall.cs:701-729`); `ImportParquet` never extracts them. Test 11 (`ViewSession_ConfigMetadataFields_InMeta`) would make a view behave differently from today's Parquet import. Either drop it, or make it an explicit owner decision that also changes the import path.\n- A view's columns and types equal what `ImportAsync` of the same input produces (same date promotion, `hive_partitioning = false`).\n- Sessions that are not view-backed: every existing test, and `SaveAsync` output, unchanged.\n- `MergeOrAppend` and the internal temp-Parquet hand-off keep copying.\n- A failed write on a view-backed session leaves the view, its rows and the source file untouched (no partial materialization).\n- The db-08 stream guard and db-07 store choice keep their tested behavior."
     }
   ],
   "notes": []

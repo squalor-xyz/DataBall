@@ -35,6 +35,14 @@
     {
       "heading": "Git",
       "body": "One DataBall commit on branch `db-15` (worktree `.worktrees/db-15`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `ExportAsync(path, ExportType)` (`src/DataBall/DataBall.cs:~470-505`) and `DuckDbStore.ExportTo`/`ExportCsv`/`ExportParquet` (`src/DataBall/DuckDbStore.cs:~980-990`, `:1100-1120`), plus `ApplyFilter`'s filtered select (`FilteredSelectOrNull`).\n- `ExportPartitionedParquet` and `ClearHiveTarget` (`DuckDbStore.cs:1009-1050`), used by `Bounce`/`Squish` (`DataBall.cs:375-380`) and `ExportManager.ExportToPartitionedParquet` (`src/DataBall/Export/ExportManager.cs:48-70`).\n- `ExportManager.ExportToArchive` (`ExportManager.cs:~80-130`), with its own temp and `.tmp`/move pattern.\n- CLI `export` (`src/DataBall.Cli/CliApp.cs:~40-60`, `CliFormat.DetectExportType`), and `bounce`/`squish` hive output.\n- The db-11 `source` dimension for the manifest's `sources`; the db-08 stream guard (export runs commands); db-07 temp store and engine `TempDirectory` (staging stays on the output volume, not in temp).\n- Config merge, clone and persistence for `exportProfiles`."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- `ExportAsync(path, ExportType)` output for CSV, Parquet and archive is unchanged until db-16 folds it: same files, header and default codec.\n- Squish and Bounce hive output: same directory layout, the `WRITE_PARTITION_COLUMNS` behavior, and `ClearHiveTarget`'s refusal to clear a directory with foreign files. Every `BounceSquishTests` case passes unchanged.\n- `ApplyFilter` keeps applying to CSV, Parquet and archive exports, and never to `.ball` saves.\n- A failed export never leaves partial final outputs and never deletes files it did not stage."
     }
   ],
   "notes": []

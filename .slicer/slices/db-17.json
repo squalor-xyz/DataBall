@@ -37,6 +37,14 @@
     {
       "heading": "Git",
       "body": "DataBall version + docs commit on `main` → push → tag `v2.0.0` → push tag (owner). Then suite `AGENTS.md`, the squalplot and squaltest version bumps, and the gitlink."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `.github/workflows/release.yml`: the tag must be an ancestor of `main`; test, pack, GitHub Release; a nuget.org push only if `NUGET_API_KEY` is set.\n- Package versions in `src/DataBall/DataBall.csproj`, `src/DataBall.Handlers/DataBall.Handlers.csproj` and `src/DataBall.Cli/DataBall.Cli.csproj`; the README tag line and the \"Migrating from 1.x\" table (db-16).\n- The hosts squalplot and squaltest (`DataBallPackageVersion`, `UseLocalDataBall`), and the suite's `AGENTS.md` and gitlink."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- Package IDs: `squalor.DataBall`, `squalor.DataBall.Handlers`, `squalor.DataBall.Cli`.\n- The library nupkg carries no `runtimes/`, and the tool nupkg carries the five native RID folders (as in db-04).\n- No nuget.org listing unless the owner changes that non-goal.\n- Earlier tags (`v1.3.0`, `v1.0.0-mpl`) stay untouched."
     }
   ],
   "notes": []

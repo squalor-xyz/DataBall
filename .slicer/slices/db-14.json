@@ -35,6 +35,14 @@
     {
       "heading": "Git",
       "body": "One DataBall commit on branch `db-14` (worktree `.worktrees/db-14`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `OnWideData` (`src/DataBall/DataBall.cs:~946-972`): unsplit, wide operation, re-split in one transaction. Dedupe, Aggregate and layout Join go through it.\n- The `MergeOrAppend` Parquet hand-off (`DataBall.cs:~283-298`), reused by `Join(DataBall)`; `Join(path)` opens through `Open`, so db-07 store choice, db-10 detection and db-11 lineage all apply.\n- The db-11 lineage columns and `source` dimension: Dedupe's default order and Join's dropping of the right side's lineage.\n- Bounce's keep list (declared keys, partition and lineage columns).\n- `ThrowIfReadOnly` and the db-08 store-owned stream guard: combine methods are writes.\n- `OpenAsync`'s run point after all sources land (db-11), inside the open's transaction; db-13 transforms run earlier, per source.\n- Config merge, clone, persistence and `ApplyImportedConfig` exclusion, as for db-13."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- `MergeOrAppend` semantics and its existing tests.\n- Layout append, growth, rollback and `_row` rules (README \"Tables\").\n- `combine` never re-runs on `ImportAsync`, `AddRow` or reopening a `.ball`.\n- With no `combine` in config, `Open` is unchanged.\n- A failed Join, Dedupe or Aggregate leaves tables, view, config and metadata as they were."
     }
   ],
   "notes": []

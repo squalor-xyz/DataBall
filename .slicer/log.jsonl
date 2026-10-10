@@ -159,3 +159,21 @@
 {"when": "2026-10-10T16:39:09Z", "item": "db-16", "action": "note", "from": "", "to": "", "note": "From db-07 relay (2026-10-10): db-07 added EngineOptions? en", "by": "Jon R"}
 {"when": "2026-10-10T16:59:09Z", "item": "db-11", "action": "note", "from": "", "to": "", "note": "From db-07 gate (2026-10-10): EngineOptions.ResolveStore wal", "by": "Jon R"}
 {"when": "2026-10-10T16:59:23Z", "item": "db-07", "action": "status", "from": "started", "to": "done", "note": "EngineOptions/StoreMode added. Open, OpenAsync and every CLI command pick a memory or temp-file store through one resolver: input bytes on disk, directories walked, against InMemoryMaxBytes, default 25% of GC available memory. memory_limit, threads and temp_directory go through the DuckDB.NET connection builder and are never persisted in the config. The temp store is deleted on dispose (best-effort, Dispose never throws). CLI gains --memory-limit, --threads, --temp-dir and --store. The re-split no longer makes the _wide copy and renames _unsplit; peak memory 135→117 MB (memory) and 135→113 MB (file) at 50k rows. Full Release suite 481 passed (442 + 39), format clean. Reviewer and architect round 1, Codex round 2, gate PASS.", "by": "Jon R"}
+{"when": "2026-10-10T18:22:52Z", "item": "db-09", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-09", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-10", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-10", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-11", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-11", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-12", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-12", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-13", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-13", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:53Z", "item": "db-14", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-14", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-15", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-15", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-16", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-16", "action": "edit", "from": "", "to": "", "note": "Must not change"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-17", "action": "edit", "from": "", "to": "", "note": "Interacts with"}
+{"when": "2026-10-10T18:22:54Z", "item": "db-17", "action": "edit", "from": "", "to": "", "note": "Must not change"}

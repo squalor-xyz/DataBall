@@ -35,6 +35,14 @@
     {
       "heading": "Git",
       "body": "One DataBall commit on branch `db-16` (worktree `.worktrees/db-16`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- Every public entry point:\n  - `Open`/`OpenAsync` (db-07 `engine`, db-11 `OpenOptions`);\n  - the constructor (squaltest's capture path uses `databasePath`);\n  - `ImportAsync`;\n  - `MergeOrAppend`;\n  - `SaveAsync` (db-09 `SaveOptions`);\n  - `ExportAsync` (db-15 `ExportOptions`);\n  - `Roll`, `Save`, `ExportToArchive`;\n  - the `ImportManager`/`ExportManager` statics;\n  - `Bounce`/`Squish`;\n  - the reads `Query`, `Filter`, `Count`, `ReadColumns`, `ReadRowsAsync`.\n- The rollback mechanisms to unify:\n  - `TakeSnapshot`/`RestoreSnapshot` (`src/DataBall/DataBall.cs:884-918`);\n  - the wide-Bounce expected-types copy (`:353-367`);\n  - `ForgetUnstoredColumnTypes` (`src/DataBall/DataBall.RowBuilder.cs:173`);\n  - wide `EnsureColumn`, which runs `ALTER` outside the write transaction.\n- The db-08 store-owned stream guard: it must stay the single gate on the connection after the fold.\n- The CLI (`src/DataBall.Cli/CliApp.cs`), which uses the constructor + `ImportAsync` and the db-07 resolver.\n- Hosts outside this repo (squalplot, squaltest) and the README migration table."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- For every folded path, the new call gives the same rows, columns, metadata, config and files as the old call did. Port each existing test to the new API without changing its expected values.\n- CLI commands and flags (`import`, `export`, `bounce`, `squish`, `query`, `info`, and the db-07 engine flags), and their exit codes.\n- Rollback guarantees: every write is one transaction, and a failed write leaves tables, view, config, metadata, expected types and the pending row as they were.\n- The read APIs as db-08 left them, including the open-stream guard and the read-side type map.\n- Native `.ball` read-only-by-default and the stored-config rules from db-06."
     }
   ],
   "notes": []
