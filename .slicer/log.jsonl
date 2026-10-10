@@ -116,3 +116,5 @@
 {"when": "2026-10-10T13:27:00Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner decisions 2026-10-10 (spec): SaveAsync parks the whole", "by": "Jon R"}
 {"when": "2026-10-10T13:32:51Z", "item": "db-18", "action": "set", "from": "", "to": "", "note": "effort -→2"}
 {"when": "2026-10-10T13:32:51Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10: config lives in a reserved table \"_databal", "by": "Jon R"}
+{"when": "2026-10-10T13:49:27Z", "item": "db-06", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-10-10T13:49:27Z", "item": "db-06", "action": "set", "from": "", "to": "", "note": "findings owner interview (2026-10-08)→owner interview (2026-10-08); db-05 decision record; owner decisions 2026-10-10"}

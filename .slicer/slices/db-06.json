@@ -2,39 +2,39 @@
   "id": "db-06",
   "title": "DataBall `.ball` v3 must be a DuckDB file",
   "lead": [
-    "`Open` attaches a `.ball` with no import; the session store and the parked file are the same DuckDB file; `SaveAsync` checkpoints and copies; ZIP `.ball` v1/v2 still import. Read-only default and snapshot policy come from the db-05 decision record."
+    "`.ball` is a DuckDB database file. `Open` attaches it (read-only by default) with no import; config travels inside the file in the reserved `\"_databall\"` table; `SaveAsync` writes a compact copy with `COPY FROM DATABASE`; ZIP `.ball` v1/v2 support is removed (never deployed; the release is v2.0.0)."
   ],
   "depends_note": null,
-  "findings_note": "owner interview (2026-10-08)",
+  "findings_note": "owner interview (2026-10-08); db-05 decision record; owner decisions 2026-10-10",
   "size": "L",
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:**",
+  "boundary": "**Not in this slice:** live-reader snapshot publication (db-18); store choice by size and engine settings (db-07); opening many files (db-11); API reshaping (db-16); the package version bump (db-17); a tested older-engine reader floor.",
   "sections": [
     {
       "heading": "Why",
-      "body": ""
+      "body": "The owner decided on 2026-10-10 (notes on this item), building on `docs/ball-v3-trial.md` (db-05):\n\n- A native `.ball` opens **read-only by default**; writable only with `Open(path, schemaPath = null, bool writable = false)` set to true.\n- ZIP `.ball` v1/v2 import and export are **removed** with `BallManifest`, the v2 per-table restore, and their tests. `.ball` means a DuckDB file only.\n- Config lives **in the file**, in a reserved, versioned table `\"_databall\"`: one row per config version (`version` INTEGER, `ball_format` = 3, `config` JSON text, `duckdb_version`, `storage_version`, `written_at`). A row is appended only when the merged config changes; the highest `version` is current.\n- `SaveAsync` saves the **whole session** even when a session filter is set; filters apply to CSV / Parquet / archive export only.\n- `ImportAsync` of a native `.ball` stays (replace or append, one transaction) by ATTACHing it READ_ONLY; the CLI keeps its commands.\n- Save uses `COPY FROM DATABASE`, not checkpoint-and-copy: db-05 measured that `CHECKPOINT` does not shrink the main file after a dimension-growth re-split (1,323,008 → 2,633,728 bytes).\n- Compatibility: keep DuckDB's default storage version (db-05 observed header 64), record writer engine and storage versions, claim no reader floor.\n\nConstraints from earlier reviews: the in-process same-path gate (`src/DataBall/DuckDbStore.cs:36-41`) applies to read-only opens too, and today every open writes `meta` (`:51-56`), which a read-only open must not do. db-05 measured a conflicting lock when another process opens a file a writer holds; this slice promises nothing across processes (db-18)."
     },
     {
       "heading": "Files",
-      "body": ""
+      "body": "- `src/DataBall/DuckDbStore.cs`: read-only connection (`ACCESS_MODE=READ_ONLY`); no `CREATE TABLE \"meta\"` when read-only; the `\"_databall\"` table (create, append on change, read latest); `SaveTo(path)`: `ATTACH` a temp path, `COPY FROM DATABASE`, `DETACH`, atomic move (same `.tmp` + `File.Move(..., overwrite: true)` pattern as today's `ExportManager.ExportToBall`); saving to the session's own live path is a `CHECKPOINT`; attach/detach helpers for import.\n- `src/DataBall/DataBall.Open.cs`: `Open`/`OpenAsync` gain `bool writable = false`. A file whose bytes 8–11 are `DUCK` is a native `.ball`, opened as the session store itself, before handlers run. A `.ball` that starts with `PK` fails with a message that 1.x ZIP `.ball` files are not supported.\n- `src/DataBall/DataBall.cs`: a writable session writes its first `\"_databall\"` row; a session over an existing file takes config from `\"_databall\"` (an overlay `schemaPath` is merged on top and must declare the same `tables`, or it throws); one read-only guard on the public write methods throws `DataBallException` before any state changes; `SaveAsync` and `ExportType.Ball` go to the native save.\n- `src/DataBall/Config.cs`: reject `tables` named `_databall` or `meta`; config to and from JSON text (reuse the existing serializer options and `Merge`).\n- `src/DataBall/Import/ImportManager.cs`: `ImportFromBallCore` ATTACHes READ_ONLY, applies the stored config (`ApplyImportedConfig`), stages `SELECT * FROM <alias>.\"data\"` into `_staging` and routes it with `PromoteDateColumns` + `MergeOrAppendFromTable` (as `ImportHiveParquet`, `DuckDbStore.cs:703-707`), loads `<alias>.\"meta\"`, then lets config metadata win (`ApplyImportedConfigMetadata`); DETACH in `finally`.\n- `src/DataBall/Export/ExportManager.cs`: remove the ZIP `.ball` writer.\n- `src/DataBall/BallManifest.cs`: delete.\n- `src/DataBall/DuckDbStore.Layout.cs`: remove the v2 per-table parquet restore; fix the `.ball` overlay comment (`:31`).\n- `src/DataBall/Export/ExportType.cs`, `src/DataBall/IFormatHandler.cs`: doc comments.\n- `src/DataBall.Cli/`: adjust only what breaks; commands stay.\n- `README.md` (store paragraph, format table, `SaveAsync` lines, \"## .ball format\") and `docs/how-it-works.md` (store diagram, section 11). Leave untracked generated docs alone.\n- Tests: new `tests/DataBall.Tests/BallNativeTests.cs`. Convert ZIP `.ball` round-trips in the existing test files (`MultiTableTests`, `ImportExportTests`, `ManagerTests`, `DataBallTests`, `OpenTests`, `FileBackedTests`, `IntendedBehaviorTests`, `ConfigTests`, `tests/DataBall.Cli.Tests/*`) to native; delete tests that only cover ZIP internals (manifest, zip entries, v1 fallback). `BallDuckDbTrialTests`: the size test drops the ZIP measurement.\n- No new dependencies."
     },
     {
       "heading": "Failing tests",
-      "body": ""
+      "body": "In `BallNativeTests` unless noted; each asserts:\n\n1. `Save_InMemory_WritesDuckDbFile_ReopenSameRowsAndMetadata`: bytes 8–11 are `DUCK`; reopened rows, column names and order, and metadata equal the source.\n2. `Save_LayoutSession_OpenWithoutConfig_BindsLayout`: `Open` with no schema binds the stored `tables`; `\"data\"` is a view; rows equal.\n3. `Open_Default_IsReadOnly_WritesNothing`: a write throws `DataBallException`; the file's SHA-256 is the same before open and after dispose.\n4. `Open_Writable_AppendPersists`: append, dispose, reopen read-only, rows include the append.\n5. `Open_ReadOnly_SamePathTwiceInProcess_Throws`.\n6. `Open_ZipNamedBall_ThrowsUnsupported`: message names 1.x ZIP `.ball`.\n7. `Open_DuckDbWithoutDataballTable_Throws` and `Open_DataballFormatNot3_Throws`.\n8. `DataballTable_AppendsOnlyOnConfigChange_LatestWins`: two saves with the same config leave one row; an import with a different config adds one; reopen uses the latest.\n9. `Config_ReservedTableNames_Rejected` (`ConfigTests`): `_databall` and `meta`.\n10. `Save_WithFilter_SavesAllRows`.\n11. `Save_AfterDimensionGrowth_SmallerThanLiveFile`: the db-05 dimension-growth scenario; the saved file is smaller than the checkpointed live file. If it cannot hold, report the measured sizes as a deviation rather than weakening the assertion.\n12. `Save_ToOwnLivePath_Checkpoints`: no `.wal` remains and the file reopens with all rows.\n13. `ImportAsync_NativeBall_ReplaceAppendAndLayout`: replace, append, and a layout source; afterwards the source `.ball` can be overwritten (it was detached).\n14. `ImportAsync_NativeBall_Failure_LeavesSessionUnchanged`: rows, config and metadata as before.\n15. `Save_RecordsEngineAndStorageVersion`: the latest `\"_databall\"` row has non-empty `duckdb_version` and `storage_version` and `ball_format` = 3."
     },
     {
       "heading": "Implement",
-      "body": ""
+      "body": "1. `slicer start db-06 --render --strict`. Write tests 1–15; run them and record each red line.\n2. Store: read-only mode, `\"_databall\"`, save via `COPY FROM DATABASE`, attach/detach.\n3. Session and `Open`: magic-byte detection, `writable`, config from the file, read-only guard.\n4. Import of a native `.ball` through the existing staging path; one transaction.\n5. Remove the ZIP `.ball` reader/writer, `BallManifest`, the v2 restore; convert or delete the dependent tests.\n6. README and `docs/how-it-works.md`.\n7. Mutation-check every new test; full Release test run; `dotnet format --verify-no-changes`."
     },
     {
       "heading": "Check",
-      "body": ""
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- `rg -n \"BallManifest|ZipFile\" src` finds only the CSV-archive paths.\n- CLI smoke: `databall import <csv> -o s.ball`, `databall info s.ball`, `databall import <csv> -o s.ball --append`, `databall query s.ball \"SELECT count(*) FROM data\"`; bytes 8–11 of `s.ball` are `DUCK`.\n- `slicer check`"
     },
     {
       "heading": "Git",
-      "body": ""
+      "body": "One DataBall commit on branch `db-06` (worktree `.worktrees/db-06`), merged to `main` after the gate and the owner's go-ahead. Suite gitlink only if the owner asks."
     }
   ],
   "notes": []

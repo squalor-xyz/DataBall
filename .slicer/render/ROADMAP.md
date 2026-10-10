@@ -29,7 +29,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
 | 1 | [db-05](slices/db-05.md) | Trial: .ball as a DuckDB file | S | 1 | databall | owner interview (2026-10-08) | done |
-| 2 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08) | — |
+| 2 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08); db-05 decision record; owner decisions 2026-10-10 | — |
 | 3 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | — |
 | 4 | [db-08](slices/db-08.md) | DataBall must return columnar and streaming reads | M | 2 | databall | owner interview (2026-10-08) | — |
 | 5 | [db-09](slices/db-09.md) | DataBall must attach Parquet and hive inputs as views | M | 2 | databall | owner interview (2026-10-08) | — |
