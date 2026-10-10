@@ -532,6 +532,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "384baa5f-c8a3-4699-94b1-1df4f1c436ab",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (db-10 spec review): (1) built-in paths (native .ball, Parquet view, generic CSV/archive import) are a fallback, not scored candidates: a scored candidate always wins; detect --explain reports the built-in as the Generic outcome with a reason (consistent with db-09 handler precedence). (2) Keep both type folders (~/.databall/types and ./databall/types); restricting folder-loaded types once types can carry SQL is a db-13 item. Spec review also moved detection before session construction, scored CustomCsvHandler at 0.6, and switched parquetColumns to DESCRIBE (parquet_schema lists the root and nested children).",
+          "created_at": "2026-10-10T20:39:46Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -735,6 +746,17 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): transforms live in Config (and a file type's config), run per source on staging at import before the merge, and travel in the .ball.",
           "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "c8a23fe5-63a7-4847-8e34-cce4cd72e851",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 spec review (owner, 2026-10-10): JSON file types auto-load from ~/.databall/types and ./databall/types (working directory). Once a type's config can carry transforms (SQL expressions), a type loaded from a folder must not carry transforms or combine unless the host registers it explicitly (RegisterFileType or CLI --types); opening a file in an untrusted working directory must not run its SQL.",
+          "created_at": "2026-10-10T20:39:46Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
