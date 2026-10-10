@@ -58,7 +58,9 @@ namespace squalor.DataBall.Tests
             {
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "Lot,EVM(dB)\nL1,1.5\nL2,2.0\n");
-                using var db = new DataBall();
+                var config = Path.Combine(dir, "strict.json");
+                File.WriteAllText(config, """{"metadataPolicy":"requireConstant"}""");
+                using var db = new DataBall(config);
                 var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, csv, append: false));
                 var msg = (ex.InnerException ?? ex).Message;
                 Assert.Contains("Lot", msg, StringComparison.Ordinal);

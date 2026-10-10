@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -43,7 +44,7 @@ namespace squalor.DataBall
         /// Native DuckDB files open directly, read-only by default, before registered handlers.
         /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
-        /// <param name="path">File to open.</param>
+        /// <param name="path">File or hive Parquet directory to open.</param>
         /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
         /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
         /// <param name="writable">Allow changes to a native .ball session.</param>
@@ -65,20 +66,24 @@ namespace squalor.DataBall
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
-            if (!File.Exists(path))
+            var directory = Directory.Exists(path);
+            if (directory && !Directory.EnumerateFiles(path, "*.parquet", SearchOption.AllDirectories).Any())
+                throw new DataBallException($"{path} is not a hive Parquet directory");
+            if (!directory && !File.Exists(path))
                 throw new DataBallException($"File not found: {path}");
 
             var native = false;
-            using (var sniff = File.OpenRead(path))
-            {
-                var magic = new byte[12];
-                var count = sniff.Read(magic, 0, magic.Length);
-                if (count >= 12 && magic.AsSpan(8, 4).SequenceEqual("DUCK"u8))
-                    native = true;
-                if (Path.GetExtension(path).Equals(".ball", StringComparison.OrdinalIgnoreCase)
-                    && count >= 2 && magic[0] == 'P' && magic[1] == 'K')
-                    throw new DataBallException("1.x ZIP .ball files are unsupported");
-            }
+            if (!directory)
+                using (var sniff = File.OpenRead(path))
+                {
+                    var magic = new byte[12];
+                    var count = sniff.Read(magic, 0, magic.Length);
+                    if (count >= 12 && magic.AsSpan(8, 4).SequenceEqual("DUCK"u8))
+                        native = true;
+                    if (Path.GetExtension(path).Equals(".ball", StringComparison.OrdinalIgnoreCase)
+                        && count >= 2 && magic[0] == 'P' && magic[1] == 'K')
+                        throw new DataBallException("1.x ZIP .ball files are unsupported");
+                }
 
             if (native)
                 return new DataBall(schemaPath, null, path, readOnly: !writable, native: true, engine);
@@ -87,7 +92,18 @@ namespace squalor.DataBall
                 temporary: (engine ?? new EngineOptions()).ResolveStore(new[] { path }) == StoreMode.File);
             try
             {
-                var handler = FindHandler(path);
+                var handler = directory ? null : FindHandler(path);
+                if ((handler is null || handler.DelegatesToGenericImport) && !db.HasLayoutConfig
+                    && (directory || Path.GetExtension(path).Equals(".parquet", StringComparison.OrdinalIgnoreCase)))
+                {
+                    db.RunImport(false, () =>
+                    {
+                        db._store.AttachParquetView(path);
+                        db.ExtractConfiguredMetadata("data", false);
+                    });
+                    return db;
+                }
+
                 if (handler is not null && !handler.DelegatesToGenericImport)
                 {
                     var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);

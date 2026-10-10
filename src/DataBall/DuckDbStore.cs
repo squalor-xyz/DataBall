@@ -34,6 +34,7 @@ namespace squalor.DataBall
         private readonly List<string> _pendingDetach = new();
         private bool _disposed;
         private int _openStreams;
+        private bool _isViewBacked;
 
         internal DuckDbStore(string? databasePath = null, ILogger? logger = null, bool readOnly = false, EngineOptions? engine = null, bool temporary = false)
         {
@@ -97,6 +98,56 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>True for an external Parquet view, excluding a configured layout view.</summary>
+        internal bool IsViewBacked
+        {
+            get
+            {
+                ThrowIfConnectionBusy();
+                return _isViewBacked;
+            }
+        }
+
+        /// <summary>Binds a native external Parquet view; returns false for any other definition.</summary>
+        internal bool BindParquetView()
+        {
+            var sql = (string)Query("SELECT sql FROM duckdb_views() WHERE database_name = current_database() AND view_name = 'data'")[0]["sql"]!;
+            _isViewBacked = sql.Contains("read_parquet(", StringComparison.OrdinalIgnoreCase);
+            return _isViewBacked;
+        }
+
+        internal void AttachParquetView(string path)
+        {
+            ThrowIfConnectionBusy();
+            var full = Path.GetFullPath(path).Replace('\\', '/');
+            var source = Directory.Exists(path)
+                ? $"read_parquet({QuoteString(full.TrimEnd('/') + "/**/*.parquet")}, hive_partitioning = false)"
+                : $"read_parquet({QuoteString(full)})";
+            var schema = Query($"DESCRIBE SELECT * FROM {source}");
+            var projection = string.Join(", ", schema.Select(c =>
+            {
+                var name = QuoteIdent((string)c["column_name"]!);
+                return IsDateType((string)c["column_type"]!) ? $"CAST({name} AS TIMESTAMP) AS {name}" : name;
+            }));
+            Execute($"CREATE VIEW \"data\" AS SELECT {projection} FROM {source}");
+            _isViewBacked = true;
+        }
+
+        /// <summary>Copies the external view inside the caller's transaction.</summary>
+        internal void MaterializeView()
+        {
+            ThrowIfConnectionBusy();
+            if (!IsViewBacked)
+                return;
+            if (_currentTx is null)
+                throw new DataBallException("Materializing a view requires a transaction");
+            var temporary = "materialize_" + Guid.NewGuid().ToString("N");
+            Execute($"CREATE TABLE {QuoteIdent(temporary)} AS SELECT * FROM \"data\"");
+            Execute("DROP VIEW \"data\"");
+            Execute($"ALTER TABLE {QuoteIdent(temporary)} RENAME TO \"data\"");
+            _isViewBacked = false;
+        }
+
         internal bool IsReadOnly { get; }
 
         internal string? StorePath => _exclusivePath;
@@ -153,18 +204,18 @@ namespace squalor.DataBall
                 """);
         }
 
-        internal void SaveTo(string path, Config? config = null)
+        internal void SaveTo(string path, Config? config = null, bool link = false)
         {
-            ThrowIfDisposed();
+            ThrowIfConnectionBusy();
             if (_currentTx is not null)
                 throw new DataBallException("Cannot save inside a store transaction");
             lock (FileGate)
             {
-                SaveToCore(path, config);
+                SaveToCore(path, config, link);
             }
         }
 
-        private void SaveToCore(string path, Config? config)
+        private void SaveToCore(string path, Config? config, bool link)
         {
             if (!DataTableExists() && _metadata.Count == 0)
                 throw new DataBallException("No data to export");
@@ -173,6 +224,8 @@ namespace squalor.DataBall
             {
                 if (IsReadOnly)
                     throw new DataBallException("Session is read-only; save to another path or open with writable: true");
+                if (!link && IsViewBacked)
+                    InTransaction(MaterializeView);
                 StampWriter();
                 Execute("CHECKPOINT");
                 return;
@@ -191,6 +244,16 @@ namespace squalor.DataBall
                 attached = true;
                 var source = Convert.ToString(ExecuteScalar("SELECT current_database()"), CultureInfo.InvariantCulture)!;
                 Execute($"COPY FROM DATABASE {QuoteIdent(source)} TO {QuoteIdent(alias)}");
+                if (!link && IsViewBacked)
+                {
+                    InTransaction(() =>
+                    {
+                        var temporaryTable = QuoteIdent("embedded_" + Guid.NewGuid().ToString("N"));
+                        Execute($"CREATE TABLE {QuoteIdent(alias)}.{temporaryTable} AS SELECT * FROM {QuoteIdent(source)}.\"data\"");
+                        Execute($"DROP VIEW {QuoteIdent(alias)}.\"data\"");
+                        Execute($"ALTER TABLE {QuoteIdent(alias)}.{temporaryTable} RENAME TO \"data\"");
+                    });
+                }
                 if (config is not null)
                     WriteConfig(config, alias);
                 StampWriter(alias);
@@ -417,6 +480,7 @@ namespace squalor.DataBall
             ThrowIfConnectionBusy();
             using var tx = _connection.BeginTransaction();
             var previous = _currentTx;
+            var wasViewBacked = _isViewBacked;
             _currentTx = tx;
             try
             {
@@ -433,6 +497,7 @@ namespace squalor.DataBall
                 {
                     _logger.LogError(ex, "Rollback failed");
                 }
+                _isViewBacked = wasViewBacked;
                 throw;
             }
             finally
@@ -761,6 +826,7 @@ namespace squalor.DataBall
 
             InTransaction(() =>
             {
+                MaterializeView();
                 if (!DataTableExists())
                 {
                     if (values.Count == 0)
@@ -822,6 +888,7 @@ namespace squalor.DataBall
 
             InTransaction(() =>
             {
+                MaterializeView();
                 if (!DataTableExists())
                 {
                     var parts = new List<string>(keyOrder.Count);
@@ -1044,17 +1111,18 @@ namespace squalor.DataBall
             });
         }
 
-        internal void ImportParquet(string path, bool append)
+        internal void ImportParquet(string path, bool append, Action<string>? prepareStaging = null)
         {
+            ThrowIfConnectionBusy();
             if (Directory.Exists(path))
             {
-                ImportHiveParquet(path, append);
+                ImportHiveParquet(path, append, prepareStaging);
                 return;
             }
-            ImportFromFunction(path, append, "read_parquet", "");
+            ImportFromFunction(path, append, "read_parquet", "", prepareStaging: prepareStaging);
         }
 
-        private void ImportHiveParquet(string directory, bool append)
+        private void ImportHiveParquet(string directory, bool append, Action<string>? prepareStaging)
         {
             ThrowIfDisposed();
             var files = Directory.GetFiles(directory, "*.parquet", SearchOption.AllDirectories);
@@ -1067,6 +1135,9 @@ namespace squalor.DataBall
             try
             {
                 PromoteDateColumns("_staging");
+                prepareStaging?.Invoke("_staging");
+                if (!TableExists("_staging"))
+                    return;
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
@@ -1267,6 +1338,24 @@ namespace squalor.DataBall
             ValidateName(tableName, "Table");
             ValidateName(columnName, "Column");
             DropColumnFromTable(tableName, columnName);
+        }
+
+        /// <summary>Excludes an extracted metadata column from the external Parquet view.</summary>
+        internal void ExcludeFromView(string column)
+        {
+            ThrowIfConnectionBusy();
+            ValidateName(column, "Column");
+            var cols = GetColumns();
+            if (!cols.Any(c => c.Name.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                return;
+            if (cols.Count == 1)
+            {
+                DropDataRelation();
+                return;
+            }
+            var sql = (string)Query("SELECT sql FROM duckdb_views() WHERE database_name = current_database() AND view_name = 'data'")[0]["sql"]!;
+            var select = sql[(sql.IndexOf(" AS ", StringComparison.OrdinalIgnoreCase) + 4)..].TrimEnd(';');
+            Execute($"CREATE OR REPLACE VIEW \"data\" AS SELECT * EXCLUDE ({QuoteIdent(column)}) FROM ({select})");
         }
 
         private void DropColumnFromTable(string tableName, string columnName)

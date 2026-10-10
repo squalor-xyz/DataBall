@@ -20,32 +20,47 @@ namespace squalor.DataBall
         public void InitializeRow(IReadOnlyDictionary<string, object?>? initial = null)
         {
             ThrowIfReadOnly();
-            _pendingRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            _originalRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-            _modifiedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            var last = LoadLastRow();
-            if (last is not null)
-            {
-                foreach (var kv in last)
-                {
-                    _originalRow[kv.Key] = kv.Value;
-                    _pendingRow[kv.Key] = kv.Value;
-                }
-            }
-
+            // Validate and unwrap before changing either the relation or pending-row state.
+            Dictionary<string, object?>? prepared = null;
             if (initial is not null)
             {
-                foreach (var kv in initial)
+                prepared = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                foreach (var pair in initial)
                 {
-                    if (string.IsNullOrWhiteSpace(kv.Key))
+                    if (string.IsNullOrWhiteSpace(pair.Key))
                         throw new DataBallException("Field name is required.");
-                    _pendingRow[kv.Key] = DuckDbStore.Unwrap(kv.Value);
-                    _modifiedFields.Add(kv.Key);
+                    prepared[pair.Key] = DuckDbStore.Unwrap(pair.Value);
                 }
             }
+            var pending = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var original = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            var modified = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            _store.InTransaction(() =>
+            {
+                _store.MaterializeView();
+                var last = LoadLastRow();
+                if (last is not null)
+                {
+                    foreach (var kv in last)
+                    {
+                        original[kv.Key] = kv.Value;
+                        pending[kv.Key] = kv.Value;
+                    }
+                }
 
-            _logger.LogDebug("Initialized pending row");
+                if (prepared is not null)
+                {
+                    foreach (var kv in prepared)
+                    {
+                        pending[kv.Key] = kv.Value;
+                        modified.Add(kv.Key);
+                    }
+                }
+                _logger.LogDebug("Initialized pending row");
+            });
+            _pendingRow = pending;
+            _originalRow = original;
+            _modifiedFields = modified;
         }
 
         /// <summary>

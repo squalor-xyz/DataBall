@@ -359,6 +359,7 @@ namespace squalor.DataBall
                     {
                         _store.InTransaction(() =>
                         {
+                            _store.MaterializeView();
                             ExtractConstantsToMetadataSql(partitionColumns);
                             DistinctInPlace();
                         });
@@ -435,7 +436,7 @@ namespace squalor.DataBall
                             ImportCsvWithSchema(path, append);
                             break;
                         case ExportType.Parquet:
-                            _store.ImportParquet(path, append);
+                            ImportParquetWithMetadata(path, append);
                             break;
                         case ExportType.Archive:
                             ImportManager.ImportFromArchiveCore(this, path, append);
@@ -467,6 +468,8 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when export fails.</exception>
         public Task ExportAsync(string path, ExportType type)
         {
+            if (type == ExportType.Ball)
+                return SaveCore(path, link: false);
             ThrowIfDisposed();
             ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
@@ -486,11 +489,6 @@ namespace squalor.DataBall
                     case ExportType.Archive:
                         ExportManager.ExportToArchive(this, path);
                         break;
-                    case ExportType.Ball:
-                        if (!_store.IsReadOnly)
-                            PersistConfig();
-                        _store.SaveTo(path, ConfigForPersistence());
-                        break;
                     default:
                         throw new DataBallException($"Unsupported export type: {type}");
                 }
@@ -507,12 +505,31 @@ namespace squalor.DataBall
         /// Saves the whole session to the specified path as a native DuckDB .ball file.
         /// </summary>
         /// <param name="path">The path to save the .ball file.</param>
+        /// <param name="options">External Parquet is embedded by default; set Link to preserve its view.</param>
         /// <returns>A completed task after the save finishes.</returns>
         /// <exception cref="DataBallException">Thrown when the save operation fails.</exception>
-        public Task SaveAsync(string path)
+        public Task SaveAsync(string path, SaveOptions? options = null) => SaveCore(path, options?.Link ?? false);
+
+        private Task SaveCore(string path, bool link)
         {
             ThrowIfDisposed();
-            return ExportAsync(path, ExportType.Ball);
+            ThrowIfPendingRow();
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DataBallException("Path is required");
+            _logger.LogInformation("Exporting to {Path} as {Type}", path, ExportType.Ball);
+            try
+            {
+                _store.ThrowIfConnectionBusy();
+                if (!_store.IsReadOnly)
+                    PersistConfig();
+                _store.SaveTo(path, ConfigForPersistence(), link);
+                return Task.CompletedTask;
+            }
+            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
+            {
+                _logger.LogError(ex, "Export failed");
+                throw new DataBallException($"Failed to export to {ExportType.Ball}", ex);
+            }
         }
 
         /// <summary>
@@ -675,6 +692,21 @@ namespace squalor.DataBall
         private static bool EndsWithSuffix(string fileName, string suffix)
             => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Copies Parquet, extracting configured metadata at the CSV path's staging/merge boundary.</summary>
+        internal void ImportParquetWithMetadata(string path, bool append)
+        {
+            if (HasLayoutConfig)
+            {
+                _store.ImportParquet(path, append, t => ExtractConfiguredMetadata(t, append && _store.Layout is not null));
+                return;
+            }
+            var reconciled = append && _store.DataTableExists() && _store.RowCount() > 0
+                ? new HashSet<string>(_store.SnapshotMetadata().Keys, StringComparer.OrdinalIgnoreCase)
+                : null;
+            _store.ImportParquet(path, append);
+            ExtractConfiguredMetadata("data", false, reconciled);
+        }
+
         /// <summary>
         /// Imports a CSV and applies the CSV schema. Legacy sessions apply it to <c>"data"</c> after
         /// the merge (unchanged behavior); layout sessions apply it to the staging table before
@@ -755,16 +787,18 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExtractConfiguredMetadata(string table, bool layoutAppend)
+        private void ExtractConfiguredMetadata(string table, bool layoutAppend, IReadOnlySet<string>? reconciled = null)
         {
             if (!_store.TableExists(table) || _config.MetadataFields.Count == 0)
                 return;
 
             var qTable = DuckDbStore.QuoteIdent(table);
-            var policy = _config.MetadataPolicy ?? "requireConstant";
+            var policy = _config.MetadataPolicy ?? "liftConstant";
             var existing = _store.SnapshotMetadata();
             foreach (var field in _config.MetadataFields.ToList())
             {
+                if (reconciled?.Contains(field) == true)
+                    continue; // already compared with stored metadata by the append path
                 var cols = _store.GetColumnsOf(table);
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
@@ -791,7 +825,10 @@ namespace squalor.DataBall
                         _store.SetMetadata(match.Name, first[0][match.Name]);
                     if (!layoutAppend)
                     {
-                        _store.RemoveColumnOf(table, match.Name);
+                        if (table == "data" && _store.IsViewBacked)
+                            _store.ExcludeFromView(match.Name);
+                        else
+                            _store.RemoveColumnOf(table, match.Name);
                         _expectedColumnTypes.Remove(match.Name);
                     }
                     continue;
@@ -802,7 +839,10 @@ namespace squalor.DataBall
                     _store.SetMetadata(match.Name, value);
                     if (!layoutAppend)
                     {
-                        _store.RemoveColumnOf(table, match.Name);
+                        if (table == "data" && _store.IsViewBacked)
+                            _store.ExcludeFromView(match.Name);
+                        else
+                            _store.RemoveColumnOf(table, match.Name);
                         _expectedColumnTypes.Remove(match.Name);
                     }
                     continue;
@@ -814,15 +854,28 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Constructor step: bind or build the layout. A view-backed file needs a config with
-        /// <c>tables</c>; a wide file opened with <c>tables</c> is split; a bad layout fails now.
+        /// Constructor step: bind an external Parquet view or a configured layout. Other views
+        /// need <c>tables</c>; a wide file opened with <c>tables</c> is split; a bad layout fails now.
         /// </summary>
         private void InitializeLayout()
         {
             if (_store.DataIsView())
             {
                 if (!HasLayoutConfig)
-                    throw new DataBallException("Session file has a multi-table layout; open it with the config that declares 'tables'");
+                {
+                    if (!_store.BindParquetView())
+                        throw new DataBallException("Session file has a multi-table layout; open it with the config that declares 'tables'");
+                    try
+                    {
+                        // Binding the view validates linked Parquet paths before returning a session.
+                        _store.Query("SELECT * FROM \"data\" LIMIT 0");
+                    }
+                    catch (DataBallException ex)
+                    {
+                        throw new DataBallException($"Failed to open linked Parquet: {ex.GetBaseException().Message}", ex);
+                    }
+                    return;
+                }
                 _store.BindExistingLayout(_config);
                 return;
             }
@@ -864,11 +917,13 @@ namespace squalor.DataBall
             {
                 _store.InTransaction(() =>
                 {
-                    if (HasLayoutConfig && !append && _store.DataIsView())
+                    if (!append && (_store.IsViewBacked || (HasLayoutConfig && _store.DataIsView())))
                     {
                         _store.DropDataRelation();
                         _store.ClearLayout();
                     }
+                    else
+                        _store.MaterializeView();
 
                     import();
                     SplitIfLayout();
@@ -947,7 +1002,16 @@ namespace squalor.DataBall
         {
             if (!HasLayoutConfig)
             {
-                wideOperation();
+                if (!_store.IsViewBacked)
+                {
+                    wideOperation();
+                    return;
+                }
+                _store.InTransaction(() =>
+                {
+                    _store.MaterializeView();
+                    wideOperation();
+                });
                 return;
             }
 
