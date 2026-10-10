@@ -61,7 +61,6 @@ What this repo adds:
 - **Size S** slices run a lite relay without the architect; M and L run the full relay.
 - **Models:** the owner picks the vendor, model and effort for each role.
 - **Agents** never commit; the orchestrator commits and merges after the gate passes and the owner agrees. Findings that belong to other slices are filed with `slicer note <id>` by the orchestrator, not by reviewers.
-- The owner's fuller playbook, with vendor fallback chains and a headless mailbox (`relay-call.sh`), lives in the squalor-xyz agents repo under `multi-agent-workflows/playbooks/slice-relay.md`.
 
 ## Git
 
