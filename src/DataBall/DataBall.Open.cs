@@ -42,11 +42,12 @@ namespace squalor.DataBall
         /// </summary>
         /// <param name="path">File to open.</param>
         /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
+        /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
         /// <param name="writable">Allow changes to a native .ball session.</param>
         /// <exception cref="DataBallException">Missing path/file, unknown format, or import failure.</exception>
-        public static DataBall Open(string path, string? schemaPath = null, bool writable = false)
+        public static DataBall Open(string path, string? schemaPath = null, bool writable = false, EngineOptions? engine = null)
         {
-            return Task.Run(() => OpenAsync(path, schemaPath, writable)).GetAwaiter().GetResult();
+            return Task.Run(() => OpenAsync(path, schemaPath, writable, engine)).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -56,6 +57,7 @@ namespace squalor.DataBall
             string path,
             string? schemaPath = null,
             bool writable = false,
+            EngineOptions? engine = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(path))
@@ -76,9 +78,10 @@ namespace squalor.DataBall
             }
 
             if (native)
-                return new DataBall(schemaPath, null, path, readOnly: !writable, native: true);
+                return new DataBall(schemaPath, null, path, readOnly: !writable, native: true, engine);
 
-            var db = new DataBall(schemaPath);
+            var db = new DataBall(schemaPath, null, null, readOnly: false, native: false, engine,
+                temporary: (engine ?? new EngineOptions()).ResolveStore(new[] { path }) == StoreMode.File);
             try
             {
                 var handler = FindHandler(path);

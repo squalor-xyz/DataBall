@@ -929,6 +929,42 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
+        public async Task Append_DimensionGrowth_FileBacked_KeyConflict_RollsBack()
+        {
+            var dir = TempDir();
+            try
+            {
+                var csv = Path.Combine(dir, "sites.csv");
+                var path = Path.Combine(dir, "session.duckdb");
+                File.WriteAllText(csv, "Site,Operator,Meas\nA,ann,1\nB,bob,2\n");
+                var config = WriteConfig(dir, """
+                    { "columns": { "Meas": "long" }, "tables": { "site": { "kind": "dimension", "columns": ["Site", "Operator", "Shift"], "key": ["Site"] } } }
+                    """);
+                IReadOnlyList<Dictionary<string, object?>> before;
+                void AssertRestored(DataBall session)
+                {
+                    Assert.Empty(session.Query("SELECT table_name FROM information_schema.tables WHERE table_name = '_unsplit'"));
+                    Assert.Equal("VIEW", TableType(session, "data"));
+                    Assert.Equal(before, session.Query("SELECT * FROM data ORDER BY Meas"));
+                }
+                using (var db = new DataBall(config, databasePath: path))
+                {
+                    await db.ImportAsync(csv);
+                    before = db.Query("SELECT * FROM data ORDER BY Meas");
+                    var ex = Assert.Throws<DataBallException>(() => db.AddRows(new[]
+                    {
+                        new Dictionary<string, object?> { ["Site"] = "A", ["Operator"] = "ann", ["Shift"] = "night", ["Meas"] = 3L }
+                    }));
+                    Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
+                    AssertRestored(db);
+                }
+                using var reopened = new DataBall(databasePath: path);
+                AssertRestored(reopened);
+            }
+            finally { Directory.Delete(dir, true); }
+        }
+
+        [Fact]
         public async Task Append_DimensionGrowth_KeyConflict_RollsBack()
         {
             var dir = TempDir();

@@ -33,16 +33,18 @@ namespace squalor.DataBall
         /// </summary>
         /// <param name="configPath">The path to the configuration JSON file, if any.</param>
         /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
+        /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
         /// <param name="databasePath">Optional DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
-        public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null)
-            : this(configPath, logger, databasePath, readOnly: false, native: false)
+        public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null, EngineOptions? engine = null)
+            : this(configPath, logger, databasePath, readOnly: false, native: false, engine,
+                temporary: string.IsNullOrEmpty(databasePath) && engine?.ResolveStore(Array.Empty<string>()) == StoreMode.File)
         {
         }
 
-        private DataBall(string? configPath, ILogger? logger, string? databasePath, bool readOnly, bool native)
+        private DataBall(string? configPath, ILogger? logger, string? databasePath, bool readOnly, bool native, EngineOptions? engine = null, bool temporary = false)
         {
             _logger = logger ?? NullLogger.Instance;
-            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly);
+            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly, engine, temporary);
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
             try
@@ -85,6 +87,8 @@ namespace squalor.DataBall
                 throw;
             }
         }
+
+        internal string? StorePath => _store.StorePath;
 
         private static string? ValidateDatabasePath(string? databasePath)
         {
@@ -554,9 +558,15 @@ namespace squalor.DataBall
                 return;
             if (_pendingRow is not null)
                 _logger.LogWarning("Disposing with an uncommitted pending row; it will be discarded.");
-            _store.Dispose();
-            _disposed = true;
-            GC.SuppressFinalize(this);
+            try
+            {
+                _store.Dispose();
+            }
+            finally
+            {
+                _disposed = true;
+                GC.SuppressFinalize(this);
+            }
         }
 
         private void ExtractConstantsToMetadataSql(string[]? partitionColumns)

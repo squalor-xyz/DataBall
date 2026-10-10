@@ -9,6 +9,79 @@ namespace squalor.DataBall.Cli.Tests;
 public class CliSmokeTests
 {
     [Fact]
+    public async Task Query_AutoStore_UsesInputSize()
+    {
+        var dir = Path.Combine(AppContext.BaseDirectory, "cli-engine", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            var csv = Path.Combine(dir, "input.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+            using var stdout = new StringWriter();
+            using var stderr = new StringWriter();
+            var app = typeof(CommandFactory).Assembly.GetType("squalor.DataBall.Cli.CliApp")!;
+            var query = app.GetMethod("QueryAsync", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic)!;
+            var task = (Task<int>)query.Invoke(null, new object[]
+            {
+                csv, "SELECT (path IS NULL OR path = '') AS value FROM duckdb_databases() WHERE database_name = current_database()",
+                stdout, stderr, false, new EngineOptions { InMemoryMaxBytes = 1, TempDirectory = dir }
+            })!;
+            Assert.Equal(0, await task);
+            Assert.Equal("value\nFalse\n", stdout.ToString().Replace("\r\n", "\n"));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Theory]
+    [InlineData("--threads", "3", "threads", "3")]
+    [InlineData("--temp-dir", "{temp}", "temp_directory", "{temp}")]
+    [InlineData("--store", "file", "store", "False")]
+    public async Task Query_EngineOptions_Arrive(string flag, string value, string setting, string expected)
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "input.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+            value = value.Replace("{temp}", dir);
+            expected = expected.Replace("{temp}", dir);
+            var sql = setting == "store"
+                ? "SELECT (path IS NULL OR path = '') AS value FROM duckdb_databases() WHERE database_name = current_database()"
+                : $"SELECT current_setting('{setting}') AS value";
+            var result = await Run("query", csv, sql, flag, value);
+            Assert.Equal(0, result.Exit);
+            Assert.Equal($"value\n{expected}\n", result.StdOut);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Theory]
+    [InlineData("import")]
+    [InlineData("export")]
+    [InlineData("query")]
+    [InlineData("info")]
+    public async Task Command_InvalidMemoryLimit_Arrives(string command)
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "input.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+            var args = command switch
+            {
+                "import" => new[] { command, csv, "-o", Path.Combine(dir, "out.ball") },
+                "export" => new[] { command, csv, Path.Combine(dir, "out.csv") },
+                "query" => new[] { command, csv, "SELECT 1" },
+                _ => new[] { command, csv }
+            };
+            var result = await Run(args.Concat(new[] { "--memory-limit", "invalid" }).ToArray());
+            Assert.Equal(1, result.Exit);
+            Assert.Contains("memory", result.StdErr, StringComparison.OrdinalIgnoreCase);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [Fact]
     public async Task ImportCsv_ThenQuery_PrintsTsv()
     {
         var dir = TempDir();
@@ -393,6 +466,25 @@ public class CliSmokeTests
         {
             Directory.Delete(dir, true);
         }
+    }
+
+    [Fact]
+    public async Task Import_MemoryLimitOption_Applied()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "input.csv");
+            var ball = Path.Combine(dir, "output.ball");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\n");
+            var invalid = await Run("import", csv, "-o", ball, "--memory-limit", "invalid");
+            Assert.Equal(1, invalid.Exit);
+            Assert.Contains("memory", invalid.StdErr, StringComparison.OrdinalIgnoreCase);
+            var valid = await Run("import", csv, "-o", ball, "--memory-limit", "1GB", "--threads", "2", "--temp-dir", dir);
+            Assert.Equal(0, valid.Exit);
+            Assert.True(File.Exists(ball));
+        }
+        finally { Directory.Delete(dir, true); }
     }
 
     private static async Task<(int Exit, string StdOut, string StdErr)> Run(params string[] args)

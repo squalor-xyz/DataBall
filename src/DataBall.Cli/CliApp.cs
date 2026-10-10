@@ -13,11 +13,12 @@ internal static class CliApp
         bool append,
         string? configPath,
         TextWriter stderr,
-        bool verbose = false)
+        bool verbose = false,
+        EngineOptions? engine = null)
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall(configPath);
+            using var db = new DataBall(configPath, engine: ResolveEngine(engine, append && File.Exists(output) ? new[] { input, output } : new[] { input }));
             if (append && File.Exists(output))
             {
                 await db.ImportAsync(output);
@@ -38,11 +39,12 @@ internal static class CliApp
         string output,
         string? format,
         TextWriter stderr,
-        bool verbose = false)
+        bool verbose = false,
+        EngineOptions? engine = null)
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall();
+            using var db = new DataBall(engine: ResolveEngine(engine, input));
             await db.ImportAsync(input);
             var type = format is null
                 ? CliFormat.DetectExportType(output)
@@ -60,7 +62,7 @@ internal static class CliApp
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall();
+            using var db = new DataBall(engine: ResolveEngine(null, input));
             await db.ImportAsync(input);
             await db.Bounce();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
@@ -79,7 +81,7 @@ internal static class CliApp
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall();
+            using var db = new DataBall(engine: ResolveEngine(null, input));
             await db.ImportAsync(input);
             if (partition is not null)
             {
@@ -105,11 +107,12 @@ internal static class CliApp
         string sql,
         TextWriter stdout,
         TextWriter stderr,
-        bool verbose = false)
+        bool verbose = false,
+        EngineOptions? engine = null)
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall();
+            using var db = new DataBall(engine: ResolveEngine(engine, file));
             await db.ImportAsync(file);
             WriteTsv(db.Query(sql), stdout);
             return 0;
@@ -120,15 +123,29 @@ internal static class CliApp
         string file,
         TextWriter stdout,
         TextWriter stderr,
-        bool verbose = false)
+        bool verbose = false,
+        EngineOptions? engine = null)
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall();
+            using var db = new DataBall(engine: ResolveEngine(engine, file));
             await db.ImportAsync(file);
             WriteInfo(file, db, stdout);
             return 0;
         });
+    }
+
+    private static EngineOptions ResolveEngine(EngineOptions? engine, params string[] inputs)
+    {
+        engine ??= new EngineOptions();
+        return new EngineOptions
+        {
+            Store = engine.ResolveStore(inputs),
+            InMemoryMaxBytes = engine.InMemoryMaxBytes,
+            MemoryLimit = engine.MemoryLimit,
+            Threads = engine.Threads,
+            TempDirectory = engine.TempDirectory,
+        };
     }
 
     private static void RejectIfSamePath(string input, string dest)

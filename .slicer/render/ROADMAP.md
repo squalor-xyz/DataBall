@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-18 items · — 13 · done 5
+18 items · — 12 · done 6
 
 ## v2.0
 
@@ -30,7 +30,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 |---|---|---|---|---|---|---|---|
 | 1 | [db-05](slices/db-05.md) | Trial: .ball as a DuckDB file | S | 1 | databall | owner interview (2026-10-08) | done |
 | 2 | [db-06](slices/db-06.md) | DataBall `.ball` v3 must be a DuckDB file | L | 3 | databall | owner interview (2026-10-08); db-05 decision record; owner decisions 2026-10-10 | done |
-| 3 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | — |
+| 3 | [db-07](slices/db-07.md) | DataBall must choose its store by size and take engine settings | M | 2 | databall | owner interview (2026-10-08) | done |
 | 4 | [db-08](slices/db-08.md) | DataBall must return columnar and streaming reads | M | 2 | databall | owner interview (2026-10-08) | — |
 | 5 | [db-09](slices/db-09.md) | DataBall must attach Parquet and hive inputs as views | M | 2 | databall | owner interview (2026-10-08) | — |
 | 6 | [db-10](slices/db-10.md) | DataBall must score format detection and explain it | M | 2 | databall | owner interview (2026-10-08) | — |
