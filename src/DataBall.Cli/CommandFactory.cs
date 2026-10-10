@@ -15,6 +15,7 @@ public static class CommandFactory
         };
         root.Options.Add(verboseOption);
 
+        root.Subcommands.Add(CreateDetectCommand(stdout, stderr, verboseOption));
         root.Subcommands.Add(CreateImportCommand(stderr, verboseOption));
         root.Subcommands.Add(CreateExportCommand(stderr, verboseOption));
         root.Subcommands.Add(CreateBounceCommand(stderr, verboseOption));
@@ -32,6 +33,28 @@ public static class CommandFactory
         parseResult.InvocationConfiguration.ProcessTerminationTimeout = null;
         parseResult.InvocationConfiguration.Output = parseResult.Errors.Count > 0 ? stderr : stdout;
         return await parseResult.InvokeAsync();
+    }
+
+    private static Command CreateDetectCommand(TextWriter stdout, TextWriter stderr, Option<bool> verboseOption)
+    {
+        var path = new Argument<string>("path") { Description = "File or hive Parquet directory" };
+        var explain = new Option<bool>("--explain") { Description = "Print every score, threshold, priority and reason" };
+        var types = new Option<string?>("--types") { Description = "Directory of JSON file types" };
+        var command = new Command("detect", "Detect an input format without importing it") { path, explain, types };
+        command.SetAction(async (result, _) => await CliApp.RunAsync(stderr, result.GetValue(verboseOption), () =>
+        {
+            if (result.GetValue(types) is { } folder)
+            {
+                if (!Directory.Exists(folder))
+                    throw new DataBallException($"File type directory not found: '{folder}'");
+                foreach (var file in Directory.EnumerateFiles(folder, "*.json").OrderBy(p => p, StringComparer.Ordinal))
+                    DataBall.RegisterFileType(file);
+            }
+            var report = DataBall.Detect(result.GetValue(path)!);
+            stdout.WriteLine(result.GetValue(explain) ? report.ToString() : $"{report.Outcome}: {report.Reason}");
+            return Task.FromResult(report.Outcome is DetectionOutcome.Match or DetectionOutcome.Generic ? 0 : 1);
+        }));
+        return command;
     }
 
     private static Command CreateImportCommand(TextWriter stderr, Option<bool> verboseOption)

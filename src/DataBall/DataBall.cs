@@ -36,12 +36,17 @@ namespace squalor.DataBall
         /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
         /// <param name="databasePath">Optional DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
         public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null, EngineOptions? engine = null)
-            : this(configPath, logger, databasePath, readOnly: false, native: false, engine,
+            : this(string.IsNullOrEmpty(configPath) ? null : Config.LoadConfig(configPath), logger, databasePath, readOnly: false, native: false, engine,
                 temporary: string.IsNullOrEmpty(databasePath) && engine?.ResolveStore(Array.Empty<string>()) == StoreMode.File)
         {
         }
 
-        private DataBall(string? configPath, ILogger? logger, string? databasePath, bool readOnly, bool native, EngineOptions? engine = null, bool temporary = false)
+        internal DataBall(Config config, EngineOptions? engine, bool temporary)
+            : this(config, null, null, readOnly: false, native: false, engine, temporary)
+        {
+        }
+
+        private DataBall(Config? overlay, ILogger? logger, string? databasePath, bool readOnly, bool native, EngineOptions? engine = null, bool temporary = false)
         {
             _logger = logger ?? NullLogger.Instance;
             _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly, engine, temporary);
@@ -51,9 +56,6 @@ namespace squalor.DataBall
             {
                 var stored = native || _store.HasStoredConfig;
                 _config = stored ? _store.ReadConfig() : Config.CreateDefaults();
-                Config? overlay = null;
-                if (!string.IsNullOrEmpty(configPath))
-                    overlay = Config.LoadConfig(configPath);
                 if (stored)
                 {
                     ApplyConfig(_config, applyMetadata: false);

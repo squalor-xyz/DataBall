@@ -24,5 +24,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="DataBall.Tests" />
     <InternalsVisibleTo Include="DataBall.Cli" />
+    <InternalsVisibleTo Include="DataBall.Cli.Tests" />
+    <InternalsVisibleTo Include="DataBall.Handlers" />
   </ItemGroup>
 </Project>

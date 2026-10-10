@@ -11,6 +11,13 @@ namespace squalor.DataBall.Handlers
         public bool CanHandle(string path, Stream sniff)
             => path.EndsWith(".prd", StringComparison.OrdinalIgnoreCase);
 
+        /// <summary>Scores the bounded probe by the supported extension.</summary>
+        public DetectionScore Score(FileProbe probe)
+        {
+            var matched = probe.Extension.Equals(".prd", StringComparison.OrdinalIgnoreCase);
+            return new DetectionScore(matched ? 1 : 0, new[] { matched ? "extension matched" : "extension missed" });
+        }
+
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,
             Config schema,

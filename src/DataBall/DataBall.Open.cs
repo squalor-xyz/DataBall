@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using squalor.DataBall.FileTypes;
 
 namespace squalor.DataBall
 {
@@ -15,18 +16,193 @@ namespace squalor.DataBall
 
         private static readonly object HandlerGate = new();
         private static readonly List<IFormatHandler> Handlers = new();
+        private static readonly Dictionary<(string Id, int Version), JsonFileType> LoadedTypes = new();
+        private static bool TypesScanned;
+        private static string? HomeTypeRoot;
+        private static string? LocalTypeRoot;
+
+        /// <summary>Loaded JSON type identities, versions and source paths.</summary>
+        public static IReadOnlyList<FileTypeInfo> FileTypes
+        {
+            get
+            {
+                lock (HandlerGate)
+                {
+                    LoadFolders();
+                    return Array.AsReadOnly(LoadedTypes.Values.Select(t => t.Info).ToArray());
+                }
+            }
+        }
+
+        /// <summary>Loads and registers a JSON type, overriding the same id and version from earlier origins.</summary>
+        public static void RegisterFileType(string path)
+        {
+            var type = JsonFileType.Load(path);
+            lock (HandlerGate)
+            {
+                LoadFolders();
+                AddType(type);
+            }
+        }
+
+        private static void AddType(JsonFileType type)
+        {
+            var key = (type.Info.Id, type.Info.Version);
+            if (LoadedTypes.TryGetValue(key, out var previous))
+                Handlers.Remove(previous);
+            LoadedTypes[key] = type;
+            Handlers.Add(type);
+        }
+
+        private static void LoadFolders()
+        {
+            if (TypesScanned)
+                return;
+            var home = HomeTypeRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".databall", "types");
+            var local = LocalTypeRoot ?? Path.Combine(Environment.CurrentDirectory, "databall", "types");
+            var pending = new List<JsonFileType>();
+            try
+            {
+                foreach (var root in new[] { home, local })
+                    if (Directory.Exists(root))
+                        foreach (var path in Directory.EnumerateFiles(root, "*.json").OrderBy(p => p, StringComparer.Ordinal))
+                            pending.Add(JsonFileType.Load(path));
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException("Failed to load file type folders", ex);
+            }
+            foreach (var type in pending)
+                AddType(type);
+            TypesScanned = true;
+        }
+
+        internal static void SetFileTypeRootsForTests(string? home, string? local)
+        {
+            lock (HandlerGate)
+            {
+                Handlers.RemoveAll(h => h is JsonFileType);
+                LoadedTypes.Clear();
+                TypesScanned = false;
+                HomeTypeRoot = home;
+                LocalTypeRoot = local;
+            }
+        }
+
+        /// <summary>Scores handlers without constructing a session; built-ins are the fallback.</summary>
+        public static DetectionReport Detect(string path)
+        {
+            try { return DetectCore(path); }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException($"Detection failed for '{path}'", ex);
+            }
+        }
+
+        private static DetectionReport DetectCore(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new DataBallException("Path is required");
+            if (!Directory.Exists(path) && !File.Exists(path))
+                throw new DataBallException($"File not found: {path}");
+            var probe = new FileProbe(path);
+            if (!probe.IsDirectory && probe.Head.Length >= 12 && probe.Head.Span.Slice(8, 4).SequenceEqual("DUCK"u8))
+                return new DetectionReport(Array.Empty<HandlerDetection>(), DetectionOutcome.Generic, null,
+                    BuiltInPath.NativeBall, "native DuckDB magic", "native DuckDB magic");
+            if (probe.Extension.Equals(".ball", StringComparison.OrdinalIgnoreCase) && probe.Head.Length >= 2
+                && probe.Head.Span[0] == 'P' && probe.Head.Span[1] == 'K')
+                throw new DataBallException("1.x ZIP .ball files are unsupported");
+
+            BuiltInPath? builtIn = null;
+            var fallbackReason = $"Unknown extension; no built-in path for '{path}'";
+            if (probe.IsDirectory)
+            {
+                if (Directory.EnumerateFiles(path, "*.parquet", SearchOption.AllDirectories).Any())
+                    (builtIn, fallbackReason) = (BuiltInPath.ParquetView, "hive Parquet directory");
+                else
+                    fallbackReason = "Not a hive Parquet directory";
+            }
+            else
+            {
+                try
+                {
+                    var format = DetectFormat(path);
+                    var name = format == Export.ExportType.Csv ? "CSV" : format.ToString();
+                    builtIn = format switch
+                    {
+                        Export.ExportType.Parquet => BuiltInPath.ParquetView,
+                        Export.ExportType.Csv => BuiltInPath.CsvImport,
+                        Export.ExportType.Ball => BuiltInPath.BallImport,
+                        _ => BuiltInPath.ArchiveImport
+                    };
+                    fallbackReason = $"Known {name} extension";
+                }
+                catch (DataBallException) { }
+            }
+
+            IFormatHandler[] snapshot;
+            lock (HandlerGate)
+            {
+                LoadFolders();
+                snapshot = Handlers.ToArray();
+            }
+            var entries = new List<HandlerDetection>();
+            var candidates = new List<(IFormatHandler Handler, double Score, int Priority)>();
+            foreach (var handler in snapshot)
+            {
+                try
+                {
+                    var score = probe.IsDirectory
+                        ? new DetectionScore(0, new[] { "directories are not offered to handlers" })
+                        : handler.Score(probe);
+                    var min = handler.MinScore;
+                    if (!double.IsFinite(min) || min is < 0 or > 1)
+                        throw new DataBallException($"Invalid minScore for handler '{handler.Name}'");
+                    var priority = handler.Priority;
+                    entries.Add(new HandlerDetection(handler.Name, score.Score, min, priority, score.Reasons,
+                        (handler as JsonFileType)?.Info.Origin));
+                    if (!probe.IsDirectory && score.Score >= min)
+                        candidates.Add((handler, score.Score, priority));
+                }
+                catch (Exception ex) when (ex is not DataBallException || !ex.Message.Contains($"'{handler.Name}'", StringComparison.Ordinal))
+                {
+                    throw new DataBallException($"Detection failed for handler '{handler.Name}': {ex.Message}", ex);
+                }
+            }
+            if (candidates.Count == 0)
+                return new DetectionReport(entries, builtIn is null ? DetectionOutcome.None : DetectionOutcome.Generic,
+                    null, builtIn, fallbackReason, fallbackReason);
+            var highestScore = candidates.Max(c => c.Score);
+            var ordered = candidates.Where(c => Math.Abs(c.Score - highestScore) <= 1e-9)
+                .OrderByDescending(c => c.Priority).ToArray();
+            if (ordered.Length > 1 && ordered[0].Priority == ordered[1].Priority)
+                return new DetectionReport(entries, DetectionOutcome.Ambiguous, null, builtIn, fallbackReason,
+                    "Handlers tie after score and priority");
+            if (ordered[0].Handler.DelegatesToGenericImport && builtIn is null)
+                return new DetectionReport(entries, DetectionOutcome.None, null, builtIn, fallbackReason,
+                    $"{ordered[0].Handler.Name} delegates to generic import; no built-in path for '{probe.Extension}'");
+            return new DetectionReport(entries, DetectionOutcome.Match, ordered[0].Handler, builtIn, fallbackReason,
+                $"{ordered[0].Handler.Name} has the highest score and priority");
+        }
 
         /// <summary>
         /// Registers a format handler on the process-wide, host-owned registry.
-        /// First match from <see cref="IFormatHandler.CanHandle"/> wins.
+        /// Highest score wins; priority breaks equal scores. Remaining ties are ambiguous.
         /// Generic CSV / Parquet / archive / <c>.ball</c> need no handler.
-        /// Duplicates are the caller's problem; tests should <see cref="ClearHandlers"/> first.
+        /// Duplicate handlers registered by hand tie as ambiguous; tests should <see cref="ClearHandlers"/> first.
         /// </summary>
         public static void RegisterHandler(IFormatHandler handler)
         {
             ArgumentNullException.ThrowIfNull(handler);
             lock (HandlerGate)
                 Handlers.Add(handler);
+        }
+
+        internal static void RegisterHandlerIfMissing(IFormatHandler handler)
+        {
+            lock (HandlerGate)
+                if (!Handlers.Any(h => h.GetType() == handler.GetType()))
+                    Handlers.Add(handler);
         }
 
         /// <summary>
@@ -36,7 +212,11 @@ namespace squalor.DataBall
         public static void ClearHandlers()
         {
             lock (HandlerGate)
+            {
                 Handlers.Clear();
+                LoadedTypes.Clear();
+                TypesScanned = false;
+            }
         }
 
         /// <summary>
@@ -86,15 +266,36 @@ namespace squalor.DataBall
                 }
 
             if (native)
-                return new DataBall(schemaPath, null, path, readOnly: !writable, native: true, engine);
+                return new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, path, readOnly: !writable, native: true, engine);
 
-            var db = new DataBall(schemaPath, null, null, readOnly: false, native: false, engine,
-                temporary: (engine ?? new EngineOptions()).ResolveStore(new[] { path }) == StoreMode.File);
+            var report = Detect(path);
+            if (report.Outcome is DetectionOutcome.Ambiguous or DetectionOutcome.None)
+                throw new DataBallException(report.ToString());
+            var handler = report.Winner;
+            Config effective;
+            bool delegates;
+            StoreMode store;
             try
             {
-                var handler = directory ? null : FindHandler(path);
-                if ((handler is null || handler.DelegatesToGenericImport) && !db.HasLayoutConfig
-                    && (directory || Path.GetExtension(path).Equals(".parquet", StringComparison.OrdinalIgnoreCase)))
+                delegates = handler is null || handler.DelegatesToGenericImport;
+                if (delegates && report.BuiltInPath is null)
+                    throw new DataBallException($"No built-in import path for this match{Environment.NewLine}{report}");
+                effective = Config.CreateDefaults();
+                if (handler?.Overlay is { } overlay)
+                    effective = Config.Merge(effective, overlay);
+                if (!string.IsNullOrEmpty(schemaPath))
+                    effective = Config.Merge(effective, Config.LoadConfig(schemaPath));
+                TableLayout.Validate(effective);
+                store = (engine ?? new EngineOptions()).ResolveStore(new[] { path });
+            }
+            catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
+            {
+                throw new DataBallException("Open configuration failed", ex);
+            }
+            var db = new DataBall(effective, engine, temporary: store == StoreMode.File);
+            try
+            {
+                if (delegates && report.BuiltInPath == BuiltInPath.ParquetView && !db.HasLayoutConfig)
                 {
                     db.RunImport(false, () =>
                     {
@@ -104,7 +305,7 @@ namespace squalor.DataBall
                     return db;
                 }
 
-                if (handler is not null && !handler.DelegatesToGenericImport)
+                if (handler is not null && !delegates)
                 {
                     var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);
                     await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
@@ -140,23 +341,5 @@ namespace squalor.DataBall
             }
         }
 
-        private static IFormatHandler? FindHandler(string path)
-        {
-            IFormatHandler[] snapshot;
-            lock (HandlerGate)
-                snapshot = Handlers.ToArray();
-            if (snapshot.Length == 0)
-                return null;
-
-            using var sniff = File.OpenRead(path);
-            foreach (var handler in snapshot)
-            {
-                sniff.Position = 0;
-                if (handler.CanHandle(path, sniff))
-                    return handler;
-            }
-
-            return null;
-        }
     }
 }

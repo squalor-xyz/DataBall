@@ -46,6 +46,8 @@ Requires a released **.NET 10** SDK (`global.json` pins `10.0.400`, `rollForward
 | Archive of CSV | `.zip`, `.tar`, `.tar.gz`, `.tgz`, `.tar.xz`, `.txz` | yes | `.zip` / `.tar` / `.tar.gz` / `.tgz` only |
 | Native DuckDB `.ball` | `.ball` | yes (replace or append) | yes (whole session) |
 
+`Open` scores registered handlers and JSON file types before choosing these built-in fallback paths. `detect --explain` reports the scores and chosen route.
+
 ## Library usage
 
 Pass machine-local settings to the constructor or open methods:
@@ -95,11 +97,50 @@ using var opened = DataBall.Open("input.csv"); // optional schema overlay: Open(
 
 `DataBall.Open(path, schemaPath = null, writable = false)` opens a native `.ball` as the session store. It reads embedded config and writes nothing by default. An overlay schema must declare the same `tables`. CSV and archive files create an imported session; they need no handler. For files, a registered handler takes precedence; a handler that delegates to generic import uses the generic path. A single unclaimed or delegated Parquet file, or a hive Parquet directory, opens as a `read_parquet` view, with projection and filter pushdown and no row copy. Configured `tables` copy and split at open. An append or edit copies the external view into a table in the write transaction; a replace drops the view without reading the source. Failure restores the view. `InitializeRow` performs that copy in its own transaction before starting a pending row; `SetMetadata` keeps the view. Store choice still uses source size at open. `ImportAsync` also reads a Squish **hive directory** of parquet (`hive_partitioning=false`; partition columns come from the files). Hive import is not `.ball` and does not restore Bounce metadata.
 
-Lab translators live in `squalor.DataBall.Handlers` (not `DuckDbStore`). Primary dialect is **custom CSV** with unit headers (`EVM(dB)`). `LabHandlers.RegisterDefaults()` also registers STDF / Touchstone / production **slots** (Parse throws until a golden file exists). Register with `DataBall.RegisterHandler`; first `CanHandle` match wins. `ClearHandlers` resets the process registry. Do not put parsers in `DuckDbStore`.
+Lab translators live in `squalor.DataBall.Handlers` (not `DuckDbStore`). Primary dialect is **custom CSV** with unit headers (`EVM(dB)`). `LabHandlers.RegisterDefaults()` also registers STDF / Touchstone / production **slots** (Parse throws until a golden file exists). `RegisterDefaults()` is idempotent: it skips a handler type that is already registered. Duplicates registered by hand with `DataBall.RegisterHandler` still tie and are ambiguous. Register with `DataBall.RegisterHandler`; the highest `Score(FileProbe)` wins, with `Priority` breaking equal scores. A remaining tie throws with the scoring table. Legacy handlers keep `CanHandle` and receive their full stream at position zero; the default score maps its result to 1 or 0 with a reason. `CustomCsvHandler` scores 0.6 for a known unit header. `ClearHandlers` resets handlers, loaded types and lazy folder scanning. Do not put parsers in `DuckDbStore`.
 
 Session filter is column predicates pushed to DuckDB (`Eq`, `In`, `Ge`, `Le`, inclusive `Range`) plus optional column projection. `Filter(spec)` does not mutate `"data"`. `ApplyFilter(spec)` applies to CSV, Parquet, and archive export; `ApplyFilter(null)` clears. `Query(sql)` is the unfiltered escape hatch.
 
 `AddRows` inserts a batch with one DuckDB appender. It does not apply trigger/reset (`CommitRow` does). Empty input is a no-op.
+
+### File types
+
+`DataBall.Detect(path)` returns the scoring table and a `Match`, `Generic`, `Ambiguous` or `None` outcome without constructing a session. Native DuckDB `.ball` files are recognized before handlers; directories are never offered to them. When there is no scored candidate, the built-ins provide CSV/archive import or the Parquet/hive view. An unknown extension has no fallback. `Open` throws on ambiguity or no match with the table in its message.
+
+JSON types load lazily, once per process, from `~/.databall/types/`, then `./databall/types/` under the working directory. `DataBall.RegisterFileType(path)` registers an explicit file last. A later origin replaces the same `id` and `version`; `DataBall.FileTypes` and detection entries report origins. Invalid files fail at load with their path. A winning type delegates to the existing generic import/view path and merges config in the order defaults, winning type's `config`, then the host's `schemaPath`, before store selection and session construction. Its `tables` therefore chooses the layout path.
+
+```json
+{
+  "id": "lab-sweep",
+  "version": 1,
+  "priority": 0,
+  "detect": {
+    "minScore": 0.6,
+    "conditions": [
+      { "fileName": "SWEEP_*.csv", "weight": 1 },
+      { "headerContainsAll": ["EVM(dB)", "I_Total(A)"], "weight": 3, "required": true }
+    ]
+  },
+  "config": { "columns": { "EVM": "double" } }
+}
+```
+
+Scores are matched weight divided by total weight; a missed required condition gates the score to zero. Each condition has exactly one condition key, optional numeric `weight` (default 1) and boolean `required` (default false). Supported keys are:
+
+| Condition | JSON value |
+|---|---|
+| `fileName` | glob string, matched against the file name |
+| `fileNameRegex` | regex string |
+| `extension` | array of extensions including the dot |
+| `headerContainsAll` | array of literal header names |
+| `headerExact` | array of header names, in order |
+| `lineMatches` | `{ "line": 0, "regex": "..." }` or `{ "firstLines": 5, "regex": "..." }` |
+| `columnCount` | `{ "min": 2, "max": 5 }`, inclusive; either bound optional |
+| `parquetColumns` | array of top-level column names |
+
+A JSON type that scores exactly 0.6 ties with `CustomCsvHandler` and is ambiguous; give the type a full match or a higher priority.
+
+Matches are case-insensitive; regexes have a one-second timeout. Aliases, preambles, captures as config sources and transforms are later slices. DataBall's own detection reads at most 64 KiB, plus Parquet's four-byte tail and a short-lived `DESCRIBE` query. Legacy `CanHandle` reads retain their previous unrestricted behavior.
 
 ### Config
 
@@ -202,6 +243,7 @@ await foreach (var row in db.ReadRowsAsync(filter, cancellationToken))
 ## CLI
 
 ```
+databall detect  <path> [--explain] [--types <dir>]
 databall import  <input> -o <output> [--append] [--config]
 databall export  <input> <output> [--format csv|parquet|ball|archive]
 databall bounce  <input> [output]
@@ -222,6 +264,8 @@ databall import hive -o session.ball
 databall query session.ball "SELECT * FROM data LIMIT 10"
 databall info session.ball
 ```
+
+`detect` prints the outcome; `--explain` includes scores, thresholds, priorities, reasons, origins and the built-in fallback. `--types` registers every JSON type in that directory. It exits 0 for `Match` or `Generic`, and 1 for `Ambiguous` or `None`.
 
 `bounce` without an output path writes a sibling `.ball`. `query` prints TSV to stdout. It is a local escape hatch and must not be exposed at a service boundary.
 

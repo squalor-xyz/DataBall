@@ -19,6 +19,26 @@ namespace squalor.DataBall
         /// </summary>
         bool CanHandle(string path, Stream sniff);
 
+        /// <summary>The name shown in detection reports.</summary>
+        string Name => GetType().Name;
+
+        /// <summary>Breaks ties between equal scores.</summary>
+        int Priority => 0;
+
+        /// <summary>The minimum score for candidacy.</summary>
+        double MinScore => 0.6;
+
+        /// <summary>Scores a probe. Legacy handlers retain their full stream at position zero.</summary>
+        DetectionScore Score(FileProbe probe)
+        {
+            using var stream = File.OpenRead(probe.Path);
+            var matched = CanHandle(probe.Path, stream);
+            return new DetectionScore(matched ? 1 : 0, new[] { matched ? "CanHandle matched" : "CanHandle did not match" });
+        }
+
+        /// <summary>Configuration merged over the defaults before session construction; an explicit host schemaPath overrides it.</summary>
+        Config? Overlay => null;
+
         /// <summary>
         /// When true, <see cref="DataBall.Open"/> runs generic <c>ImportAsync</c> on the outer
         /// session (with overlay schema) instead of draining <see cref="Parse"/>.
