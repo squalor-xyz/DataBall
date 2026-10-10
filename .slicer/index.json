@@ -277,7 +277,7 @@
       "id": "db-07",
       "title": "DataBall must choose its store by size and take engine settings",
       "short_title": "DataBall must choose its store by size and take engine settings",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-06"
@@ -315,6 +315,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "2de9945b-f263-48a4-ae7b-537ea69540f3",
+          "kind": "",
+          "text": "**2026-10-10** — Measured 2026-10-10 (db-07 relay, Codex implementer): 50k rows, one dimension-growth append, peak summed duckdb_memory().memory_usage_bytes sampled every 1 ms. In memory 135,231,488 → 117,473,280 bytes; temp file store 135,018,496 → 113,278,976 bytes. After removing the _wide copy and renaming _unsplit, the re-split still holds data + _cast (TEMP wide copy, in memory even on file stores) + the dropped old layout tables (kept until commit) + the new tables: more than two wide copies.",
+          "created_at": "2026-10-10T16:39:09Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -335,7 +346,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -407,6 +418,17 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): a write to a view-backed session copies the view in on first write; SaveAsync embeds by default, link is opt-in.",
           "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "445d1991-3344-4178-a793-854bcc296242",
+          "kind": "",
+          "text": "**2026-10-10** — From db-07 relay (2026-10-10): OpenAsync picks a temp-file store by input size before reading. A view-backed Parquet/hive open copies nothing, so it should not create a temp file at open, but materialize-on-first-write copies the whole source, so the size rule should apply there (or the store be chosen by source size anyway). Decide which. Hive directories are sized by db-07's resolver (directories walked).",
+          "created_at": "2026-10-10T16:39:09Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -528,6 +550,28 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): BCL-only globbing (wildcards in the last segment, Recursive option); built-in \"source\" dimension (_source_file, _source_hash, _source_type, per-source meta columns), \"meta\" keeps only values constant across sources, wide sessions carry lineage columns directly; every file-opened session has lineage, even one file; widening in layout sessions ALTERs the owning physical column.",
           "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "55ee4408-c129-46ef-9eb7-e1be78ac8a79",
+          "kind": "",
+          "text": "**2026-10-10** — From db-07 relay (2026-10-10): the re-split peak fell only ~13-16% (135 → 117 MB at 50k rows); _cast is a TEMP wide copy that stays in memory on file-backed stores, and dropped layout tables are kept until commit. In-place dimension growth (or a non-TEMP _cast on file stores) is still the lever. The store threshold uses on-disk bytes, which understate memory for compressed archives and Parquet. Use db-07's store resolver over the expanded input list rather than adding a new call site.",
+          "created_at": "2026-10-10T16:39:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "9c64d14d-edca-42fc-9f6e-9680f104a94d",
+          "kind": "",
+          "text": "**2026-10-10** — From db-07 gate (2026-10-10): EngineOptions.ResolveStore walks directories with Directory.EnumerateFiles(..., AllDirectories), which can throw a raw UnauthorizedAccessException on an unreadable subdirectory. Wrap it in DataBallException when many-file open reuses the resolver.",
+          "created_at": "2026-10-10T16:59:09Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -767,6 +811,17 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): remove the old entry points outright in v2.0.0 (no [Obsolete] shims). Still open: whether the stored _databall config keeps full merged defaults or only the overlay (step 1 of Implement).",
           "created_at": "2026-10-10T15:50:10Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "3b3b36c2-17cf-412c-a71f-1babe06ce013",
+          "kind": "",
+          "text": "**2026-10-10** — From db-07 relay (2026-10-10): db-07 added EngineOptions? engine to Open (after writable), OpenAsync (before the CancellationToken, so positional OpenAsync(path, schema, writable, ct) no longer compiles) and as the 4th public ctor parameter, plus public EngineOptions/StoreMode and CLI --memory-limit/--threads/--temp-dir/--store. Fold engine into OpenOptions.Engine. With an explicit databasePath, EngineOptions.Store is ignored; a create-only ctor could reject databasePath with Store = File.",
+          "created_at": "2026-10-10T16:39:09Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",

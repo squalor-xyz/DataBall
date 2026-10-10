@@ -35,12 +35,13 @@ Compacting is optional. `ApplyFilter` limits CSV, Parquet, and archive exports; 
 
 ## 3. Where the data lives
 
-The default store lives in memory. A `.ball` is a native DuckDB file: open it directly as a read-only session, or request `writable: true`. Save produces a compact whole-session copy.
+A non-native `Open` / `OpenAsync` compares input bytes on disk with `EngineOptions.InMemoryMaxBytes`: at or below the threshold it uses memory, above it a temporary file. The default threshold is 25% of GC available memory. `StoreMode.Memory` or `File` overrides this choice; an empty constructor starts in memory unless forced to file. Every CLI command applies the same size rule, recursively summing directory inputs; append import counts both inputs. On `import`, `export`, `query`, and `info`, `--store auto|memory|file` selects the rule or forces a store, and `--memory-limit`, `--threads`, and `--temp-dir` forward engine settings. Temporary files live under `TempDirectory` (OS temp by default) and their database, WAL, and default spill directory are cleaned up on disposal or constructor failure; cleanup failures are logged. `MemoryLimit`, `Threads`, and spill `TempDirectory` go through the DuckDB connection builder; null retains engine defaults. Engine options are never persisted in config. Native `.ball` opens ignore mode and threshold but apply the other settings. A `.ball` is a native DuckDB file: open it directly as a read-only session, or request `writable: true`. Save produces a compact whole-session copy.
 
 ```mermaid
 flowchart LR
     subgraph store["Working store (DuckDB)"]
-        Mem["In memory<br/><small>default; gone on Dispose</small>"]
+        Mem["In memory<br/><small>small input; gone on Dispose</small>"]
+        Temp["databall-&lt;guid&gt;.duckdb<br/><small>large input or forced File;<br/>deleted on Dispose</small>"]
         File["session.duckdb<br/><small>opt-in databasePath;<br/>kept after Dispose</small>"]
     end
     store -->|"SaveAsync: COPY FROM DATABASE"| Ball["session.ball<br/><small>native DuckDB file</small>"]
@@ -49,7 +50,7 @@ flowchart LR
 ```
 
 - **Share or move data as `.ball`.** Open it with DataBall or DuckDB; config and metadata travel inside the database.
-- **A file-backed working store persists after disposal.** Reopen it with `new DataBall(databasePath: ...)`; its stored config binds the layout. Never point this at `catalog.duckdb`.
+- **An explicit file-backed working store persists after disposal.** Reopen it with `new DataBall(databasePath: ...)`; its stored config binds the layout. Never point this at `catalog.duckdb`.
 
 ## 4. Imports are all-or-nothing
 
@@ -213,3 +214,5 @@ Config history appends only when merged config changes; the highest version is c
 Native saves stamp the latest `_databall` row with the running engine's `version()`, the destination's actual `duckdb_databases()` storage tag, and `written_at` (time of that save). The engine and storage versions are read after the database copy and before detach. Saving a writable session to its own file stamps that row before checkpointing. Config history grows only when config changes, including a read-only overlay saved to a copy. A read-only session cannot save to its own path (it throws); save to another path, or open with `writable: true`.
 
 `Open` uses the full stored config; an overlay merges on top and must keep the same table layout (table order does not matter). Stored `meta` values are authoritative on reopen; only overlay metadata overrides them, in memory for a read-only session. Native `ImportAsync` merges only columns, relationships, tables, and config metadata. The receiving session keeps its CSV settings, metadata fields, metadata policy, and other settings.
+
+Dimension-growth re-splits materialize the ordered view once, rename that table to `data`, and use `data` directly as split input. The `_cast` staging table is still a full wide TEMP copy held in memory. Dropped tables are retained until commit, so dropping the source early does not lower the peak inside the transaction. This removes the extra `_unsplit` and `_wide` copies; the whole-session rewrite still runs in one transaction.

@@ -54,6 +54,7 @@ public static class CommandFactory
             Description = "Path to configuration JSON",
         };
 
+        var engine = new EngineArguments();
         var command = new Command("import", "Import a file into an output DataBall")
         {
             inputArg,
@@ -61,6 +62,7 @@ public static class CommandFactory
             appendOption,
             configOption,
         };
+        engine.AddTo(command);
         command.SetAction(async (parseResult, _) =>
             await CliApp.ImportAsync(
                 parseResult.GetValue(inputArg)!,
@@ -68,7 +70,8 @@ public static class CommandFactory
                 parseResult.GetValue(appendOption),
                 parseResult.GetValue(configOption),
                 stderr,
-                parseResult.GetValue(verboseOption)));
+                parseResult.GetValue(verboseOption),
+                engine.Read(parseResult)));
         return command;
     }
 
@@ -87,19 +90,22 @@ public static class CommandFactory
             Description = "csv, parquet, ball, or archive",
         };
 
+        var engine = new EngineArguments();
         var command = new Command("export", "Export a file to another format")
         {
             inputArg,
             outputArg,
             formatOption,
         };
+        engine.AddTo(command);
         command.SetAction(async (parseResult, _) =>
             await CliApp.ExportAsync(
                 parseResult.GetValue(inputArg)!,
                 parseResult.GetValue(outputArg)!,
                 parseResult.GetValue(formatOption),
                 stderr,
-                parseResult.GetValue(verboseOption)));
+                parseResult.GetValue(verboseOption),
+                engine.Read(parseResult)));
         return command;
     }
 
@@ -172,18 +178,21 @@ public static class CommandFactory
             Description = "SQL to run",
         };
 
+        var engine = new EngineArguments();
         var command = new Command("query", "Run SQL and print TSV")
         {
             fileArg,
             sqlArg,
         };
+        engine.AddTo(command);
         command.SetAction(async (parseResult, _) =>
             await CliApp.QueryAsync(
                 parseResult.GetValue(fileArg)!,
                 parseResult.GetValue(sqlArg)!,
                 stdout,
                 stderr,
-                parseResult.GetValue(verboseOption)));
+                parseResult.GetValue(verboseOption),
+                engine.Read(parseResult)));
         return command;
     }
 
@@ -194,16 +203,44 @@ public static class CommandFactory
             Description = "File to inspect",
         };
 
+        var engine = new EngineArguments();
         var command = new Command("info", "Print file format, rows, columns, and metadata")
         {
             fileArg,
         };
+        engine.AddTo(command);
         command.SetAction(async (parseResult, _) =>
             await CliApp.InfoAsync(
                 parseResult.GetValue(fileArg)!,
                 stdout,
                 stderr,
-                parseResult.GetValue(verboseOption)));
+                parseResult.GetValue(verboseOption),
+                engine.Read(parseResult)));
         return command;
+    }
+
+    private sealed class EngineArguments
+    {
+        private readonly Option<string?> _memory = new("--memory-limit") { Description = "DuckDB memory limit, such as 1GB" };
+        private readonly Option<int?> _threads = new("--threads") { Description = "DuckDB worker threads" };
+        private readonly Option<string?> _temp = new("--temp-dir") { Description = "Directory for temporary file stores and DuckDB spill" };
+
+        private readonly Option<StoreMode> _store = new("--store") { Description = "Store mode: auto, memory, or file" };
+
+        internal void AddTo(Command command)
+        {
+            command.Options.Add(_memory);
+            command.Options.Add(_threads);
+            command.Options.Add(_temp);
+            command.Options.Add(_store);
+        }
+
+        internal EngineOptions Read(ParseResult result) => new()
+        {
+            MemoryLimit = result.GetValue(_memory),
+            Threads = result.GetValue(_threads),
+            TempDirectory = result.GetValue(_temp),
+            Store = result.GetValue(_store),
+        };
     }
 }

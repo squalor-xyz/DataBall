@@ -16,7 +16,6 @@ namespace squalor.DataBall
     /// </summary>
     internal sealed partial class DuckDbStore
     {
-        private const string WideTemp = "_wide";
         private const string CastTemp = "_cast";
         private const string RowsTemp = "_rows";
         private const string UnsplitTemp = "_unsplit";
@@ -100,17 +99,14 @@ namespace squalor.DataBall
             {
                 InTransaction(() =>
                 {
-                    Execute($"CREATE OR REPLACE TEMP TABLE {QuoteIdent(WideTemp)} AS SELECT * FROM \"data\"");
                     foreach (var table in layout.PhysicalTables)
                         CreateEmptyLayoutTable(layout, table, types);
-                    Execute("DROP TABLE \"data\"");
-                    InsertStagingRows(WideTemp, layout, incoming);
+                    InsertStagingRows("data", layout, incoming, consumeSource: true);
                     CreateDataView(layout);
                 });
             }
             finally
             {
-                DropTemp(WideTemp);
                 DropTemp(CastTemp);
             }
 
@@ -318,9 +314,9 @@ namespace squalor.DataBall
             var layout = Layout ?? throw new DataBallException("No table layout is bound");
             try
             {
-                Execute($"CREATE OR REPLACE TEMP TABLE {QuoteIdent(UnsplitTemp)} AS {layout.BuildOrderedViewSelect()}");
+                Execute($"CREATE TABLE {QuoteIdent(UnsplitTemp)} AS {layout.BuildOrderedViewSelect()}");
                 DropDataRelation();
-                Execute($"CREATE TABLE \"data\" AS SELECT * FROM {QuoteIdent(UnsplitTemp)}");
+                Execute($"ALTER TABLE {QuoteIdent(UnsplitTemp)} RENAME TO \"data\"");
             }
             finally
             {
@@ -483,7 +479,7 @@ namespace squalor.DataBall
         /// staging become typed NULLs so their key hashes), numbers them after the spine's last
         /// row key, then inserts dimensions (key reuse, functional-key check), spine, and groups.
         /// </summary>
-        private void InsertStagingRows(string staging, TableLayout layout, IReadOnlyList<IncomingColumn> incoming)
+        private void InsertStagingRows(string staging, TableLayout layout, IReadOnlyList<IncomingColumn> incoming, bool consumeSource = false)
         {
             var qStaging = QuoteIdent(staging);
             var qCast = QuoteIdent(CastTemp);
@@ -521,6 +517,9 @@ namespace squalor.DataBall
             }
 
             Execute($"CREATE OR REPLACE TEMP TABLE {qCast} AS SELECT {string.Join(", ", castParts)} FROM {qStaging}");
+
+            if (consumeSource)
+                Execute($"DROP TABLE {qStaging}");
 
             foreach (var d in layout.Dimensions)
             {

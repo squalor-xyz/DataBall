@@ -28,14 +28,31 @@ namespace squalor.DataBall
         private readonly ILogger _logger;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
         private readonly string? _exclusivePath;
+        private readonly bool _temporary;
         private DbTransaction? _currentTx;
         private readonly List<string> _pendingDetach = new();
         private bool _disposed;
 
-        internal DuckDbStore(string? databasePath = null, ILogger? logger = null, bool readOnly = false)
+        internal DuckDbStore(string? databasePath = null, ILogger? logger = null, bool readOnly = false, EngineOptions? engine = null, bool temporary = false)
         {
             _logger = logger ?? NullLogger.Instance;
             IsReadOnly = readOnly;
+            engine?.Validate();
+            _temporary = temporary;
+            if (temporary)
+            {
+                try
+                {
+                    var directory = engine?.TempDirectory ?? Path.GetTempPath();
+                    Directory.CreateDirectory(directory);
+                    databasePath = Path.Combine(directory, $"databall-{Guid.NewGuid():N}.duckdb");
+                    databasePath = Path.GetFullPath(databasePath);
+                }
+                catch (Exception ex)
+                {
+                    throw new DataBallException("Failed to create temporary store", ex);
+                }
+            }
             _exclusivePath = ExclusiveFilePath(databasePath);
             if (_exclusivePath is not null)
             {
@@ -49,7 +66,7 @@ namespace squalor.DataBall
             DuckDBConnection? connection = null;
             try
             {
-                connection = new DuckDBConnection(BuildConnectionString(databasePath, readOnly));
+                connection = new DuckDBConnection(BuildConnectionString(databasePath, readOnly, engine));
                 connection.Open();
                 _connection = connection;
                 if (!readOnly)
@@ -63,8 +80,15 @@ namespace squalor.DataBall
             }
             catch (Exception ex)
             {
-                ReleaseExclusivePath();
-                connection?.Dispose();
+                try
+                {
+                    TrySaveCleanup(() => connection?.Dispose());
+                    TrySaveCleanup(DeleteTemporaryStore);
+                }
+                finally
+                {
+                    ReleaseExclusivePath();
+                }
                 if (ex is DataBallException)
                     throw;
                 throw new DataBallException("Failed to open database", ex);
@@ -72,6 +96,8 @@ namespace squalor.DataBall
         }
 
         internal bool IsReadOnly { get; }
+
+        internal string? StorePath => _exclusivePath;
 
         internal bool HasStoredConfig => TableExists("_databall");
 
@@ -207,7 +233,7 @@ namespace squalor.DataBall
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Save cleanup failed");
+                _logger.LogError(ex, "Store cleanup failed");
             }
         }
 
@@ -273,18 +299,34 @@ namespace squalor.DataBall
                 OpenFiles.Remove(_exclusivePath);
         }
 
-        private static string BuildConnectionString(string? databasePath, bool readOnly)
+        private void DeleteTemporaryStore()
         {
-            if (string.IsNullOrEmpty(databasePath)
-                || databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
-                return "Data Source=:memory:";
+            if (!_temporary || _exclusivePath is null)
+                return;
+            TrySaveCleanup(() => File.Delete(_exclusivePath));
+            TrySaveCleanup(() => File.Delete(_exclusivePath + ".wal"));
+            TrySaveCleanup(() =>
+            {
+                var spill = _exclusivePath + ".tmp";
+                if (Directory.Exists(spill))
+                    Directory.Delete(spill, recursive: true);
+            });
+        }
 
+        private static string BuildConnectionString(string? databasePath, bool readOnly, EngineOptions? engine)
+        {
             var builder = new DuckDBConnectionStringBuilder
             {
-                DataSource = Path.GetFullPath(databasePath)
+                DataSource = ExclusiveFilePath(databasePath) ?? ":memory:"
             };
             if (readOnly)
                 builder["ACCESS_MODE"] = "READ_ONLY";
+            if (engine?.MemoryLimit is not null)
+                builder["memory_limit"] = engine.MemoryLimit;
+            if (engine?.Threads is not null)
+                builder["threads"] = engine.Threads.Value.ToString(CultureInfo.InvariantCulture);
+            if (engine?.TempDirectory is not null)
+                builder["temp_directory"] = engine.TempDirectory;
             return builder.ConnectionString;
         }
 
@@ -1016,11 +1058,18 @@ namespace squalor.DataBall
             _disposed = true;
             try
             {
-                _connection.Dispose();
+                TrySaveCleanup(_connection.Dispose);
             }
             finally
             {
-                ReleaseExclusivePath();
+                try
+                {
+                    TrySaveCleanup(DeleteTemporaryStore);
+                }
+                finally
+                {
+                    ReleaseExclusivePath();
+                }
             }
         }
 
