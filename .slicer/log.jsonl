@@ -118,3 +118,11 @@
 {"when": "2026-10-10T13:32:51Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10: config lives in a reserved table \"_databal", "by": "Jon R"}
 {"when": "2026-10-10T13:49:27Z", "item": "db-06", "action": "promote", "from": "", "to": "", "note": ""}
 {"when": "2026-10-10T13:49:27Z", "item": "db-06", "action": "set", "from": "", "to": "", "note": "findings owner interview (2026-10-08)→owner interview (2026-10-08); db-05 decision record; owner decisions 2026-10-10"}
+{"when": "2026-10-10T14:36:01Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10 (review round 1): the _databall duckdb_vers", "by": "Jon R"}
+{"when": "2026-10-10T14:36:02Z", "item": "db-18", "action": "note", "from": "", "to": "", "note": "From db-06 review (2026-10-10): DuckDbStore.SaveTo (temp fil", "by": "Jon R"}
+{"when": "2026-10-10T14:36:02Z", "item": "db-11", "action": "note", "from": "", "to": "", "note": "From db-06 review (2026-10-10): native .ball import ATTACHes", "by": "Jon R"}
+{"when": "2026-10-10T14:36:02Z", "item": "db-16", "action": "note", "from": "", "to": "", "note": "From db-06 review (2026-10-10): there are now four ways into", "by": "Jon R"}
+{"when": "2026-10-10T14:36:02Z", "item": "db-07", "action": "note", "from": "", "to": "", "note": "From db-06 review (2026-10-10): connection settings are buil", "by": "Jon R"}
+{"when": "2026-10-10T14:56:56Z", "item": "db-18", "action": "note", "from": "", "to": "", "note": "From db-06 architect gate (2026-10-10): SaveTo holds the pro", "by": "Jon R"}
+{"when": "2026-10-10T15:10:50Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10 (gate round): _databall.written_at on the l", "by": "Jon R"}
+{"when": "2026-10-10T15:11:18Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10 (gate round): a read-only session saving to", "by": "Jon R"}

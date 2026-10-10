@@ -217,6 +217,39 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "947e6146-fa37-4329-9810-1abd18a154d1",
+          "kind": "",
+          "text": "**2026-10-10** — Owner 2026-10-10 (review round 1): the _databall duckdb_version and storage_version columns describe the last writer of the file. Every save stamps the copy's latest row with the saved file's real engine version and storage tag; no hard-coded fallback. Config history still grows only when the config changes. ImportAsync of a native .ball merges only Columns, Relationships, Tables and Metadata from the source config; the session keeps its own CSV and metadata-policy settings. Open still uses the full stored config.",
+          "created_at": "2026-10-10T14:36:01Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "260bc833-13be-4c95-8712-77639214d5f0",
+          "kind": "",
+          "text": "**2026-10-10** — Owner 2026-10-10 (gate round): _databall.written_at on the latest row means last save, stamped with the engine and storage versions on every save.",
+          "created_at": "2026-10-10T15:10:50Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "993b6dfa-3df5-4106-a068-3a856979fa4e",
+          "kind": "",
+          "text": "**2026-10-10** — Owner 2026-10-10 (gate round): a read-only session saving to its own live path throws DataBallException (save to another path or open with writable: true) instead of a silent no-op.",
+          "created_at": "2026-10-10T15:11:18Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -255,6 +288,17 @@
           "kind": "",
           "text": "**2026-10-09** — From db-02 review (2026-10-08): a dimension-growth append re-splits the whole session in one transaction, holding about three wide copies (_unsplit TEMP, base data, _wide TEMP) plus the new tables; TEMP tables stay in memory unless temp_directory is set. Measure this. Options: drop the two TEMP copies in UnsplitLayout/SplitIntoLayout, or grow declared-key dimensions in place (ALTER dim ADD COLUMN + key check; new dimension = CREATE + spine key column + one UPDATE).",
           "created_at": "2026-10-09T03:58:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "72dc8333-34c0-40f4-b9bb-bc5c8f747614",
+          "kind": "",
+          "text": "**2026-10-10** — From db-06 review (2026-10-10): connection settings are built in DuckDbStore.BuildConnectionString; read-only is the first engine setting, so route engine settings through DuckDBConnectionStringBuilder in one place. Moving an in-memory session to a file can reuse DuckDbStore.SaveTo (COPY FROM DATABASE); same-path checks must be case-insensitive on Windows and macOS.",
+          "created_at": "2026-10-10T14:36:02Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -416,6 +460,17 @@
           "kind": "",
           "text": "**2026-10-09** — From db-02 review (2026-10-08): layout physical types are fixed at first import and the re-split casts incoming data to existing types, which conflicts with db-11's planned numeric-widening schema merge. Decide how widening applies to layout sessions.",
           "created_at": "2026-10-09T03:59:16Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "d6a3376f-f97d-456e-87a2-8cb02bf1e8bc",
+          "kind": "",
+          "text": "**2026-10-10** — From db-06 review (2026-10-10): native .ball import ATTACHes the source READ_ONLY for one import transaction (deferred DETACH in the store transaction) and does not consult the in-process open-file gate. Many files in one session needs a session-lifetime attachment registry through that gate, and a policy for merging several stored _databall configs (db-06 import merges only columns, relationships, tables and metadata).",
+          "created_at": "2026-10-10T14:36:02Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -589,6 +644,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "63e71317-d5bc-444d-a17e-67c159979e98",
+          "kind": "",
+          "text": "**2026-10-10** — From db-06 review (2026-10-10): there are now four ways into a .ball: Open (native, read-only by default), new DataBall(databasePath: x.ball) (native, writable, writes _databall on open), ImportAsync (copy), and the public statics ImportManager.ImportFromBall / ExportManager.ExportToBall (thin wrappers). OpenAsync gained bool writable before the CancellationToken (source-breaking for OpenAsync(path, null, ct)). The stored config holds the full merged defaults, so later default changes never reach existing files. Fold these into the one-way-in/out API.",
+          "created_at": "2026-10-10T14:36:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -735,6 +801,28 @@
           "kind": "",
           "text": "**2026-10-10** — Owner 2026-10-10: split out of db-06. A writer publishes a separate, completed, closed snapshot generation that readers open read-only; direct cross-process reads of the active capture file are not promised (db-05 measured a conflicting lock). Covers snapshot creation, publication, cadence, and consistency under concurrent capture (docs/ball-v3-trial.md).",
           "created_at": "2026-10-10T13:24:40Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "d5e5afde-0b9f-4d53-832f-318767d2178e",
+          "kind": "",
+          "text": "**2026-10-10** — From db-06 review (2026-10-10): DuckDbStore.SaveTo (temp file, COPY FROM DATABASE, File.Move) is the publication primitive. Snapshot publication needs a unique temp name per save, a check against the in-process open-file gate on the target, and a plan for Windows, where a reader holding the target blocks the replace (POSIX readers keep the old inode). Saving to the session's own path is only a CHECKPOINT and does not compact.",
+          "created_at": "2026-10-10T14:36:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "8198671d-e343-42a8-a9b3-c76d6675d895",
+          "kind": "",
+          "text": "**2026-10-10** — From db-06 architect gate (2026-10-10): SaveTo holds the process-wide FileGate for the whole copy (ATTACH, COPY FROM DATABASE, DETACH, File.Move), so every file-backed open, dispose or save in the process waits on it. Frequent snapshot publication should reserve the target in OpenFiles under the gate and release the gate during I/O.",
+          "created_at": "2026-10-10T14:56:56Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
