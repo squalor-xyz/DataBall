@@ -1,0 +1,49 @@
+{
+  "id": "db-19",
+  "title": "DataBall must declare its relay profile for scripted landing",
+  "lead": [
+    "The agents-repo `relay-land.sh` (agents queue S59) reads each project's check commands and code paths from a `.relay-profile` file at the project root. Add DataBall's profile, and point `AGENTS.md`'s slice-relay section at it, so landing a DataBall slice is one scripted command instead of the hand sequence used for db-07 to db-09."
+  ],
+  "depends_note": null,
+  "findings_note": "owner 2026-10-10 (relay scripts); agents-repo S59",
+  "size": "S",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** the scripts themselves (agents S57 to S59); slicer's `verify --landed` (slicer queue s245); changing which checks DataBall runs.",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "The owner decided on 2026-10-10 that deterministic relay chores become scripts. DataBall's check commands live only in the prose of `AGENTS.md` (\"Build, test, format\"). The land script needs them in a form it can read. The rule \"rerun the check only when main gained code\" also needs DataBall's code paths.\n\nThe format is defined by agents-repo S59: `key=value` lines and `#` comments, with keys `check` (repeatable), `code_paths`, `main` and `worktrees`.\n\nThis item waits on agents S59. slicer cannot express a dependency across repositories, so do not start it before S59 lands there."
+    },
+    {
+      "heading": "Files",
+      "body": "- `.relay-profile` (new):\n  - `check=dotnet build DataBall.sln -c Release`\n  - `check=dotnet test DataBall.sln -c Release`\n  - `check=dotnet format DataBall.sln --verify-no-changes`\n  - `code_paths=src tests DataBall.sln Directory.Build.props global.json`\n  - `main=main`\n  - `worktrees=.worktrees`\n- `AGENTS.md`, \"Slice relay\": say that landing reads `.relay-profile`, and that the build, test and format commands are listed there as well as under \"Build, test, format\". Keep the two lists identical."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "No product tests. Validation is the agents-repo profile parser (S59) accepting the file."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Confirm S59 has landed in the agents repo and that its profile format matches this spec. Adjust if the format changed.\n2. Add `.relay-profile` and the `AGENTS.md` line.\n3. Validate the file with S59's parser. Do a dry run of the land script against a throwaway branch in a scratch clone."
+    },
+    {
+      "heading": "Check",
+      "body": "- The S59 profile parser accepts `.relay-profile` with no errors.\n- Every `check=` line in `.relay-profile` matches the commands in `AGENTS.md`.\n- `slicer check`."
+    },
+    {
+      "heading": "Git",
+      "body": "One DataBall commit on a feature branch, merged after the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `AGENTS.md`'s \"Build, test, format\" and \"Slice relay\" sections.\n- The landing rule from 2026-10-10: rerun the full check after a merge only when main gained code.\n- CI (`.github/workflows/ci.yml`) runs restore, build and test but not format. The profile is for local landing only and does not change CI."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- CI and the release workflow.\n- The commands in `AGENTS.md`. They stay the source a person reads, and the profile mirrors them."
+    }
+  ],
+  "notes": []
+}

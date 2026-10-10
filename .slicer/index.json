@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 19,
+  "next_id": 20,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -1164,6 +1164,47 @@
         "importance": 2,
         "urgency": 2,
         "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-19",
+      "title": "DataBall must declare its relay profile for scripted landing",
+      "short_title": "DataBall must declare its relay profile for scripted landing",
+      "status": "parked",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "ffdcef9c-a81d-4e16-b898-1474f9550aee",
+          "kind": "",
+          "text": "**2026-10-10** — Parked 2026-10-10 (owner): waits on agents-repo S59 (relay-land.sh); unpark when S59 lands.",
+          "created_at": "2026-10-10T23:13:11Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner 2026-10-10 (relay scripts); agents-repo S59",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 3,
+        "urgency": 3,
+        "effort": 1,
         "attempts": 0
       }
     }

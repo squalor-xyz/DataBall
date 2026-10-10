@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-18 items · — 10 · done 8
+19 items · — 10 · done 8 · parked 1
 
 ## v2.0
 
@@ -48,6 +48,12 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 16 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
-| 17 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | done |
-| 18 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | done |
+| 16 | [db-19](slices/db-19.md) | DataBall must declare its relay profile for scripted landing | S | 1 | databall | owner 2026-10-10 (relay scripts); agents-repo S59 | parked |
+
+---
+
+| # | Slice | Title | Size | Effort | Trees | Findings | Status |
+|---|---|---|---|---|---|---|---|
+| 17 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
+| 18 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | done |
+| 19 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | done |

@@ -197,3 +197,6 @@
 {"when": "2026-10-10T20:39:46Z", "item": "db-10", "action": "promote", "from": "", "to": "", "note": ""}
 {"when": "2026-10-10T20:39:46Z", "item": "db-10", "action": "note", "from": "", "to": "", "note": "Owner decisions 2026-10-10 (db-10 spec review): (1) built-in", "by": "Jon R"}
 {"when": "2026-10-10T20:39:46Z", "item": "db-13", "action": "note", "from": "", "to": "", "note": "From db-10 spec review (owner, 2026-10-10): JSON file types ", "by": "Jon R"}
+{"when": "2026-10-10T21:56:35Z", "item": "db-19", "action": "add", "from": "", "to": "open", "note": "DataBall must declare its relay profile for scripted landing"}
+{"when": "2026-10-10T23:13:11Z", "item": "db-19", "action": "set", "from": "open", "to": "parked", "note": "status open→parked"}
+{"when": "2026-10-10T23:13:11Z", "item": "db-19", "action": "note", "from": "", "to": "", "note": "Parked 2026-10-10 (owner): waits on agents-repo S59 (relay-l", "by": "Jon R"}
