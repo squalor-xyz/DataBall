@@ -1,0 +1,44 @@
+{
+  "id": "db-21",
+  "title": "DataBall must have micro-benchmarks for its hot read and open paths",
+  "lead": [
+    "In db-10 a host-load slowdown was briefly mistaken for a code regression, because the only timing signal was whole-suite duration. Benchmarks give a deterministic signal for paths hosts call often, and relay reviewers can compare them between the branch point and the branch.",
+    "**Owner gate:** BenchmarkDotNet (MIT) would be a new test-only dependency in a new non-packed project. It needs owner approval first."
+  ],
+  "depends_note": null,
+  "findings_note": "DataBall db-10 relay, owner 2026-10-10",
+  "size": "M",
+  "flags": [
+    "OWNER"
+  ],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** running benchmarks in CI; performance budgets that fail the build.",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": ""
+    },
+    {
+      "heading": "Files",
+      "body": "- `tests/DataBall.Benchmarks/` (new, not packed): benchmarks for these paths, on small fixed fixtures generated at setup:\n  - `Open` of a small CSV, a Parquet file and a hive directory;\n  - `Detect`;\n  - `ReadColumns` and `ReadRowsAsync` over 100k rows.\n- `README.md` or `AGENTS.md`: how to run them, and that results are only comparable on the same machine at similar load."
+    },
+    {
+      "heading": "Failing tests",
+      "body": ""
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Bring the dependency to the owner, and stop until approved.\n2. Add the project and benchmarks; record one baseline run's numbers and the machine load in a note."
+    },
+    {
+      "heading": "Check",
+      "body": "- `dotnet build DataBall.sln -c Release` (the benchmarks project builds).\n- The full Release test suite is unchanged.\n- `slicer check`"
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}

@@ -200,3 +200,7 @@
 {"when": "2026-10-10T21:56:35Z", "item": "db-19", "action": "add", "from": "", "to": "open", "note": "DataBall must declare its relay profile for scripted landing"}
 {"when": "2026-10-10T23:13:11Z", "item": "db-19", "action": "set", "from": "open", "to": "parked", "note": "status open→parked"}
 {"when": "2026-10-10T23:13:11Z", "item": "db-19", "action": "note", "from": "", "to": "", "note": "Parked 2026-10-10 (owner): waits on agents-repo S59 (relay-l", "by": "Jon R"}
+{"when": "2026-10-10T23:25:21Z", "item": "db-20", "action": "add", "from": "", "to": "open", "note": "Trial Stryker.NET mutation testing in place of hand-run mutations"}
+{"when": "2026-10-10T23:25:21Z", "item": "db-21", "action": "add", "from": "", "to": "open", "note": "DataBall must have micro-benchmarks for its hot read and open paths"}
+{"when": "2026-10-10T23:25:21Z", "item": "db-20", "action": "set", "from": "", "to": "", "note": "flags -→OWNER"}
+{"when": "2026-10-10T23:25:21Z", "item": "db-21", "action": "set", "from": "", "to": "", "note": "flags -→OWNER"}

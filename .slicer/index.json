@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 20,
+  "next_id": 22,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -1205,6 +1205,68 @@
         "importance": 3,
         "urgency": 3,
         "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-20",
+      "title": "Trial Stryker.NET mutation testing in place of hand-run mutations",
+      "short_title": "Trial Stryker.NET mutation testing in place of hand-run mutations",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [
+          "OWNER"
+        ],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "DataBall relays db-07 to db-10, owner 2026-10-10",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-21",
+      "title": "DataBall must have micro-benchmarks for its hot read and open paths",
+      "short_title": "DataBall must have micro-benchmarks for its hot read and open paths",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [
+          "OWNER"
+        ],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "DataBall db-10 relay, owner 2026-10-10",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 1,
+        "effort": 2,
         "attempts": 0
       }
     }
