@@ -4,6 +4,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using DuckDB.NET.Data;
 
 namespace squalor.DataBall
@@ -84,6 +87,60 @@ namespace squalor.DataBall
             {
                 throw new DataBallException("Filter failed", ex);
             }
+        }
+
+        /// <summary>Returns matching rows as typed column arrays with optional null masks.</summary>
+        public ColumnSet ReadColumns(SessionFilter filter)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(filter);
+            try
+            {
+                return _store.ReadColumns(BuildSelectSql(filter));
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException("Column read failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Streams caller-owned rows with projection and predicates pushed to DuckDB.
+        /// Session commands are rejected until enumeration finishes or the enumerator is disposed.
+        /// Cancellation is checked before execution and between rows.
+        /// </summary>
+        public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ReadRowsAsync(
+            SessionFilter filter, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(filter);
+            cancellationToken.ThrowIfCancellationRequested();
+            ParameterizedSql select;
+            try
+            {
+                select = BuildSelectSql(filter);
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException("Row read failed", ex);
+            }
+            using var rows = _store.StreamRows(select, cancellationToken).GetEnumerator();
+            while (true)
+            {
+                IReadOnlyDictionary<string, object?> row;
+                try
+                {
+                    if (!rows.MoveNext())
+                        break;
+                    row = rows.Current;
+                }
+                catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
+                {
+                    throw new DataBallException("Row read failed", ex);
+                }
+                yield return row;
+            }
+            await Task.CompletedTask.ConfigureAwait(false);
         }
 
         internal ParameterizedSql? FilteredSelectOrNull()
