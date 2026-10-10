@@ -9,10 +9,17 @@ namespace squalor.DataBall.Handlers
     /// </summary>
     public sealed class TouchstoneHandler : IFormatHandler
     {
-        private static readonly Regex SnP = new(@"\.s\d+p$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        private static readonly Regex SnP = new(@"\.s\d+p$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1));
 
         public bool CanHandle(string path, Stream sniff)
             => SnP.IsMatch(path);
+
+        /// <summary>Scores the bounded probe by the supported extension.</summary>
+        public DetectionScore Score(FileProbe probe)
+        {
+            var matched = SnP.IsMatch(probe.FileName);
+            return new DetectionScore(matched ? 1 : 0, new[] { matched ? "extension matched" : "extension missed" });
+        }
 
         public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,

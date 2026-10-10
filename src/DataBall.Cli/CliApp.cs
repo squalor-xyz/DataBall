@@ -154,7 +154,7 @@ internal static class CliApp
             throw new DataBallException("Output path is the input path. Pass -o explicitly.");
     }
 
-    private static async Task<int> RunAsync(TextWriter stderr, bool verbose, Func<Task<int>> action)
+    internal static async Task<int> RunAsync(TextWriter stderr, bool verbose, Func<Task<int>> action)
     {
         try
         {

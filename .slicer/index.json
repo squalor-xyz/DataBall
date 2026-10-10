@@ -505,7 +505,7 @@
       "id": "db-10",
       "title": "DataBall must score format detection and explain it",
       "short_title": "DataBall must score format detection and explain it",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-04"
@@ -538,6 +538,39 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decisions 2026-10-10 (db-10 spec review): (1) built-in paths (native .ball, Parquet view, generic CSV/archive import) are a fallback, not scored candidates: a scored candidate always wins; detect --explain reports the built-in as the Generic outcome with a reason (consistent with db-09 handler precedence). (2) Keep both type folders (~/.databall/types and ./databall/types); restricting folder-loaded types once types can carry SQL is a db-13 item. Spec review also moved detection before session construction, scored CustomCsvHandler at 0.6, and switched parquetColumns to DESCRIBE (parquet_schema lists the root and nested children).",
           "created_at": "2026-10-10T20:39:46Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "4bb77129-ae23-470f-9dfa-d8c7f5168d90",
+          "kind": "",
+          "text": "**2026-10-10** — Spec amended 2026-10-10 (orchestrator, after the implementer stopped on a spec conflict): the 64 KiB read limit applies to FileProbe and every new scorer (JSON types, lab handlers' new Score), not to a legacy handler's CanHandle. The default Score keeps giving CanHandle the full file stream at position 0, exactly as FindHandler does today, so third-party handlers behave unchanged. Must not change's 'no file is read past 64 KiB' means DataBall's own detection reads.",
+          "created_at": "2026-10-10T20:40:57Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "0dc1cf00-9901-41fb-9a3e-1a277e9110d7",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (after the implementer stopped on undefined JSON syntax): lineMatches is exactly one of {line, regex} or {firstLines, regex}; columnCount is {min, max} (inclusive, either optional); headerContainsAll takes literal names only (aliases come with db-12 sources). The full syntax table for all eight conditions is now in the Files section.",
+          "created_at": "2026-10-10T20:42:58Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "f80d02ee-052c-44d3-b494-309e3c6b8f3e",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (db-10 review round 1): (1) LabHandlers.RegisterDefaults is idempotent: it skips a handler type already registered (duplicates registered by hand still tie as ambiguous). (2) Config precedence in Open: defaults, then the winning type's overlay, then the host's schemaPath, so an explicit host schema overrides a detected type. This replaces spec step 3's order.",
+          "created_at": "2026-10-10T23:13:11Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -665,6 +698,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "a5296527-a43a-4c0b-97cc-fb71005f8335",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 relay (2026-10-10): Detect per expanded file builds a FileProbe (db-10 makes ParquetColumns lazy, so only parquetColumns conditions pay the DuckDB DESCRIBE); a hive Open walks the tree in OpenAsync, Detect and ResolveStore — walk once when expanding inputs. Route each file from DetectionReport.BuiltInPath (an enum after db-10).",
+          "created_at": "2026-10-10T23:13:11Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -703,6 +747,17 @@
           "kind": "",
           "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): strict casts apply only to columns with a declared type; undeclared columns keep DuckDB inference.",
           "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "5116debf-7201-452b-83ea-b43d1d1ee3a9",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 relay (2026-10-10): (1) a delegating JSON type that wins on a non-.csv text feed (.txt/.tsv/.dat) cannot open, because the built-in route still comes from DetectFormat's extension table; when CSV settings live in a type's config, let the winning type choose the CSV reader regardless of extension. (2) FileProbe.HeaderFields is line 0 with the sniffed delimiter and fileNameRegex named groups are not retained;  and preambles must expose captures and a post-preamble header to conditions. (3) Precedence is defaults < type overlay < host schemaPath (owner, 2026-10-10).",
+          "created_at": "2026-10-10T23:13:11Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -757,6 +812,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-10 spec review (owner, 2026-10-10): JSON file types auto-load from ~/.databall/types and ./databall/types (working directory). Once a type's config can carry transforms (SQL expressions), a type loaded from a folder must not carry transforms or combine unless the host registers it explicitly (RegisterFileType or CLI --types); opening a file in an untrusted working directory must not run its SQL.",
           "created_at": "2026-10-10T20:39:46Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "c09885ee-5f63-4a1e-9a24-a8f2d74d5209",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 relay (2026-10-10): to restrict folder-loaded types, record an origin kind (HomeFolder/LocalFolder/Registered) set in LoadFolders and RegisterFileType (a path alone can't tell them apart). A type file with the same id and a different version coexists with the old one, so an upgraded type left next to the old file is ambiguous. Decide whether one invalid file in ~/.databall/types should fail every Open in the process (LoadFolders throws and retries per call). db-10 makes unknown top-level keys in a type file invalid.",
+          "created_at": "2026-10-10T23:13:12Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -954,6 +1020,28 @@
           "kind": "",
           "text": "**2026-10-10** — From db-09 gate (2026-10-10): (1) the cached IsViewBacked flag goes stale after raw DDL on \"data\" through Query (every later write then fails); fold it into the Query write guard, or re-check DataIsView() in MaterializeView. (2) Under explicit requireConstant a wide Parquet append with a differing value demotes the field while the same CSV append throws (ImportParquetWithMetadata skips reconciled fields). (3) .ball files saved before db-09 store metadataPolicy requireConstant in their merged config and keep it; part of the stored-config decision.",
           "created_at": "2026-10-10T20:17:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "186cf1b7-31ca-4bfa-8a2f-19c59b08446e",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 relay (2026-10-10): public surface db-10 adds, to fold: IFormatHandler defaults Name/Priority/MinScore/Score/Overlay; FileProbe's public constructor does IO plus a DuckDB query (consider a factory); DetectionReport.Winner exposes the internal JsonFileType (Parse throws NotSupportedException); Overlay returns a mutable Config shared across opens; FileTypeInfo lives in namespace squalor.DataBall.FileTypes, which shares its name with the DataBall.FileTypes property; JSON type Name is the id without version. The CLI's import/query/export use ImportAsync, not Open, so detect --types predicts a route databall import does not take.",
+          "created_at": "2026-10-10T23:13:12Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "8b578a10-7774-40d4-a0a6-5669bfd23d2b",
+          "kind": "",
+          "text": "**2026-10-10** — From db-10 gate (2026-10-10): DataBall.csproj grants InternalsVisibleTo to the shipped DataBall.Handlers package for LabHandlers.RegisterDefaults' idempotence (internal RegisterHandlerIfMissing, atomic under HandlerGate). Fold it into the registry API (e.g. a public RegisterHandler overload or option that skips an already-registered type) or pin Handlers to an exact DataBall version, so the two packages cannot skew at runtime (MissingMethodException if a newer DataBall renames the internal method).",
+          "created_at": "2026-10-10T23:30:48Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",

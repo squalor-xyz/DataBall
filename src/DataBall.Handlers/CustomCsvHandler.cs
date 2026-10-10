@@ -29,6 +29,16 @@ namespace squalor.DataBall.Handlers
             return false;
         }
 
+        /// <summary>Scores known unit headers using only the bounded probe.</summary>
+        public DetectionScore Score(FileProbe probe)
+        {
+            var config = Config.CreateDefaults();
+            var matched = probe.Extension.Equals(".csv", StringComparison.OrdinalIgnoreCase)
+                && probe.HeaderFields.Any(raw => HeaderParser.Parse(raw.Trim(), config.Csv.HeaderPatterns,
+                    unit => IsKnownUnit(config, unit)).Item2 is not null);
+            return new DetectionScore(matched ? 0.6 : 0, new[] { matched ? "unit header matched" : "unit header missed" });
+        }
+
         public bool DelegatesToGenericImport => true;
 
         public IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
