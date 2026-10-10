@@ -92,3 +92,27 @@
 {"when": "2026-10-10T12:47:20Z", "item": "db-03", "action": "set", "from": "", "to": "", "note": "pass_key -→v1.4"}
 {"when": "2026-10-10T12:47:20Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "pass_key -→v1.4"}
 {"when": "2026-10-10T13:15:40Z", "item": "db-05", "action": "set", "from": "", "to": "", "note": "pass_key -→v1.4"}
+{"when": "2026-10-10T13:23:55Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "title DataBall v1.4.0 must be tagged and released→Tag and release DataBall v2.0.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-06", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-08", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-10", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-05", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-07", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-09", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-11", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-16", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-12", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-13", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-14", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-15", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-03", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:23:59Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "pass_key v1.4→v2.0"}
+{"when": "2026-10-10T13:24:02Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "short_title Tag and release DataBall v1.4.0→Tag and release DataBall v2.0.0"}
+{"when": "2026-10-10T13:24:16Z", "item": "goals", "action": "prose", "from": "", "to": "", "note": "edit"}
+{"when": "2026-10-10T13:24:20Z", "item": "db-17", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10: the release is v2.0.0, not v1.4.0 (ZIP .ba", "by": "Jon R"}
+{"when": "2026-10-10T13:24:34Z", "item": "db-18", "action": "add", "from": "", "to": "open", "note": "DataBall must publish closed .ball snapshots for live readers"}
+{"when": "2026-10-10T13:24:40Z", "item": "db-18", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10: split out of db-06. A writer publishes a s", "by": "Jon R"}
+{"when": "2026-10-10T13:24:40Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner decisions 2026-10-10: (1) snapshot publication for liv", "by": "Jon R"}
+{"when": "2026-10-10T13:27:00Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner decisions 2026-10-10 (spec): SaveAsync parks the whole", "by": "Jon R"}
+{"when": "2026-10-10T13:32:51Z", "item": "db-18", "action": "set", "from": "", "to": "", "note": "effort -→2"}
+{"when": "2026-10-10T13:32:51Z", "item": "db-06", "action": "note", "from": "", "to": "", "note": "Owner 2026-10-10: config lives in a reserved table \"_databal", "by": "Jon R"}

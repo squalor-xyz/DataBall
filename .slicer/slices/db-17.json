@@ -1,6 +1,6 @@
 {
   "id": "db-17",
-  "title": "DataBall v1.4.0 must be tagged and released",
+  "title": "Tag and release DataBall v2.0.0",
   "lead": [
     "**Owner gate:** tagging publishes a GitHub Release. Release slice for the v1.4.0 plan in suite `docs/databall-v1.4-alignment.md`."
   ],
