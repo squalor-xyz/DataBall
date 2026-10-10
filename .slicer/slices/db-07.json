@@ -2,7 +2,7 @@
   "id": "db-07",
   "title": "DataBall must choose its store by size and take engine settings",
   "lead": [
-    "Non-`.ball` opens use in-memory DuckDB below a threshold and a file-backed store above it. `memory_limit`, `threads`, and `temp_directory` come from config. Larger-than-RAM data is a goal; the threshold and temp location are open owner questions."
+    "A non-`.ball` `Open` uses in-memory DuckDB when its input is below a threshold (default 25% of available memory) and a temporary file-backed store above it. A new `EngineOptions` argument carries `memory_limit`, `threads`, `temp_directory`, the store mode and the threshold; it is not part of `Config`, so it is never saved into a `.ball`. The dimension-growth re-split's extra TEMP copies are measured and cut."
   ],
   "depends_note": null,
   "findings_note": "owner interview (2026-10-08)",
@@ -10,31 +10,31 @@
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:**",
+  "boundary": "**Not in this slice:** opening many files (db-11 sums their sizes using this rule); Parquet views (db-09); columnar or streaming reads (db-08); in-place dimension growth (db-11 takes it if this slice's measurement shows the re-split still dominates); the db-03 perf re-run; snapshot publication (db-18).",
   "sections": [
     {
       "heading": "Why",
-      "body": ""
+      "body": "Goals: data larger than RAM must work, and the store is in-memory or file-backed by size (suite `docs/databall-v1.4-alignment.md`, \"Store for non-`.ball` opens: auto by size\").\n\nOwner decisions 2026-10-10 (spec interview):\n\n- Threshold: total input bytes on disk compared with `EngineOptions.InMemoryMaxBytes`; when unset, the default is 25% of `GC.GetGCMemoryInfo().TotalAvailableMemoryBytes` (BCL). The caller can force `StoreMode.Memory` or `StoreMode.File`.\n- Engine settings live in `EngineOptions`, an argument to `Open` and the constructor, not in `Config`. `Config` is persisted in `\"_databall\"`, and one machine's memory and thread settings must not travel with a file.\n- The temporary store is a DuckDB file under `TempDirectory` (default `Path.GetTempPath()`), deleted on dispose.\n\nFrom earlier reviews (notes on this item): connection settings are built in one place, `DuckDbStore.BuildConnectionString` (`src/DataBall/DuckDbStore.cs:276`), where read-only is already the first engine setting. A dimension-growth append holds about three wide copies (`_unsplit` TEMP, base data, `_wide` TEMP) plus the new tables, and TEMP tables stay in memory unless `temp_directory` is set. Moving an in-memory session to a file can reuse `DuckDbStore.SaveTo`. Same-path checks are already case-insensitive on Windows and macOS (`DuckDbStore.cs:23-24`)."
     },
     {
       "heading": "Files",
-      "body": ""
+      "body": "- `src/DataBall/EngineOptions.cs` (new): `StoreMode Store` (`Auto` default, `Memory`, `File`), `long? InMemoryMaxBytes`, `string? MemoryLimit` (DuckDB syntax such as `\"8GB\"`), `int? Threads`, `string? TempDirectory`. Null means DuckDB's default.\n- `src/DataBall/DuckDbStore.cs`: `BuildConnectionString` (`:276`) takes `EngineOptions`; every engine setting goes through `DuckDBConnectionStringBuilder` there. First check whether DuckDB.NET 1.5.5 passes `memory_limit`, `threads` and `temp_directory` through as DuckDB config keys; if it does not, `SET` them right after `Open` in the same method. Temporary store: create `databall-<guid>.duckdb` under the temp directory, register it in `OpenFiles`, and delete it and its `.wal` on `Dispose` and on constructor failure.\n- `src/DataBall/DataBall.Open.cs`: `Open`/`OpenAsync` gain `EngineOptions? engine = null` (before the `CancellationToken`). The size decision runs before the session is built. A native `.ball` ignores `Store` and `InMemoryMaxBytes` but applies the other settings.\n- `src/DataBall/DataBall.cs`: the public constructor gains `EngineOptions? engine = null`; an internal `StorePath` (null for in-memory) for tests.\n- `src/DataBall/DuckDbStore.Layout.cs`: `UnsplitLayout` (`:315`) and `SplitIntoLayout` (`:77`): drop each TEMP copy as soon as it has been consumed, or build the target table directly, where the measurement shows a copy can go.\n- `src/DataBall.Cli/CommandFactory.cs`: `--memory-limit`, `--threads`, `--temp-dir` on `import`, `export`, `query` and `info`.\n- `README.md` (\"Engine (DuckDB)\", \"Library usage\") and `docs/how-it-works.md` (store section).\n- Tests: new `tests/DataBall.Tests/EngineOptionsTests.cs`; CLI options in `tests/DataBall.Cli.Tests`.\n- No new dependencies."
     },
     {
       "heading": "Failing tests",
-      "body": ""
+      "body": "In `EngineOptionsTests` unless noted; each asserts:\n\n1. `Open_SmallCsv_DefaultIsInMemory`: `StorePath` is null.\n2. `Open_AboveThreshold_UsesTempFileStore`: with `InMemoryMaxBytes = 1`, `StorePath` is under `TempDirectory`; after `Dispose` neither the file nor its `.wal` exists.\n3. `Open_StoreModeOverridesThreshold`: `Memory` with a tiny threshold stays in memory; `File` with a large threshold uses a file.\n4. `EngineOptions_AppliedToConnection`: `current_setting('memory_limit')`, `current_setting('threads')` and `current_setting('temp_directory')` match the options.\n5. `EngineOptions_NotPersisted`: after `SaveAsync`, the latest `\"_databall\".config` has no engine keys; reopening with other options applies the new ones.\n6. `NativeBall_Open_AppliesEngineOptions`.\n7. `TempStore_ConstructorFailure_LeavesNoFile`: a failing overlay config leaves the temp directory empty.\n8. `TempStore_SaveAsync_RoundTrips`: save from a temp-file session, reopen, rows and metadata equal.\n9. CLI: `Import_MemoryLimitOption_Applied`.\n\nExisting dimension-growth tests in `MultiTableTests` must stay green after the TEMP-copy change."
     },
     {
       "heading": "Implement",
-      "body": ""
+      "body": "1. `slicer start db-07 --render --strict`. Write tests 1–9; run them and record each red line.\n2. Measure before changing the layout code: a 50k-row layout session with one dimension-growth append, peak `memory_usage_bytes` summed from `duckdb_memory()` sampled during the re-split, in memory and with a temp file store. Record the numbers in a note on this item.\n3. `EngineOptions` and `BuildConnectionString`; the temp-file store lifecycle.\n4. The size decision in `OpenAsync` and the constructor overload.\n5. Cut the TEMP copies in `UnsplitLayout`/`SplitIntoLayout`; re-measure and add the after numbers to the note. If the re-split still holds more than two wide copies, say so in the note for db-11.\n6. CLI options; README and `docs/how-it-works.md`.\n7. Mutation-check every new test; full Release test run; `dotnet format --verify-no-changes`."
     },
     {
       "heading": "Check",
-      "body": ""
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- CLI smoke: `databall import <csv> -o s.ball --memory-limit 1GB --threads 2`, then `databall info s.ball`.\n- The before and after measurements are in a note on db-07.\n- `slicer check`"
     },
     {
       "heading": "Git",
-      "body": ""
+      "body": "One DataBall commit on branch `db-07` (worktree `.worktrees/db-07`), merged to `main` after the gate and the owner's go-ahead."
     }
   ],
   "notes": []

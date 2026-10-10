@@ -2,7 +2,7 @@
   "id": "db-12",
   "title": "DataBall CSV must handle preambles, trailers and strict casts",
   "lead": [
-    "Preamble / trailer lines, `$preamble` / `$capture` / alias column sources in config, and strict casts whose errors name file, row, column, and value (from the Conflux spec)."
+    "CSV import gains preamble and trailer handling, preamble key/value pairs, and column sources: header alias lists, `$preamble.<key>`, and `$capture.<name>` from a file-name regex. Columns whose type is declared get strict casts; a cast error names the file, row, column and value. The settings live in `Config` and so also in a JSON file type's `config` (db-10)."
   ],
   "depends_note": null,
   "findings_note": "owner interview (2026-10-08)",
@@ -10,31 +10,31 @@
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:**",
+  "boundary": "**Not in this slice:** encodings other than UTF-8, UTF-16 and Latin-1; multi-character delimiters; `nullTokens`, decimal and thousands separators, `commentPrefix`, `trim`; `extraColumns` and nullable rules; transforms (db-13); the bad-file policy (db-11 uses this slice's error fields).",
   "sections": [
     {
       "heading": "Why",
-      "body": ""
+      "body": "`docs/conflux-spec.md` (\"Custom CSV handling\"): preamble lines as `lines: N` or `untilRegex` with an optional `keyValue` regex; trailers as `lines: N` or `matchRegex` with an optional `rowCountField`; `source` as a header name, an alias list, `$preamble.<key>` or `$capture.<name>`; strict casts whose error names file, row, column, raw value and expected type, with the row number equal to the line number unless a quoted field spans lines.\n\nOwner decision 2026-10-10 (spec interview): strict casts apply only to columns with a declared type (`Columns`, unit lookup, `Parameters`, or a file type's config). Undeclared columns keep DuckDB inference as today.\n\nToday CSV goes through `read_csv_auto(path, header=true)` into `_staging` (`src/DataBall/DuckDbStore.cs:841-848`, `:1027-1054`), then `CoerceColumnsOf` casts declared types without naming the failing row (`:872-903`), all from `ImportCsvWithSchema` (`src/DataBall/DataBall.cs:673`)."
     },
     {
       "heading": "Files",
-      "body": ""
+      "body": "- `src/DataBall/CsvConfig.cs`: `Delimiter` (null = sniff); `Preamble` (`Lines`, `UntilRegex`, `KeyValue` with `key` and `value` groups); `Trailer` (`Lines`, `MatchRegex`, `RowCountField`, a preamble or trailer key holding the expected row count); `FileNameRegex` (named groups become captures); `DateFormats` and `TimestampFormats` (strptime lists tried in order).\n- `src/DataBall/Config.cs`: `Sources` (canonical name → list of header aliases, `$preamble.<key>` or `$capture.<name>`; overlay keys win); merge and clone for the new `CsvConfig` fields.\n- `src/DataBall/Csv/CsvPrelude.cs` (new): a BCL line reader that finds the preamble end, parses key/value pairs, scans the last 64 KiB for trailer lines, and evaluates `FileNameRegex`. Regexes run with a 1-second timeout.\n- `src/DataBall/DuckDbStore.cs`: CSV reads use `read_csv` with `header=true`, `skip`, `delim` when set, strict mode on (so a ragged row is an error; confirm the parameter name in DuckDB 1.5.5), and `types` overriding only the declared columns to `VARCHAR`. Declared columns are cast with `CAST` (dates and timestamps through `strptime` with the configured formats). When a cast fails, a diagnostic query with `TRY_CAST` over `row_number()` (insertion order preserved) finds the first failing row; the line number is preamble lines + header + row. With a trailer, a streaming copy to a temp file (under the engine temp directory when db-07's is set, else `Path.GetTempPath()`) drops the preamble and trailer and checks `RowCountField`; the fast path then reads the temp file.\n- `src/DataBall/DataBallCastException.cs` (new): `DataBallException` with `File`, `Row`, `Column`, `Value`, `ExpectedType`; message `Cast failed: file=… row=… column=… value=\"…\" expected=…`.\n- `src/DataBall/DataBall.cs`: `ImportCsvWithSchema` applies sources after staging: rename the first present alias to the canonical name (none present → `DataBallException` naming the column and aliases); `$preamble`/`$capture` sources become constant columns, which the existing metadata rules then handle.\n- `src/DataBall/FileTypes/`: the `preambleKey` detection condition (key, optional value regex).\n- `README.md` (\"Config\", new \"CSV dialects\" section) and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/CsvDialectTests.cs`; fixtures under `tests/DataBall.Tests/fixtures/csv-dialect/`.\n- No new dependencies."
     },
     {
       "heading": "Failing tests",
-      "body": ""
+      "body": "In `CsvDialectTests` unless noted; each asserts:\n\n1. `Preamble_Lines_Skipped`; `Preamble_UntilRegex`.\n2. `Preamble_KeyValue_SourcedColumn`: `$preamble.Report Date` lands as a DATE parsed with `DateFormats`.\n3. `Capture_FileNameRegex_SourcedColumn`.\n4. `AliasSources_FirstPresentWins`; `AliasSources_NonePresent_Throws`.\n5. `Trailer_Lines_Dropped`; `Trailer_MatchRegex_Dropped`; `Trailer_RowCountMismatch_Throws`.\n6. `StrictCast_BadValue_ErrorNamesFileRowColumnValue`: `DataBallCastException` fields equal the fixture's file, line number, column and raw value.\n7. `StrictCast_UndeclaredColumns_StillInferred`: an undeclared integer column is still BIGINT.\n8. `StrictCast_DateFormats_TriedInOrder`.\n9. `RaggedRow_Throws`.\n10. `JsonFileType_CsvConfigApplied`: a db-10 type whose `config.csv` sets a preamble.\n11. `Detect_PreambleKeyCondition` (`FileTypeTests`).\n12. `Config_Merge_CsvFieldsAndSources_OverlayWins` (`ConfigTests`).\n\nEvery existing CSV test stays green unchanged: with no new settings, the read is the same as `read_csv_auto`."
     },
     {
       "heading": "Implement",
-      "body": ""
+      "body": "1. `slicer start db-12 --render --strict`. Write tests 1–12; run them and record each red line.\n2. Switch `read_csv_auto` to `read_csv` with the same inference; confirm the existing suite is green before going on.\n3. Config fields, merge and clone; `CsvPrelude`.\n4. Preamble skip and key/values, captures, alias and constant sources.\n5. Strict casts with the diagnostic query and `DataBallCastException`; the trailer normalizer.\n6. The `preambleKey` condition; README and `docs/how-it-works.md`.\n7. Mutation-check every new test; full Release test run; `dotnet format --verify-no-changes`."
     },
     {
       "heading": "Check",
-      "body": ""
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- CLI smoke: `databall import <preamble fixture> -c <config> -o s.ball`; the same with a bad value prints the file, row, column and value and exits 1.\n- `slicer check`"
     },
     {
       "heading": "Git",
-      "body": ""
+      "body": "One DataBall commit on branch `db-12` (worktree `.worktrees/db-12`), merged to `main` after the gate and the owner's go-ahead."
     }
   ],
   "notes": []

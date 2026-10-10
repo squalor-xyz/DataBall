@@ -2,7 +2,7 @@
   "id": "db-10",
   "title": "DataBall must score format detection and explain it",
   "lead": [
-    "`IFormatHandler.CanHandle` is a boolean and the first match wins (`DataBall.Open.cs:88-105`). Extend handlers with a score and reasons, add declarative JSON file types that compile to handlers, report ambiguity and no-match, and add `databall detect --explain`."
+    "`IFormatHandler.CanHandle` is a boolean and the first match wins (`src/DataBall/DataBall.Open.cs:105-122`). Handlers gain `Score(FileProbe)` with reasons; by default it maps `CanHandle` to 1 or 0. Declarative JSON file types compile to handlers and are loaded from well-known folders and `RegisterFileType`. `Open` reports ambiguity and no-match instead of silently taking the first match, and `databall detect --explain` prints the scoring table."
   ],
   "depends_note": null,
   "findings_note": "owner interview (2026-10-08)",
@@ -10,31 +10,31 @@
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:**",
+  "boundary": "**Not in this slice:** opening many files and skipping bad ones (db-11); CSV preamble, trailer, `$preamble`/`$capture` sources and the `preambleKey` condition (db-12); transforms in file types (db-13); a C# detector separate from `IFormatHandler`; quarantine folders (not planned: watch mode is out).",
   "sections": [
     {
       "heading": "Why",
-      "body": ""
+      "body": "Suite `docs/databall-v1.4-alignment.md`: \"Extend `IFormatHandler` with score + reasons. Declarative JSON file types compile to handlers. Ambiguity and no-match are reported, not resolved by silent first match.\" Scoring rules follow `docs/conflux-spec.md` (\"Scoring and ambiguity\"): the score is matched weight over total weight; a type is a candidate at `minScore` (default 0.6); the highest candidate wins, then `priority`; a tie that survives priority is ambiguous.\n\nOwner decisions 2026-10-10 (spec interview):\n\n- Add `Score` and keep `CanHandle`: the default `Score` maps `CanHandle` to 1 or 0, so third-party handlers compile unchanged.\n- JSON file types load from well-known folders, as in the Conflux spec: `~/.databall/types/`, then `./databall/types/` under the working directory, then explicit `RegisterFileType(path)` calls. A later origin overrides an earlier one with the same `id` and `version`, and the origin of every type is reported.\n\nA native `.ball` (magic bytes, `DataBall.Open.cs:66-76`) is still recognized before any handler. Generic CSV / Parquet / archive need no handler and stay the fallback by extension (`DataBall.DetectFormat`, `src/DataBall/DataBall.cs:643`)."
     },
     {
       "heading": "Files",
-      "body": ""
+      "body": "- `src/DataBall/FileProbe.cs` (new): an immutable probe: path, file name, extension, length, last-write time; `Head` (at most the first 64 KiB); `HeadLines` (decoded with BOM detection, else UTF-8, else Latin-1); a sniffed delimiter (`,` `;` tab `|` by field-count consistency) and the header fields; `IsParquet` (`PAR1` at both ends; the 4-byte tail is the only read past 64 KiB) and its column names from DuckDB `parquet_schema()`. Detection never reads further.\n- `src/DataBall/DetectionScore.cs` (new): `double Score` (0..1) and `IReadOnlyList<string> Reasons`. `DetectionReport`: every handler's score, min score, priority and reasons, plus the outcome (`Match`, `Generic`, `Ambiguous`, `None`).\n- `src/DataBall/IFormatHandler.cs`: default members `string Name => GetType().Name`, `int Priority => 0`, `double MinScore => 0.6`, `DetectionScore Score(FileProbe probe)` (opens the file and calls `CanHandle`), and `Config? Overlay => null` (an overlay merged onto the session schema before import).\n- `src/DataBall/FileTypes/` (new): the JSON file-type model (`id`, `version`, `priority`, `detect { minScore, conditions[] }`, `config`, where `config` is an ordinary DataBall overlay), the conditions `fileName` (glob), `fileNameRegex`, `extension`, `headerContainsAll`, `headerExact`, `lineMatches`, `columnCount` and `parquetColumns`, each with `weight` (default 1) and `required`; a compiled handler with `DelegatesToGenericImport = true` and `Overlay = config`; the folder loader. Regexes run with a 1-second match timeout. An invalid type file throws `DataBallException` naming the file at load.\n- `src/DataBall/DataBall.Open.cs`: `public static DetectionReport Detect(string path)`; `Open` uses it. Ambiguous → `DataBallException` with the table; no candidate → generic import if `DetectFormat` knows the extension, else `DataBallException` with the table. `RegisterFileType(string path)`; `FileTypes` (id, version, origin). Folder scanning runs once per process, lazily, under `HandlerGate`; `ClearHandlers` also clears loaded types and resets the scan. An internal seam sets the folder roots so tests never read the real home directory.\n- `src/DataBall/DataBall.cs`: an internal constructor that takes a `Config` object, so `Open` can merge a handler's `Overlay`.\n- `src/DataBall.Handlers/*.cs`: `Score` for the STDF, Touchstone, production and custom-CSV handlers, with reasons naming what matched (extension, header units, record bytes).\n- `src/DataBall.Cli/CommandFactory.cs`: `databall detect <file> [--explain] [--types <dir>]`. It prints the outcome; `--explain` prints every handler's score, min score, priority and reasons; `--types` registers each JSON file in the directory. Exit 0 for a match or generic, 1 for ambiguous or none (current CLI convention, `src/DataBall.Cli/CliApp.cs:151`).\n- `README.md` (\"Supported formats\", new \"File types\" section, \"CLI\") and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/DetectionTests.cs` and `FileTypeTests.cs`; `HandlerTests`; CLI `detect` tests.\n- No new dependencies (globs and regexes via `System.IO.Enumeration.FileSystemName` and `System.Text.RegularExpressions`)."
     },
     {
       "heading": "Failing tests",
-      "body": ""
+      "body": "Each asserts:\n\n1. `Score_DefaultMapsCanHandle`: 1.0 with a reason when `CanHandle` is true, 0.0 otherwise.\n2. `Open_HighestScoreWins_NotFirstRegistered`.\n3. `Open_TieBrokenByPriority`.\n4. `Open_TieAfterPriority_ThrowsAmbiguous`: the message lists both handlers' scores and reasons.\n5. `Open_NoCandidate_KnownExtension_FallsBackToGeneric`.\n6. `Open_NoCandidate_UnknownExtension_ThrowsWithTable`.\n7. `NativeBall_IsRecognizedBeforeHandlers`: a handler that scores 1.0 on everything does not see a `.ball`.\n8. `FileProbe_ReadsAtMost64KiB`: on a 1 MiB file, `Head.Length` is 65536.\n9. `JsonType_Conditions` (theory, one row per condition kind): a match and a miss; `required` gates the score to 0; weights give matched over total.\n10. `JsonType_OverlayApplied`: the type's `config.columns` type override shows in the session's column types.\n11. `JsonType_FolderOrder_LaterOriginOverrides_OriginReported`: through the test seam roots.\n12. `JsonType_Invalid_ThrowsNamingFile`.\n13. `LabHandlers_ScoreWithReasons`: each lab handler scores its sample above 0.6 with a reason and a plain CSV at 0.\n14. CLI: `Detect_Explain_PrintsScoresAndReasons`; `Detect_Ambiguous_ExitCode1`."
     },
     {
       "heading": "Implement",
-      "body": ""
+      "body": "1. `slicer start db-10 --render --strict`. Write tests 1–14; run them and record each red line.\n2. `FileProbe`, `DetectionScore`, `DetectionReport`; the new default members on `IFormatHandler`.\n3. `Detect` and the scoring rules; switch `Open` to it.\n4. JSON file types: model, conditions, compiled handler, folder loader, `RegisterFileType`, `FileTypes`.\n5. Lab handler scores; CLI `detect`.\n6. README and `docs/how-it-works.md`.\n7. Mutation-check every new test; full Release test run; `dotnet format --verify-no-changes`."
     },
     {
       "heading": "Check",
-      "body": ""
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- CLI smoke: `databall detect <csv> --explain` and `databall detect <file> --types <dir> --explain` with one sample JSON type.\n- `slicer check`"
     },
     {
       "heading": "Git",
-      "body": ""
+      "body": "One DataBall commit on branch `db-10` (worktree `.worktrees/db-10`), merged to `main` after the gate and the owner's go-ahead."
     }
   ],
   "notes": []

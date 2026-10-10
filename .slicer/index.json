@@ -304,6 +304,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "bf66dec2-4582-4667-ac19-60f77ed5ae2d",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): store choice by total input bytes vs EngineOptions.InMemoryMaxBytes, default 25% of available memory; engine settings in a new EngineOptions argument, not Config (never saved into a .ball); temp store under TempDirectory (default OS temp), deleted on dispose.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -336,7 +347,19 @@
       "depends_on": [
         "db-04"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "f3f9689d-2d32-4c63-a2bc-450dc9d9dc44",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): ReadColumns returns T[] Values plus bool[]? Nulls per column (Nulls null when the column has none).",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -378,6 +401,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "40a72f9b-19fd-46c9-8ee5-c915835e9f71",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): a write to a view-backed session copies the view in on first write; SaveAsync embeds by default, link is opt-in.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -410,7 +444,19 @@
       "depends_on": [
         "db-04"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "ba0cabab-99b7-4cc7-a0f2-2a384a15f5ce",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): add Score(FileProbe) to IFormatHandler and keep CanHandle (default Score maps it to 1/0); JSON file types load from ~/.databall/types/, then ./databall/types/, then RegisterFileType; a later origin overrides the same id+version; origins are reported.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -476,6 +522,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "60cc3056-0ce0-46c0-b281-290bc244f93e",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (spec interview): BCL-only globbing (wildcards in the last segment, Recursive option); built-in \"source\" dimension (_source_file, _source_hash, _source_type, per-source meta columns), \"meta\" keeps only values constant across sources, wide sessions carry lineage columns directly; every file-opened session has lineage, even one file; widening in layout sessions ALTERs the owning physical column.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -508,7 +565,19 @@
       "depends_on": [
         "db-10"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "67a59cdc-edd5-4a71-840b-71f38f594ad5",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): strict casts apply only to columns with a declared type; undeclared columns keep DuckDB inference.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -539,7 +608,19 @@
       "depends_on": [
         "db-11"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "fdb7e6ab-1768-4576-bae0-1cf988bc672a",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): transforms live in Config (and a file type's config), run per source on staging at import before the merge, and travel in the .ball.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -568,12 +649,25 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [
-        "db-11"
+        "db-11",
+        "db-13"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "17719828-1e56-4d79-89a2-1d336e825870",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): both surfaces now, session methods (Join/Dedupe/Aggregate) and a config combine section that calls them; resized to L.",
+          "created_at": "2026-10-10T15:50:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
-        "size": "M",
+        "size": "L",
         "flags": [],
         "trees": [
           "databall"
@@ -588,7 +682,7 @@
         "reason": "",
         "importance": 2,
         "urgency": 1,
-        "effort": 2,
+        "effort": 3,
         "attempts": 0
       }
     },
@@ -601,7 +695,19 @@
       "depends_on": [
         "db-06"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "44fdb30b-d1be-451a-84fd-2224ed7f35c5",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): four bundled profiles plus exportProfiles in Config; staging at <out>/.databall-staging/<id>/; manifest at <out>/_manifest/<id>.json.",
+          "created_at": "2026-10-10T15:50:10Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -650,6 +756,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-06 review (2026-10-10): there are now four ways into a .ball: Open (native, read-only by default), new DataBall(databasePath: x.ball) (native, writable, writes _databall on open), ImportAsync (copy), and the public statics ImportManager.ImportFromBall / ExportManager.ExportToBall (thin wrappers). OpenAsync gained bool writable before the CancellationToken (source-breaking for OpenAsync(path, null, ct)). The stored config holds the full merged defaults, so later default changes never reach existing files. Fold these into the one-way-in/out API.",
           "created_at": "2026-10-10T14:36:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "2ebcab31-0a92-45af-832d-dd9778cb1146",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): remove the old entry points outright in v2.0.0 (no [Obsolete] shims). Still open: whether the stored _databall config keeps full merged defaults or only the overlay (step 1 of Implement).",
+          "created_at": "2026-10-10T15:50:10Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -737,7 +854,8 @@
         "db-13",
         "db-14",
         "db-15",
-        "db-16"
+        "db-16",
+        "db-18"
       ],
       "note_records": [
         {

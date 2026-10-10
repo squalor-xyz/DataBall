@@ -37,7 +37,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 7 | [db-11](slices/db-11.md) | DataBall must open many files into one session | L | 3 | databall | owner interview (2026-10-08) | — |
 | 8 | [db-12](slices/db-12.md) | DataBall CSV must handle preambles, trailers and strict casts | M | 2 | databall | owner interview (2026-10-08) | — |
 | 9 | [db-13](slices/db-13.md) | DataBall must apply declarative transforms from config | M | 2 | databall | owner interview (2026-10-08) | — |
-| 10 | [db-14](slices/db-14.md) | DataBall must join, dedupe and aggregate across sources | M | 2 | databall | owner interview (2026-10-08) | — |
+| 10 | [db-14](slices/db-14.md) | DataBall must join, dedupe and aggregate across sources | L | 3 | databall | owner interview (2026-10-08) | — |
 | 11 | [db-15](slices/db-15.md) | DataBall export must support profiles and content splits | M | 2 | databall | owner interview (2026-10-08) | — |
 | 12 | [db-16](slices/db-16.md) | DataBall API must have one clear way in and out | M | 2 | databall | owner interview (2026-10-08) | — |
 | 13 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
