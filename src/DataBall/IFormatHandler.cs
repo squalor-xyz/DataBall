@@ -7,7 +7,7 @@ namespace squalor.DataBall
 {
     /// <summary>
     /// Vendor or custom format parser registered with <see cref="DataBall.RegisterHandler"/>.
-    /// Core generic CSV / Parquet / archive / <c>.ball</c> import does not use this interface.
+    /// Core generic CSV / Parquet / archive import and native <c>.ball</c> open do not use this interface.
     /// Lab plugins (custom CSV, STDF, Touchstone, production) implement this and live in
     /// <c>DataBall.Handlers</c>, not <c>DuckDbStore</c>.
     /// </summary>

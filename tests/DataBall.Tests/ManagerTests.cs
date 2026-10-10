@@ -72,16 +72,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromBall_MissingParquet_LoadsMetadataOnly()
+        public void ImportFromBall_LoadsMetadataOnly()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "meta-only.ball");
-                var meta = Path.Combine(dir, "metadata.json");
-                File.WriteAllText(meta, """{"Source":"ATE"}""");
-                using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
-                    zip.CreateEntryFromFile(meta, "metadata.json");
+                using (var source = new DataBall(databasePath: path))
+                    source.SetMetadata("Source", "ATE");
 
                 using var db = new DataBall();
                 ImportManager.ImportFromBall(db, path, append: false);

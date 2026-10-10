@@ -33,7 +33,7 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
     }
 
     [Fact]
-    public async Task Trial_DuckDbFile_SizeVsBallAndParquet_LogsRatios()
+    public async Task Trial_DuckDbFile_SizeVsParquet_LogsRatios()
     {
         using var dir = new TrialDirectory();
         output.WriteLine(await ProbeSizes(dir.Path, CaptureRows()));
@@ -71,20 +71,17 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
     private static async Task<string> ProbeSizes(string dir, IReadOnlyList<Dictionary<string, object?>> rows)
     {
         var duck = Path.Combine(dir, "capture.duckdb");
-        var ball = Path.Combine(dir, "capture.ball");
         var parquet = Path.Combine(dir, "capture.parquet");
         using (var writer = new DataBall(databasePath: duck))
             writer.AddRows(rows);
         using (var wide = new DataBall())
         {
             wide.AddRows(rows);
-            await wide.SaveAsync(ball);
             await wide.ExportAsync(parquet, ExportType.Parquet);
         }
         var duckBytes = Bytes(duck);
-        var ballBytes = Bytes(ball);
         var parquetBytes = Bytes(parquet);
-        var sizes = FormattableString.Invariant($"Sizes: rows={rows.Count}, DuckDB={duckBytes} bytes, ZIP .ball={ballBytes} bytes, Parquet={parquetBytes} bytes; DuckDB/ball={(double)duckBytes / ballBytes:F6}, DuckDB/Parquet={(double)duckBytes / parquetBytes:F6}");
+        var sizes = FormattableString.Invariant($"Sizes: rows={rows.Count}, DuckDB={duckBytes} bytes, Parquet={parquetBytes} bytes; DuckDB/Parquet={(double)duckBytes / parquetBytes:F6}");
 
         // An initially absent configured dimension appears on append: db-02 re-splits all tables.
         var config = Path.Combine(dir, "layout.json");

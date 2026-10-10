@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -34,18 +35,49 @@ namespace squalor.DataBall
         /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
         /// <param name="databasePath">Optional DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
         public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null)
+            : this(configPath, logger, databasePath, readOnly: false, native: false)
+        {
+        }
+
+        private DataBall(string? configPath, ILogger? logger, string? databasePath, bool readOnly, bool native)
         {
             _logger = logger ?? NullLogger.Instance;
-            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger);
+            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly);
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
             try
             {
-                _config = string.IsNullOrEmpty(configPath)
-                    ? Config.CreateDefaults()
-                    : Config.LoadMerged(configPath);
-                ApplyConfig(_config);
-                InitializeLayout();
+                var stored = native || _store.HasStoredConfig;
+                _config = stored ? _store.ReadConfig() : Config.CreateDefaults();
+                Config? overlay = null;
+                if (!string.IsNullOrEmpty(configPath))
+                    overlay = Config.LoadConfig(configPath);
+                if (stored)
+                {
+                    ApplyConfig(_config, applyMetadata: false);
+                    InitializeLayout();
+                    if (overlay is not null)
+                    {
+                        var merged = Config.Merge(_config, overlay);
+                        if (overlay.Tables.Count > 0 && _store.Layout is null && _store.DataTableExists())
+                            throw new DataBallException("Overlay declares a different 'tables' layout");
+                        TableLayout.Validate(merged);
+                        _store.UpdateLayoutConfig(merged);
+                        _config = merged;
+                        ApplyConfig(_config, applyMetadata: false);
+                        foreach (var (key, value) in overlay.Metadata)
+                            _store.SetMetadata(key, DuckDbStore.Unwrap(value));
+                    }
+                }
+                else
+                {
+                    if (overlay is not null)
+                        _config = Config.Merge(_config, overlay);
+                    ApplyConfig(_config);
+                    InitializeLayout();
+                }
+                if (!readOnly)
+                    PersistConfig();
             }
             catch
             {
@@ -121,6 +153,7 @@ namespace squalor.DataBall
         /// <param name="value">The metadata value.</param>
         public void SetMetadata(string key, object? value)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             _store.SetMetadata(key, value);
         }
@@ -133,6 +166,7 @@ namespace squalor.DataBall
         /// <param name="values">The values for the column.</param>
         public void AddColumn<T>(string name, IEnumerable<T> values) where T : struct
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(T));
@@ -149,6 +183,7 @@ namespace squalor.DataBall
         /// <param name="values">The string values for the column.</param>
         public void AddColumn(string name, IEnumerable<string?> values)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(values);
             EnsureExpectedType(name, typeof(string));
@@ -164,6 +199,7 @@ namespace squalor.DataBall
         /// <param name="name">The name of the column to remove.</param>
         public void RemoveColumn(string name)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfDeclaredKey(name);
             OnWideData(() => _store.RemoveColumn(name));
@@ -176,6 +212,7 @@ namespace squalor.DataBall
         /// <param name="values">The column values for the new row.</param>
         public void AddRow(IReadOnlyDictionary<string, object?> values)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             _store.AddRow(values, _expectedColumnTypes);
             RememberRow(values);
@@ -188,6 +225,7 @@ namespace squalor.DataBall
         /// </summary>
         public void AddRows(IEnumerable<IReadOnlyDictionary<string, object?>> rows)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             if (rows is null)
                 throw new DataBallException("Row values are required");
@@ -200,7 +238,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Executes SQL against the in-memory store and returns rows as dictionaries.
+        /// Executes SQL against the session store and returns rows as dictionaries.
         /// Each row is a caller-owned copy; mutating it does not change the store.
         /// </summary>
         /// <param name="sql">The SQL to execute.</param>
@@ -228,6 +266,7 @@ namespace squalor.DataBall
         /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
         public void MergeOrAppend(DataBall other, bool append)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfPendingRow();
             ArgumentNullException.ThrowIfNull(other);
@@ -280,6 +319,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when the Bounce operation fails.</exception>
         public Task Bounce(string? partitionedParquetPath = null, string[]? partitionColumns = null)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfPendingRow();
             _logger.LogInformation("Starting Bounce operation");
@@ -368,6 +408,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when the path is missing, the format is unknown, or import fails.</exception>
         public Task ImportAsync(string path, ImportOptions? options = null)
         {
+            ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
@@ -442,7 +483,9 @@ namespace squalor.DataBall
                         ExportManager.ExportToArchive(this, path);
                         break;
                     case ExportType.Ball:
-                        ExportManager.ExportToBall(this, path);
+                        if (!_store.IsReadOnly)
+                            PersistConfig();
+                        _store.SaveTo(path, ConfigForPersistence());
                         break;
                     default:
                         throw new DataBallException($"Unsupported export type: {type}");
@@ -457,7 +500,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Saves the data to the specified path using the .ball format.
+        /// Saves the whole session to the specified path as a native DuckDB .ball file.
         /// </summary>
         /// <param name="path">The path to save the .ball file.</param>
         /// <returns>A completed task after the save finishes.</returns>
@@ -492,7 +535,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Saves the data to the specified path using the .ball format.
+        /// Saves the whole session to the specified path as a native DuckDB .ball file.
         /// </summary>
         /// <param name="path">The path to save the .ball file.</param>
         /// <exception cref="DataBallException">Thrown when the save operation fails.</exception>
@@ -570,14 +613,21 @@ namespace squalor.DataBall
         internal void ApplyImportedConfig(Config config)
         {
             ArgumentNullException.ThrowIfNull(config);
-            _config = Config.Merge(_config, config);
+            var subset = new Config
+            {
+                Columns = config.Columns,
+                Relationships = config.Relationships,
+                Tables = config.Tables,
+                Metadata = config.Metadata,
+            };
+            _config = Config.Merge(_config, subset);
             ApplyConfig(_config);
             _store.UpdateLayoutConfig(_config);
         }
 
         /// <summary>
         /// Re-applies the constant metadata of an imported config so it wins over
-        /// <c>metadata.json</c>, as it did when config was applied last.
+        /// stored metadata, as it did when config was applied last.
         /// </summary>
         internal void ApplyImportedConfigMetadata(Config config)
         {
@@ -669,10 +719,23 @@ namespace squalor.DataBall
             ExtractConfiguredMetadata(table, layoutAppend);
         }
 
-        private void ApplyConfig(Config config)
+        private Config ConfigForPersistence()
         {
-            foreach (var (key, value) in config.Metadata)
-                _store.SetMetadata(key, DuckDbStore.Unwrap(value));
+            var persisted = _config.Clone();
+            foreach (var pair in Config.ToColumnTypeNames(_expectedColumnTypes))
+                persisted.Columns[pair.Key] = pair.Value;
+            return persisted;
+        }
+
+        private void PersistConfig() => _store.WriteConfig(ConfigForPersistence());
+
+        private void ApplyConfig(Config config, bool applyMetadata = true)
+        {
+            if (applyMetadata)
+            {
+                foreach (var (key, value) in config.Metadata)
+                    _store.SetMetadata(key, DuckDbStore.Unwrap(value));
+            }
             foreach (var col in config.Columns)
                 _expectedColumnTypes[col.Key] = Config.ParseColumnType(col.Value);
             if (config.Relationships.Count > 0)
@@ -778,12 +841,13 @@ namespace squalor.DataBall
         /// <summary>
         /// Runs an import as one transaction. On a layout session a replace drops the view and its
         /// tables first; afterwards the result is split (or the layout cleared when no data
-        /// remains). A <c>.ball</c> <c>config.json</c> may change the config mid-import, so the
+        /// remains). Stored <c>.ball</c> config may change the config mid-import, so the
         /// in-memory mirrors (config, expected types, relationships, layout, metadata) are
         /// snapshotted first and restored when the transaction rolls back.
         /// </summary>
         internal void RunImport(bool append, Action import)
         {
+            ThrowIfReadOnly();
             ArgumentNullException.ThrowIfNull(import);
             var snapshot = TakeSnapshot();
             try
@@ -800,6 +864,7 @@ namespace squalor.DataBall
                     SplitIfLayout();
                     if (!_store.DataTableExists())
                         _store.ClearLayout();
+                    PersistConfig();
                 });
             }
             catch
@@ -892,6 +957,13 @@ namespace squalor.DataBall
                 RestoreSnapshot(snapshot);
                 throw;
             }
+        }
+
+        private void ThrowIfReadOnly()
+        {
+            ThrowIfDisposed();
+            if (_store.IsReadOnly)
+                throw new DataBallException("Session is read-only; open with writable: true to change it");
         }
 
         private void ThrowIfDisposed()

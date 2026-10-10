@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System.IO;
+using System.Linq;
 using squalor.DataBall.Cli;
 using Xunit;
 
@@ -31,6 +32,7 @@ public class CliLayoutTests
             Assert.Contains("setup (2 rows)", info.StdOut);
             Assert.Contains("rows (3 rows)", info.StdOut);
             Assert.Contains("m (3 rows)", info.StdOut);
+            Assert.DoesNotContain("_databall", info.StdOut.Split('\n').Select(line => line.Trim().Split(" (")[0]));
 
             var queried = await Run("query", ball, "SELECT Site, Temp, Meas FROM data ORDER BY Meas");
             Assert.Equal(0, queried.Exit);

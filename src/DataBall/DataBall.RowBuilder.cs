@@ -19,7 +19,7 @@ namespace squalor.DataBall
         /// <param name="initial">Optional field values applied on top of the copied last row.</param>
         public void InitializeRow(IReadOnlyDictionary<string, object?>? initial = null)
         {
-            ThrowIfDisposed();
+            ThrowIfReadOnly();
             _pendingRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             _originalRow = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
             _modifiedFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -56,7 +56,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when no pending row exists or the field name is empty.</exception>
         public void ModifyField(string field, object? value)
         {
-            ThrowIfDisposed();
+            ThrowIfReadOnly();
             if (_pendingRow is null || _modifiedFields is null)
                 throw new DataBallException("No pending row. Call InitializeRow before ModifyField.");
             if (string.IsNullOrWhiteSpace(field))
@@ -71,7 +71,7 @@ namespace squalor.DataBall
         /// <exception cref="DataBallException">Thrown when no pending row exists or the row is empty with no data table.</exception>
         public void CommitRow()
         {
-            ThrowIfDisposed();
+            ThrowIfReadOnly();
             if (_pendingRow is null)
                 throw new DataBallException("No pending row. Call InitializeRow before CommitRow.");
 

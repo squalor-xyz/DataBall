@@ -28,7 +28,7 @@ namespace squalor.DataBall
         internal Config? LayoutConfig { get; private set; }
 
         /// <summary>
-        /// Points the bound layout at a newer merged config (after a <c>.ball</c> overlay). The
+        /// Points the bound layout at a newer merged config (after importing native <c>.ball</c> config). The
         /// overlay must describe the same tables for the current wide columns; a different
         /// <c>tables</c> section cannot be adopted while rows are already split.
         /// </summary>
@@ -63,7 +63,7 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             var result = ExecuteScalar("""
                 SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = 'main' AND table_name = 'data' AND table_type = 'VIEW'
+                WHERE table_catalog = current_database() AND table_schema = 'main' AND table_name = 'data' AND table_type = 'VIEW'
                 """);
             return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
         }
@@ -328,79 +328,6 @@ namespace squalor.DataBall
             }
 
             ClearLayout();
-        }
-
-        /// <summary>
-        /// Rebuilds the layout from one parquet file per physical table (a <c>.ball</c> v2), then
-        /// creates the wide view. Replaces any existing <c>"data"</c> relation. Atomic.
-        /// </summary>
-        internal void LoadLayoutTables(TableLayout layout, IReadOnlyDictionary<string, string> parquetByTable, Config config)
-        {
-            ThrowIfDisposed();
-            ArgumentNullException.ThrowIfNull(layout);
-            ArgumentNullException.ThrowIfNull(parquetByTable);
-            ArgumentNullException.ThrowIfNull(config);
-            // Validate every parquet before touching the catalog so a mismatch can fall back cleanly.
-            foreach (var table in layout.PhysicalTables)
-            {
-                if (!parquetByTable.TryGetValue(table.Name, out var path))
-                    throw new DataBallException($"Missing parquet for table '{table.Name}'");
-                var actual = Query($"SELECT column_name FROM (DESCRIBE SELECT * FROM read_parquet({QuotePath(path)}))")
-                    .Select(r => Convert.ToString(r["column_name"], CultureInfo.InvariantCulture) ?? string.Empty)
-                    .ToList();
-                foreach (var expected in ExpectedPhysicalColumns(layout, table))
-                {
-                    if (!actual.Any(a => a.Equals(expected, StringComparison.OrdinalIgnoreCase)))
-                        throw new DataBallException($"Table '{table.Name}' parquet is missing column '{expected}'");
-                }
-            }
-
-            InTransaction(() =>
-            {
-                DropDataRelation();
-                foreach (var table in layout.PhysicalTables)
-                {
-                    if (TableExists(table.Name))
-                        throw new DataBallException($"Table '{table.Name}' already exists; cannot build the layout");
-                    Execute($"CREATE TABLE {QuoteIdent(table.Name)} AS SELECT * FROM read_parquet({QuotePath(parquetByTable[table.Name])})");
-                }
-                CreateDataView(layout);
-            });
-            Layout = layout;
-            LayoutConfig = config;
-        }
-
-        /// <summary>Writes one physical table to parquet.</summary>
-        internal void ExportTableParquet(string tableName, string path)
-        {
-            ThrowIfDisposed();
-            ValidateName(tableName, "Table");
-            if (!TableExists(tableName))
-                throw new DataBallException($"Table '{tableName}' does not exist");
-            var dir = Path.GetDirectoryName(Path.GetFullPath(path));
-            if (!string.IsNullOrEmpty(dir))
-                Directory.CreateDirectory(dir);
-            Execute($"COPY (SELECT * FROM {QuoteIdent(tableName)}) TO {QuotePath(path)} (FORMAT PARQUET)");
-        }
-
-        internal static IEnumerable<string> ExpectedPhysicalColumns(TableLayout layout, TableLayout.PhysicalTable table)
-        {
-            if (table.IsDimension)
-            {
-                yield return table.KeyColumnName;
-            }
-            else
-            {
-                yield return TableLayout.RowKey;
-                if (ReferenceEquals(table, layout.Spine))
-                {
-                    foreach (var d in layout.Dimensions)
-                        yield return d.KeyColumnName;
-                }
-            }
-
-            foreach (var column in table.Columns)
-                yield return column;
         }
 
         /// <summary>Staging column and the wide (canonical) column it feeds.</summary>

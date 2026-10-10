@@ -80,7 +80,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_RoundTrip_IncludesMetadata_AndZipEntries()
+        public async Task Ball_RoundTrip_IncludesMetadata_AndNativeMagic()
         {
             var dir = TempDir();
             try
@@ -92,11 +92,7 @@ namespace squalor.DataBall.Tests
                     await db.ExportAsync(path, ExportType.Ball);
                 }
 
-                using (var zip = ZipFile.OpenRead(path))
-                {
-                    Assert.Contains(zip.Entries, e => EntryName(e) == "data.parquet");
-                    Assert.Contains(zip.Entries, e => EntryName(e) == "metadata.json");
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -110,7 +106,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_OptionalConfigJson()
+        public async Task Ball_StoredConfig()
         {
             var dir = TempDir();
             try
@@ -119,17 +115,14 @@ namespace squalor.DataBall.Tests
                 using (var db = Sample())
                     await db.ExportAsync(path, ExportType.Ball);
 
-                using (var zip = ZipFile.OpenRead(path))
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
+                using (var stored = DataBall.Open(path))
                 {
-                    var configEntry = Assert.Single(zip.Entries, e => EntryName(e) == "config.json");
-                    using var stream = configEntry.Open();
-                    using var reader = new StreamReader(stream);
-                    var config = JsonSerializer.Deserialize<Config>(reader.ReadToEnd());
-                    Assert.NotNull(config);
-                    Assert.Empty(config.Metadata);
-                    Assert.Equal("int", config.Columns["Age"]);
-                    Assert.Equal("string", config.Columns["Name"]);
+                    Assert.Empty(stored.Schema.Metadata);
+                    Assert.Equal("int", stored.Schema.Columns["Age"]);
+                    Assert.Equal("string", stored.Schema.Columns["Name"]);
                 }
+
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -142,7 +135,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_MetadataOnly_NoParquet_RoundTrips()
+        public async Task Ball_MetadataOnly_RoundTrips()
         {
             var dir = TempDir();
             try
@@ -154,11 +147,7 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(path);
                 }
 
-                using (var zip = ZipFile.OpenRead(path))
-                {
-                    Assert.Contains(zip.Entries, e => EntryName(e) == "metadata.json");
-                    Assert.DoesNotContain(zip.Entries, e => EntryName(e) == "data.parquet");
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -174,31 +163,6 @@ namespace squalor.DataBall.Tests
                     """);
                 Assert.Empty(columns);
                 Assert.DoesNotContain(columns, r => Convert.ToString(r["column_name"]) == "_");
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
-        [Fact]
-        public async Task Ball_ImportMissingMetadataJson_StillLoadsParquet()
-        {
-            var dir = TempDir();
-            try
-            {
-                var parquet = Path.Combine(dir, "data.parquet");
-                using (var db = Sample())
-                    await db.ExportAsync(parquet, ExportType.Parquet);
-
-                var path = Path.Combine(dir, "no-meta.ball");
-                using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
-                    zip.CreateEntryFromFile(parquet, "data.parquet");
-
-                using var imported = new DataBall();
-                await imported.ImportAsync(path);
-                AssertPeople(imported);
-                Assert.Empty(imported.Metadata);
             }
             finally
             {
@@ -387,11 +351,7 @@ namespace squalor.DataBall.Tests
                     db.Save(path);
 
                 Assert.True(File.Exists(path));
-                using (var zip = ZipFile.OpenRead(path))
-                {
-                    Assert.Contains(zip.Entries, e => EntryName(e) == "data.parquet");
-                    Assert.Contains(zip.Entries, e => EntryName(e) == "metadata.json");
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);

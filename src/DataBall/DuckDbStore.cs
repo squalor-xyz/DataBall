@@ -20,18 +20,22 @@ namespace squalor.DataBall
     internal sealed partial class DuckDbStore : IDisposable
     {
         private static readonly object FileGate = new();
-        private static readonly HashSet<string> OpenFiles = new(StringComparer.Ordinal);
+        private static readonly StringComparer FilePathComparer = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        private static readonly HashSet<string> OpenFiles = new(FilePathComparer);
 
         private readonly DuckDBConnection _connection;
         private readonly ILogger _logger;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
         private readonly string? _exclusivePath;
         private DbTransaction? _currentTx;
+        private readonly List<string> _pendingDetach = new();
         private bool _disposed;
 
-        internal DuckDbStore(string? databasePath = null, ILogger? logger = null)
+        internal DuckDbStore(string? databasePath = null, ILogger? logger = null, bool readOnly = false)
         {
             _logger = logger ?? NullLogger.Instance;
+            IsReadOnly = readOnly;
             _exclusivePath = ExclusiveFilePath(databasePath);
             if (_exclusivePath is not null)
             {
@@ -45,10 +49,11 @@ namespace squalor.DataBall
             DuckDBConnection? connection = null;
             try
             {
-                connection = new DuckDBConnection(BuildConnectionString(databasePath));
+                connection = new DuckDBConnection(BuildConnectionString(databasePath, readOnly));
                 connection.Open();
                 _connection = connection;
-                Execute("""
+                if (!readOnly)
+                    Execute("""
                     CREATE TABLE IF NOT EXISTS "meta" (
                         "key"   VARCHAR PRIMARY KEY,
                         "value" VARCHAR
@@ -64,6 +69,192 @@ namespace squalor.DataBall
                     throw;
                 throw new DataBallException("Failed to open database", ex);
             }
+        }
+
+        internal bool IsReadOnly { get; }
+
+        internal bool HasStoredConfig => TableExists("_databall");
+
+        internal Config ReadConfig(string? alias = null)
+        {
+            ThrowIfDisposed();
+            var catalog = alias is null ? "" : QuoteIdent(alias) + ".";
+            var exists = Query($"SELECT count(*) AS n FROM information_schema.tables WHERE table_name = '_databall'" +
+                (alias is null ? "" : $" AND table_catalog = {QuoteString(alias)}"));
+            if (Convert.ToInt64(exists[0]["n"], CultureInfo.InvariantCulture) == 0)
+                throw new DataBallException("Native .ball is missing the '_databall' table");
+            var rows = Query($"SELECT ball_format, config FROM {catalog}\"_databall\" ORDER BY version DESC LIMIT 1");
+            if (rows.Count == 0 || Convert.ToInt32(rows[0]["ball_format"], CultureInfo.InvariantCulture) != 3)
+                throw new DataBallException("Unsupported .ball format; expected ball_format = 3");
+            return Config.FromJson((string)rows[0]["config"]!);
+        }
+
+        internal void WriteConfig(Config config, string? alias = null)
+        {
+            ThrowIfDisposed();
+            var table = (alias is null ? "" : QuoteIdent(alias) + ".") + "\"_databall\"";
+            Execute($"""
+                CREATE TABLE IF NOT EXISTS {table} (
+                    version INTEGER PRIMARY KEY, ball_format INTEGER, config VARCHAR,
+                    duckdb_version VARCHAR, storage_version VARCHAR, written_at TIMESTAMP
+                )
+                """);
+            var json = config.ToJson();
+            var latest = Query($"SELECT config FROM {table} ORDER BY version DESC LIMIT 1");
+            if (latest.Count > 0 && (string)latest[0]["config"]! == json)
+                return;
+            var catalog = alias ?? Convert.ToString(ExecuteScalar("SELECT current_database()"), CultureInfo.InvariantCulture)!;
+            Execute($"""
+                INSERT INTO {table}
+                SELECT COALESCE((SELECT max(version) FROM {table}), 0) + 1, 3,
+                    {QuoteString(json)}, version(),
+                    (SELECT tags['storage_version'] FROM duckdb_databases()
+                        WHERE database_name = {QuoteString(catalog)}), current_timestamp
+                """);
+        }
+
+        private void StampWriter(string? alias = null)
+        {
+            var table = (alias is null ? "" : QuoteIdent(alias) + ".") + "\"_databall\"";
+            var catalog = alias ?? Convert.ToString(ExecuteScalar("SELECT current_database()"), CultureInfo.InvariantCulture)!;
+            Execute($"""
+                UPDATE {table} SET duckdb_version = version(), storage_version =
+                    (SELECT tags['storage_version'] FROM duckdb_databases() WHERE database_name = {QuoteString(catalog)}),
+                    written_at = current_timestamp
+                WHERE version = (SELECT max(version) FROM {table})
+                """);
+        }
+
+        internal void SaveTo(string path, Config? config = null)
+        {
+            ThrowIfDisposed();
+            if (_currentTx is not null)
+                throw new DataBallException("Cannot save inside a store transaction");
+            lock (FileGate)
+            {
+                SaveToCore(path, config);
+            }
+        }
+
+        private void SaveToCore(string path, Config? config)
+        {
+            if (!DataTableExists() && _metadata.Count == 0)
+                throw new DataBallException("No data to export");
+            var target = Path.GetFullPath(path);
+            if (FilePathComparer.Equals(target, _exclusivePath))
+            {
+                if (IsReadOnly)
+                    throw new DataBallException("Session is read-only; save to another path or open with writable: true");
+                StampWriter();
+                Execute("CHECKPOINT");
+                return;
+            }
+            if (OpenFiles.Contains(target))
+                throw new DataBallException("Save target is already open in another session");
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            var temporary = target + ".tmp";
+            File.Delete(temporary);
+            File.Delete(temporary + ".wal");
+            var alias = "save_" + Guid.NewGuid().ToString("N");
+            var attached = false;
+            try
+            {
+                Execute($"ATTACH {QuoteString(temporary)} AS {QuoteIdent(alias)} (READ_WRITE)");
+                attached = true;
+                var source = Convert.ToString(ExecuteScalar("SELECT current_database()"), CultureInfo.InvariantCulture)!;
+                Execute($"COPY FROM DATABASE {QuoteIdent(source)} TO {QuoteIdent(alias)}");
+                if (config is not null)
+                    WriteConfig(config, alias);
+                StampWriter(alias);
+                // Read-only overlays live in memory; the saved copy gets the session metadata.
+                Execute($"CREATE TABLE IF NOT EXISTS {QuoteIdent(alias)}.meta (key VARCHAR PRIMARY KEY, value VARCHAR)");
+                foreach (var (key, value) in _metadata)
+                    Execute($"INSERT OR REPLACE INTO {QuoteIdent(alias)}.meta VALUES ({QuoteString(key)}, {QuoteString(SerializeMetadataValue(value))})");
+                Execute($"DETACH {QuoteIdent(alias)}");
+                attached = false;
+                File.Move(temporary, target, overwrite: true);
+            }
+            catch
+            {
+                TrySaveCleanup(() =>
+                {
+                    using var command = CreateCommand("ROLLBACK", Array.Empty<DuckDBParameter>());
+                    try
+                    {
+                        command.ExecuteNonQuery();
+                    }
+                    catch (DuckDBException ex) when (ex.Message.Contains("no transaction is active", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // A failed save may already have ended its implicit transaction.
+                    }
+                });
+                throw;
+            }
+            finally
+            {
+                if (attached)
+                    TrySaveCleanup(() => Execute($"DETACH {QuoteIdent(alias)}"));
+                TrySaveCleanup(() => File.Delete(temporary));
+                TrySaveCleanup(() => File.Delete(temporary + ".wal"));
+            }
+        }
+
+        private void TrySaveCleanup(Action cleanup)
+        {
+            try
+            {
+                cleanup();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Save cleanup failed");
+            }
+        }
+
+        internal string AttachReadOnly(string path)
+        {
+            var alias = "import_" + Guid.NewGuid().ToString("N");
+            Execute($"ATTACH {QuotePath(path)} AS {QuoteIdent(alias)} (READ_ONLY)");
+            return alias;
+        }
+
+        internal void Detach(string alias)
+        {
+            // DuckDB requires outstanding reads to commit or roll back before DETACH.
+            if (_currentTx is not null)
+                _pendingDetach.Add(alias);
+            else
+                Execute($"DETACH {QuoteIdent(alias)}");
+        }
+
+        internal void ImportNativeRows(string alias, bool append)
+        {
+            var exists = ExecuteScalar($"SELECT count(*) FROM information_schema.tables WHERE table_catalog = {QuoteString(alias)} AND table_name = 'data'");
+            if (Convert.ToInt64(exists, CultureInfo.InvariantCulture) == 0)
+            {
+                if (!append)
+                    DropDataRelation();
+                return;
+            }
+            Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM {QuoteIdent(alias)}.\"data\"");
+            try
+            {
+                PromoteDateColumns("_staging");
+                MergeOrAppendFromTable("_staging", append);
+            }
+            finally
+            {
+                DropTemp("_staging");
+            }
+        }
+
+        internal void ImportNativeMetadata(string alias)
+        {
+            var exists = ExecuteScalar($"SELECT count(*) FROM information_schema.tables WHERE table_catalog = {QuoteString(alias)} AND table_name = 'meta'");
+            if (Convert.ToInt64(exists, CultureInfo.InvariantCulture) == 0)
+                return;
+            foreach (var row in Query($"SELECT key, value FROM {QuoteIdent(alias)}.\"meta\""))
+                SetMetadata((string)row["key"]!, row["value"] is string value ? DeserializeMetadataValue(value) : null);
         }
 
         private static string? ExclusiveFilePath(string? databasePath)
@@ -82,7 +273,7 @@ namespace squalor.DataBall
                 OpenFiles.Remove(_exclusivePath);
         }
 
-        private static string BuildConnectionString(string? databasePath)
+        private static string BuildConnectionString(string? databasePath, bool readOnly)
         {
             if (string.IsNullOrEmpty(databasePath)
                 || databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase))
@@ -92,11 +283,15 @@ namespace squalor.DataBall
             {
                 DataSource = Path.GetFullPath(databasePath)
             };
+            if (readOnly)
+                builder["ACCESS_MODE"] = "READ_ONLY";
             return builder.ConnectionString;
         }
 
         private void HydrateMetadata()
         {
+            if (!TableExists("meta"))
+                return;
             var rows = Query("SELECT \"key\", \"value\" FROM \"meta\"");
             foreach (var row in rows)
             {
@@ -185,13 +380,35 @@ namespace squalor.DataBall
             }
             catch
             {
-                try { tx.Rollback(); }
-                catch (Exception ex) { _logger.LogError(ex, "Rollback failed"); }
+                try
+                {
+                    tx.Rollback();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Rollback failed");
+                }
                 throw;
             }
             finally
             {
                 _currentTx = previous;
+                var pending = _pendingDetach.ToArray();
+                _pendingDetach.Clear();
+                foreach (var alias in pending)
+                {
+                    // ATTACH itself is undone by a rollback.
+                    try
+                    {
+                        var exists = ExecuteScalar($"SELECT count(*) FROM duckdb_databases() WHERE database_name = {QuoteString(alias)}");
+                        if (Convert.ToInt64(exists, CultureInfo.InvariantCulture) > 0)
+                            Execute($"DETACH {QuoteIdent(alias)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Deferred detach failed");
+                    }
+                }
             }
         }
 
@@ -244,7 +461,7 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             var result = ExecuteScalar("""
                 SELECT COUNT(*) FROM information_schema.tables
-                WHERE table_schema = 'main' AND table_name = 'data'
+                WHERE table_catalog = current_database() AND table_schema = 'main' AND table_name = 'data'
                 """);
             return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
         }
@@ -510,6 +727,8 @@ namespace squalor.DataBall
             ValidateName(key, "Metadata key");
             var unwrapped = Unwrap(value);
             _metadata[key] = unwrapped;
+            if (IsReadOnly)
+                return;
             var storedKey = _metadata.Keys.First(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
             var json = SerializeMetadataValue(unwrapped);
             ExecuteParameterized(
@@ -531,6 +750,8 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             ValidateName(key, "Metadata key");
             if (!_metadata.TryGetValue(key, out _))
+                return;
+            if (IsReadOnly)
                 return;
             var storedKey = _metadata.Keys.First(k => k.Equals(key, StringComparison.OrdinalIgnoreCase));
             _metadata.Remove(storedKey);
@@ -950,6 +1171,7 @@ namespace squalor.DataBall
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_name = {QuoteString(tableName)}
                   AND table_schema IN ('main', 'temp')
+                  AND table_catalog IN (current_database(), 'temp')
                 """);
             return Convert.ToInt64(result, CultureInfo.InvariantCulture) > 0;
         }
@@ -977,6 +1199,7 @@ namespace squalor.DataBall
                 FROM information_schema.columns
                 WHERE table_name = {QuoteString(tableName)}
                   AND table_schema IN ('main', 'temp')
+                  AND table_catalog IN (current_database(), 'temp')
                 ORDER BY ordinal_position
                 """;
             var rows = Query(sql);
@@ -1301,24 +1524,6 @@ namespace squalor.DataBall
             ThrowIfDisposed();
             _metadata.Clear();
             HydrateMetadata();
-        }
-
-        internal static string SerializeMetadataMap(IReadOnlyDictionary<string, object?> map)
-        {
-            ArgumentNullException.ThrowIfNull(map);
-            var buffer = new ArrayBufferWriter<byte>();
-            using (var writer = new Utf8JsonWriter(buffer))
-            {
-                writer.WriteStartObject();
-                foreach (var pair in map)
-                {
-                    writer.WritePropertyName(pair.Key);
-                    WriteTagged(writer, Unwrap(pair.Value));
-                }
-                writer.WriteEndObject();
-            }
-
-            return Encoding.UTF8.GetString(buffer.WrittenSpan);
         }
 
         internal static string SerializeMetadataValue(object? value)

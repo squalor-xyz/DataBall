@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System;
 using System.IO;
-using System.IO.Compression;
-using System.Text;
 using Xunit;
 
 namespace squalor.DataBall.Tests
@@ -54,13 +52,10 @@ namespace squalor.DataBall.Tests
                 Assert.True(string.IsNullOrWhiteSpace(spec.Role));
 
                 var ball = Path.Combine(dir, "overlay.ball");
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Create))
-                {
-                    using (var writer = new StreamWriter(zip.CreateEntry("metadata.json").Open(), Encoding.UTF8))
-                        writer.Write("{}");
-                    using (var writer = new StreamWriter(zip.CreateEntry("config.json").Open(), Encoding.UTF8))
-                        writer.Write("""{ "stimulus": ["Foo"] }""");
-                }
+                var importedConfig = Path.Combine(dir, "imported.json");
+                File.WriteAllText(importedConfig, """{"stimulus":["Foo"]}""");
+                using (var source = new DataBall(importedConfig, databasePath: ball))
+                    source.SetMetadata("source", "fixture");
 
                 await db.ImportAsync(ball);
                 Assert.True(string.IsNullOrWhiteSpace(spec.Role));
@@ -144,6 +139,26 @@ namespace squalor.DataBall.Tests
             var dir = Path.Combine(Path.GetTempPath(), "databall-t2-config", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             return dir;
+        }
+
+        [Theory]
+        [InlineData("_databall")]
+        [InlineData("meta")]
+        public void Config_ReservedTableNames_Rejected(string name)
+        {
+            var config = new Config { Tables = new() { [name] = new TableSpec { Kind = "measurements", Columns = new() { "value" } } } };
+            Assert.Throws<DataBallException>(() => Config.Merge(Config.CreateDefaults(), config));
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "reserved.json");
+                File.WriteAllText(path, config.ToJson());
+                Assert.Throws<DataBallException>(() => Config.LoadConfig(path));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
         }
     }
 }

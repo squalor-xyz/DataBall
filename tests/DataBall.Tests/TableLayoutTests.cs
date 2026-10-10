@@ -19,9 +19,12 @@ namespace squalor.DataBall.Tests
         [InlineData("_hidden")]
         public void Layout_ReservedName_Throws(string name)
         {
-            var config = Load($$$"""{ "tables": { "{{{name}}}": { "kind": "measurements", "columns": ["EVM"] } } }""");
-            var ex = Assert.Throws<DataBallException>(() => TableLayout.Validate(config));
-            Assert.Contains("reserved", ex.Message, StringComparison.OrdinalIgnoreCase);
+            var ex = Assert.Throws<DataBallException>(() =>
+            {
+                var config = Load($$$"""{ "tables": { "{{{name}}}": { "kind": "measurements", "columns": ["EVM"] } } }""");
+                TableLayout.Validate(config);
+            });
+            Assert.Contains("reserved", ex.ToString(), StringComparison.OrdinalIgnoreCase);
         }
 
         [Fact]

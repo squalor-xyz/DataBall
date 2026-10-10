@@ -2,8 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.IO.Compression;
-using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SharpCompress.Common;
@@ -124,114 +122,10 @@ namespace squalor.DataBall.Export
             }
         }
 
-        /// <summary>
-        /// Exports the DataBall as a <c>.ball</c> ZIP of parquet plus metadata.
-        /// Parquet is omitted when there is no data table; metadata-only balls are allowed.
-        /// A multi-table session also writes <c>manifest.json</c> and <c>tables/&lt;name&gt;.parquet</c>
-        /// next to the wide <c>data.parquet</c> (kept for older readers), unless a session filter
-        /// is applied, in which case only the filtered wide parquet is written.
-        /// </summary>
-        /// <param name="db">The DataBall to export.</param>
-        /// <param name="path">The path to save the <c>.ball</c> file.</param>
-        /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
+        /// <summary>Saves the whole session as a native DuckDB .ball file.</summary>
         public static void ExportToBall(DataBall db, string path)
         {
-            db.Logger.LogInformation("Exporting to .ball at {Path}", path);
-            var dir = Path.Combine(Path.GetTempPath(), "databall-ball-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(dir);
-            string? tmp = null;
-            try
-            {
-                var hasTable = db.Store.DataTableExists();
-                if (!hasTable && db.Metadata.Count == 0)
-                    throw new DataBallException("No data to export");
-
-                string? parquetPath = null;
-                var filtered = db.FilteredSelectOrNull();
-                if (hasTable)
-                {
-                    parquetPath = Path.Combine(dir, "data.parquet");
-                    db.Store.ExportParquet(parquetPath, filtered);
-                }
-
-                var tableEntries = new List<(string Entry, string Path)>();
-                string? manifestPath = null;
-                var layout = db.Layout;
-                if (hasTable && filtered is null && layout is not null && db.Store.DataIsView())
-                {
-                    var tablesDir = Path.Combine(dir, "tables");
-                    Directory.CreateDirectory(tablesDir);
-                    foreach (var table in layout.PhysicalTables)
-                    {
-                        var file = Path.Combine(tablesDir, table.Name + ".parquet");
-                        db.Store.ExportTableParquet(table.Name, file);
-                        tableEntries.Add(("tables/" + table.Name + ".parquet", file));
-                    }
-
-                    var manifest = new BallManifest
-                    {
-                        BallVersion = 2,
-                        Columns = new List<string>(layout.WideColumns),
-                        Tables = new List<string>(layout.PhysicalTableNames)
-                    };
-                    manifestPath = Path.Combine(dir, BallManifest.FileName);
-                    File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, BallManifest.JsonOptions));
-                }
-
-                var metadataPath = Path.Combine(dir, "metadata.json");
-                File.WriteAllText(metadataPath, DuckDbStore.SerializeMetadataMap(db.Metadata));
-
-                string? configPath = null;
-                var schema = db.Schema;
-                if (db.ExpectedColumnTypes.Count > 0 || db.Relationships.Count > 0 || schema.Tables.Count > 0)
-                {
-                    var config = new Config
-                    {
-                        Metadata = new Dictionary<string, object?>(),
-                        Columns = ToColumnTypeNames(db.ExpectedColumnTypes),
-                        Relationships = new List<Relationship>(db.Relationships),
-                        Tables = schema.Tables
-                    };
-                    configPath = Path.Combine(dir, "config.json");
-                    File.WriteAllText(configPath, JsonSerializer.Serialize(config));
-                }
-
-                var destDir = Path.GetDirectoryName(Path.GetFullPath(path));
-                if (!string.IsNullOrEmpty(destDir))
-                    Directory.CreateDirectory(destDir);
-
-                tmp = path + ".tmp";
-                if (File.Exists(tmp))
-                    File.Delete(tmp);
-
-                using (var zip = ZipFile.Open(tmp, ZipArchiveMode.Create))
-                {
-                    if (parquetPath is not null)
-                        zip.CreateEntryFromFile(parquetPath, "data.parquet");
-                    foreach (var (entry, file) in tableEntries)
-                        zip.CreateEntryFromFile(file, entry);
-                    if (manifestPath is not null)
-                        zip.CreateEntryFromFile(manifestPath, BallManifest.FileName);
-                    zip.CreateEntryFromFile(metadataPath, "metadata.json");
-                    if (configPath is not null)
-                        zip.CreateEntryFromFile(configPath, "config.json");
-                }
-                File.Move(tmp, path, overwrite: true);
-                tmp = null;
-                db.Logger.LogInformation("Ball export completed");
-            }
-            catch (Exception ex) when (ex is not DataBallException)
-            {
-                db.Logger.LogError(ex, "Ball export failed");
-                throw new DataBallException("Failed to export .ball file", ex);
-            }
-            finally
-            {
-                if (tmp is not null && File.Exists(tmp))
-                    File.Delete(tmp);
-                if (Directory.Exists(dir))
-                    Directory.Delete(dir, true);
-            }
+            db.Save(path);
         }
 
         /// <summary>
@@ -268,24 +162,5 @@ namespace squalor.DataBall.Export
             return (ArchiveType.Zip, CompressionType.Deflate);
         }
 
-        private static Dictionary<string, string> ToColumnTypeNames(IReadOnlyDictionary<string, Type> types)
-        {
-            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (name, type) in types)
-                map[name] = TypeName(type);
-            return map;
-        }
-
-        private static string TypeName(Type type)
-        {
-            if (type == typeof(int)) return "int";
-            if (type == typeof(long)) return "long";
-            if (type == typeof(float)) return "float";
-            if (type == typeof(double)) return "double";
-            if (type == typeof(bool)) return "bool";
-            if (type == typeof(DateTime)) return "datetime";
-            if (type == typeof(string)) return "string";
-            return type.FullName ?? type.Name;
-        }
     }
 }
