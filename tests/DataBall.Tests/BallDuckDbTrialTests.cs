@@ -104,7 +104,9 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
             var before = Bytes(growth);
             var newRow = new Dictionary<string, object?>(rows[^1])
             {
-                ["groupId"] = 500L, ["sweepId"] = 0L, ["Humidity"] = 40.0
+                ["groupId"] = 500L,
+                ["sweepId"] = 0L,
+                ["Humidity"] = 40.0
             };
             layout.AddRow(newRow);
             var afterAppend = Bytes(growth);
@@ -123,7 +125,9 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
         var helper = Path.Combine(AppContext.BaseDirectory, "TrialProbe", "DataBall.TrialProbe.dll");
         var start = new ProcessStartInfo(Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet")
         {
-            RedirectStandardOutput = true, RedirectStandardError = true, UseShellExecute = false
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false
         };
         start.ArgumentList.Add(helper);
         start.ArgumentList.Add(path);
