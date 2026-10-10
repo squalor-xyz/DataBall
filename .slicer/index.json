@@ -353,7 +353,7 @@
       "id": "db-08",
       "title": "DataBall must return columnar and streaming reads",
       "short_title": "DataBall must return columnar and streaming reads",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-04"
@@ -365,6 +365,17 @@
           "text": "**2026-10-10** — Owner decision 2026-10-10 (spec interview): ReadColumns returns T[] Values plus bool[]? Nulls per column (Nulls null when the column has none).",
           "created_at": "2026-10-10T15:50:09Z",
           "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "1a05a380-9e3c-4084-b6f8-f68a70798f51",
+          "kind": "",
+          "text": "**2026-10-10** — Owner decisions 2026-10-10 (db-08 relay review): (1) a column created from an all-null handler batch with no config type is widened automatically when a later batch brings its first typed value (ALTER ... TYPE in that batch's transaction; safe because every stored value is NULL). (2) ReadColumns uses a complete read-side type map, separate from import typing: SMALLINT/TINYINT/UTINYINT/USMALLINT -> int, UINTEGER -> long, DECIMAL/UBIGINT/HUGEINT -> double, everything else -> string; it never throws on type, and any remaining error names the column.",
+          "created_at": "2026-10-10T17:55:51Z",
+          "attempt": 1,
           "by": "Jon R",
           "verified_by": "",
           "verified_at": "",
@@ -389,7 +400,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -572,6 +583,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-07 gate (2026-10-10): EngineOptions.ResolveStore walks directories with Directory.EnumerateFiles(..., AllDirectories), which can throw a raw UnauthorizedAccessException on an unreadable subdirectory. Wrap it in DataBallException when many-file open reuses the resolver.",
           "created_at": "2026-10-10T16:59:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "1d9b6c17-fc27-4264-93ba-c269288c300d",
+          "kind": "",
+          "text": "**2026-10-10** — From db-08 relay (2026-10-10): db-08 drains handlers in 10,000-row batches and widens a column created from an all-null batch when a later batch brings a typed value; db-11's numeric widening (INTEGER->BIGINT->DOUBLE) should use the same in-place path for later sources. Handler opens on a layout session split once after all batches (db-08); keep that when staging many sources.",
+          "created_at": "2026-10-10T17:55:51Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -822,6 +844,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-07 relay (2026-10-10): db-07 added EngineOptions? engine to Open (after writable), OpenAsync (before the CancellationToken, so positional OpenAsync(path, schema, writable, ct) no longer compiles) and as the 4th public ctor parameter, plus public EngineOptions/StoreMode and CLI --memory-limit/--threads/--temp-dir/--store. Fold engine into OpenOptions.Engine. With an explicit databasePath, EngineOptions.Store is ignored; a create-only ctor could reject databasePath with Store = File.",
           "created_at": "2026-10-10T16:39:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "91a704fc-3f22-48ae-bc3c-e5f7d21b7a95",
+          "kind": "",
+          "text": "**2026-10-10** — From db-08 relay (2026-10-10): ReadRowsAsync streams on the session's single connection, so db-08 guards every store command while a stream is open; fold that guard (or a dedicated stream connection, which would not see TEMP objects or the open transaction) into the one-way-out API. Query(sql) can run DML and is not covered by the write guard. ReadColumns and ReadRowsAsync run synchronously on the caller's thread (Open escapes the sync context with Task.Run; these do not): decide whether the folded read API offloads for UI hosts. Plots want double[]: consider ColumnData.ToDoubleArray() or a read option that casts numeric columns to DOUBLE in SQL.",
+          "created_at": "2026-10-10T17:55:51Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",

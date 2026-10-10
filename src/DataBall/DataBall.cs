@@ -971,7 +971,7 @@ namespace squalor.DataBall
 
         private void ThrowIfReadOnly()
         {
-            ThrowIfDisposed();
+            _store.ThrowIfConnectionBusy();
             if (_store.IsReadOnly)
                 throw new DataBallException("Session is read-only; open with writable: true to change it");
         }

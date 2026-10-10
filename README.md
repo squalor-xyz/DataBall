@@ -57,6 +57,8 @@ var engine = new EngineOptions { MemoryLimit = "1GB", Threads = 2, InMemoryMaxBy
 using var session = await DataBall.OpenAsync("measurements.csv", engine: engine);
 ```
 
+Registered lab handlers write parsed rows in batches of 10,000. A failed open disposes the partial session and removes its temporary store.
+
 The CLI accepts `--memory-limit`, `--threads`, `--temp-dir`, and `--store auto|memory|file` on `import`, `export`, `query`, and `info`:
 
 ```sh
@@ -181,7 +183,21 @@ This is not a matrix rewrite. DuckDB already dictionary-encodes repeats. On a mu
 
 ```csharp
 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
+
+var filter = new SessionFilter { Columns = ["Name", "Age"] };
+ColumnSet columns = db.ReadColumns(filter);
+var ages = (ColumnData<int>)columns["Age"];
+for (var i = 0; i < ages.Values.Length; i++)
+    if (ages.Nulls is null || !ages.Nulls[i])
+        Console.WriteLine(ages.Values[i]);
+
+await foreach (var row in db.ReadRowsAsync(filter, cancellationToken))
+    Console.WriteLine(row["Name"]);
 ```
+
+`ReadColumns` returns arrays in projection order. The read-side map is INTEGER/SMALLINT/TINYINT/UTINYINT/USMALLINT → `int`, BIGINT/UINTEGER → `long`, FLOAT → `float`, DOUBLE/DECIMAL/UBIGINT/HUGEINT → `double`, BOOLEAN → `bool`, DATE/TIMESTAMP* → `DateTime`, and UHUGEINT and every other unlisted type → `string` using DuckDB's text form (`CAST(... AS VARCHAR)`). This map is separate from import typing. Column lookup is case-insensitive. Null slots hold `default(T)`; `Nulls[i]` is true for those slots, and `Nulls` is null when a column has no nulls. Arrays are sized using one matching-row count before the reader fills them.
+
+`ReadRowsAsync` uses DuckDB streaming mode and yields a separate caller-owned dictionary for each row. Both reads push projection and predicates to DuckDB and read through the wide `data` view for table layouts. They do not apply `CurrentFilter` implicitly or guarantee row order. Cancellation is checked before execution and between rows. Finish or dispose the enumerator (including an `await foreach` early break) before any call that touches the store; any call that touches the store while a row stream is open throws `DataBallException`. In-memory access to `Metadata`, `Schema` and `CurrentFilter`, and clearing the filter with `ApplyFilter(null)`, still works. Disposing the session ends the stream: its next move throws. `ReadColumns` and `ReadRowsAsync` execute synchronously on the caller's thread; UI hosts should use `Task.Run` to keep that work off the UI thread. Sessions are owned by one caller and are not thread-safe.
 
 ## CLI
 

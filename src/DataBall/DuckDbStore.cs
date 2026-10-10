@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using DuckDB.NET.Data;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,6 +33,7 @@ namespace squalor.DataBall
         private DbTransaction? _currentTx;
         private readonly List<string> _pendingDetach = new();
         private bool _disposed;
+        private int _openStreams;
 
         internal DuckDbStore(string? databasePath = null, ILogger? logger = null, bool readOnly = false, EngineOptions? engine = null, bool temporary = false)
         {
@@ -350,7 +352,7 @@ namespace squalor.DataBall
         {
             get
             {
-                ThrowIfDisposed();
+                ThrowIfConnectionBusy();
                 return _connection;
             }
         }
@@ -412,6 +414,7 @@ namespace squalor.DataBall
                 return;
             }
 
+            ThrowIfConnectionBusy();
             using var tx = _connection.BeginTransaction();
             var previous = _currentTx;
             _currentTx = tx;
@@ -495,6 +498,97 @@ namespace squalor.DataBall
             catch (DuckDBException ex)
             {
                 throw new DataBallException("DuckDB operation failed", ex);
+            }
+        }
+
+        internal ColumnSet ReadColumns(ParameterizedSql select)
+        {
+            using var countCommand = CreateCommand($"SELECT COUNT(*) FROM ({select.Sql}) AS matching", select.Parameters);
+            var count = Convert.ToInt64(countCommand.ExecuteScalar(), CultureInfo.InvariantCulture);
+            if (count > int.MaxValue)
+                throw new DataBallException("ReadColumns cannot allocate arrays above int.MaxValue rows (2,147,483,647)");
+            var length = (int)count;
+            var projections = new List<string>();
+            var needsTextCast = false;
+            using (var schemaCommand = CreateCommand($"SELECT * FROM ({select.Sql}) AS q LIMIT 0", select.Parameters))
+            using (var schemaReader = schemaCommand.ExecuteReader())
+            {
+                for (var i = 0; i < schemaReader.FieldCount; i++)
+                {
+                    var name = schemaReader.GetName(i);
+                    var identifier = QuoteIdent(name);
+                    var sqlType = schemaReader.GetDataTypeName(i);
+                    var textCast = ReadTypeOf(sqlType) == typeof(string) && NormalizeType(sqlType) != "VARCHAR";
+                    needsTextCast |= textCast;
+                    projections.Add(textCast
+                        ? $"CAST(q.{identifier} AS VARCHAR) AS {identifier}"
+                        : $"q.{identifier}");
+                }
+            }
+            var readSql = needsTextCast
+                ? $"SELECT {string.Join(", ", projections)} FROM ({select.Sql}) AS q"
+                : select.Sql;
+            using var command = CreateCommand(readSql, select.Parameters);
+            using var reader = command.ExecuteReader();
+            var columns = new ColumnData[reader.FieldCount];
+            for (var i = 0; i < columns.Length; i++)
+            {
+                var name = reader.GetName(i);
+                try
+                {
+                    var type = ReadTypeOf(reader.GetDataTypeName(i));
+                    columns[i] = type == typeof(int) ? new ColumnData<int>(name, length, fieldType: reader.GetFieldType(i))
+                        : type == typeof(long) ? new ColumnData<long>(name, length, fieldType: reader.GetFieldType(i))
+                        : type == typeof(float) ? new ColumnData<float>(name, length, fieldType: reader.GetFieldType(i))
+                        : type == typeof(double) ? new ColumnData<double>(name, length, fieldType: reader.GetFieldType(i))
+                        : type == typeof(bool) ? new ColumnData<bool>(name, length, fieldType: reader.GetFieldType(i))
+                        : type == typeof(DateTime) ? new ColumnData<DateTime>(name, length, reader.GetFieldType(i) == typeof(DateOnly), reader.GetFieldType(i))
+                        : new ColumnData<string>(name, length, fieldType: reader.GetFieldType(i));
+                }
+                catch (Exception ex)
+                {
+                    throw new DataBallException($"Cannot read column '{name}'", ex);
+                }
+            }
+            var row = 0;
+            while (reader.Read())
+            {
+                for (var i = 0; i < columns.Length; i++)
+                    columns[i].ReadValue(reader, i, row);
+                row++;
+            }
+            return new ColumnSet(count, columns);
+        }
+
+        internal IEnumerable<IReadOnlyDictionary<string, object?>> StreamRows(
+            ParameterizedSql select, CancellationToken cancellationToken)
+        {
+            using var command = CreateCommand(select.Sql, select.Parameters);
+            command.UseStreamingMode = true;
+            _openStreams++;
+            try
+            {
+                using var reader = command.ExecuteReader();
+                while (true)
+                {
+                    ThrowIfDisposed();
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!reader.Read())
+                        yield break;
+                    var row = new Dictionary<string, object?>(reader.FieldCount, StringComparer.Ordinal);
+                    for (var i = 0; i < reader.FieldCount; i++)
+                    {
+                        object? value = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        if (value is DateOnly date)
+                            value = date.ToDateTime(TimeOnly.MinValue);
+                        row[reader.GetName(i)] = value;
+                    }
+                    yield return row;
+                }
+            }
+            finally
+            {
+                _openStreams--;
             }
         }
 
@@ -586,7 +680,7 @@ namespace squalor.DataBall
                 Execute($"CREATE TEMP TABLE \"_addcol\" (\"rid\" BIGINT, \"v\" {sqlType})");
                 try
                 {
-                    using (var appender = _connection.CreateAppender("_addcol"))
+                    using (var appender = CreateAppender("_addcol"))
                     {
                         for (int i = 0; i < n; i++)
                         {
@@ -740,8 +834,14 @@ namespace squalor.DataBall
                     var cols = GetColumns();
                     foreach (var key in keyOrder)
                     {
-                        if (cols.Any(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase)))
+                        var existing = cols.FirstOrDefault(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+                        if (existing.Name is not null)
+                        {
+                            var widened = InferredNullColumnType("data", existing, FirstValue(rows, key), expectedTypes);
+                            if (widened is not null)
+                                Execute($"ALTER TABLE \"data\" ALTER COLUMN {QuoteIdent(existing.Name)} SET DATA TYPE {widened}");
                             continue;
+                        }
                         Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
                     }
                 }
@@ -751,7 +851,7 @@ namespace squalor.DataBall
                 foreach (var values in rows)
                     coercedRows.Add(CoerceAppenderValues(columns, values));
 
-                using var appender = _connection.CreateAppender("data");
+                using var appender = CreateAppender("data");
                 foreach (var coerced in coercedRows)
                     WriteCoercedAppenderRow(appender, coerced);
             });
@@ -765,7 +865,7 @@ namespace squalor.DataBall
 
         internal void SetMetadata(string key, object? value)
         {
-            ThrowIfDisposed();
+            ThrowIfConnectionBusy();
             ValidateName(key, "Metadata key");
             var unwrapped = Unwrap(value);
             _metadata[key] = unwrapped;
@@ -1230,7 +1330,7 @@ namespace squalor.DataBall
             if (count <= 0 || !DataTableExists())
                 return;
             var columns = GetColumns();
-            using var appender = _connection.CreateAppender("data");
+            using var appender = CreateAppender("data");
             for (long i = 0; i < count; i++)
             {
                 var row = appender.CreateRow();
@@ -1264,13 +1364,28 @@ namespace squalor.DataBall
 
         private void AppendSingleColumn<T>(IReadOnlyList<T> values)
         {
-            using var appender = _connection.CreateAppender("data");
+            using var appender = CreateAppender("data");
             for (int i = 0; i < values.Count; i++)
             {
                 var row = appender.CreateRow();
                 AppendClr(row, values[i]);
                 row.EndRow();
             }
+        }
+
+        private string? InferredNullColumnType(
+            string table, (string Name, string DuckDbType) column, object? value,
+            IReadOnlyDictionary<string, Type>? expectedTypes)
+        {
+            value = Unwrap(value);
+            if (NormalizeType(column.DuckDbType) != "VARCHAR" || value is null
+                || expectedTypes?.Keys.Any(key => key.Equals(column.Name, StringComparison.OrdinalIgnoreCase)) == true)
+                return null;
+            var type = ToDuckDbType(ClrTypeOf(value));
+            if (type == "VARCHAR")
+                return null;
+            var nonNull = ExecuteScalar($"SELECT COUNT({QuoteIdent(column.Name)}) FROM {QuoteIdent(table)}");
+            return Convert.ToInt64(nonNull, CultureInfo.InvariantCulture) == 0 ? type : null;
         }
 
         private static object? FirstValue(
@@ -1293,7 +1408,7 @@ namespace squalor.DataBall
             IReadOnlyList<(string Name, string DuckDbType)> columns,
             IReadOnlyDictionary<string, object?> values)
         {
-            using var appender = _connection.CreateAppender("data");
+            using var appender = CreateAppender("data");
             WriteAppenderRow(appender, columns, values);
         }
 
@@ -1369,6 +1484,7 @@ namespace squalor.DataBall
 
         private DuckDBCommand CreateCommand(string sql, DuckDBParameter[] parameters)
         {
+            ThrowIfConnectionBusy();
             var cmd = _connection.CreateCommand();
             cmd.CommandText = sql;
             if (_currentTx is not null)
@@ -1490,6 +1606,24 @@ namespace squalor.DataBall
             {
                 throw new DataBallException($"Cannot convert value of type {value.GetType().Name} to {t.Name}", ex);
             }
+        }
+
+        internal static Type ReadTypeOf(string duckDbType)
+        {
+            var type = NormalizeType(duckDbType);
+            if (type.StartsWith("DECIMAL", StringComparison.Ordinal))
+                return typeof(double);
+            return type switch
+            {
+                "TINYINT" or "SMALLINT" or "UTINYINT" or "USMALLINT"
+                    or "UNSIGNEDTINYINT" or "UNSIGNEDSMALLINT" or "INTEGER" => typeof(int),
+                "UINTEGER" or "UNSIGNEDINTEGER" or "BIGINT" => typeof(long),
+                "UBIGINT" or "UNSIGNEDBIGINT" or "HUGEINT" or "DOUBLE" => typeof(double),
+                "FLOAT" => typeof(float),
+                "BOOLEAN" => typeof(bool),
+                "DATE" or "TIMESTAMP" => typeof(DateTime),
+                _ => typeof(string)
+            };
         }
 
         internal static Type FromDuckDbType(string duckDbType)
@@ -1693,6 +1827,19 @@ namespace squalor.DataBall
         {
             if (string.IsNullOrWhiteSpace(name))
                 throw new DataBallException($"{kind} name is required");
+        }
+
+        private DuckDBAppender CreateAppender(string table)
+        {
+            ThrowIfConnectionBusy();
+            return _connection.CreateAppender(table);
+        }
+
+        internal void ThrowIfConnectionBusy()
+        {
+            ThrowIfDisposed();
+            if (_openStreams > 0)
+                throw new DataBallException("A row stream is open; finish or dispose it first");
         }
 
         private void ThrowIfDisposed()

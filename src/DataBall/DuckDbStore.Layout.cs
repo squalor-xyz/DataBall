@@ -228,32 +228,62 @@ namespace squalor.DataBall
             IReadOnlyList<string> keyOrder,
             IReadOnlyDictionary<string, Type>? expectedTypes)
         {
-            var viewCols = GetColumns();
-            var parts = new List<string>(keyOrder.Count);
-            foreach (var key in keyOrder)
-            {
-                var existing = viewCols.FirstOrDefault(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-                var type = existing.Name is null
-                    ? ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))
-                    : existing.DuckDbType;
-                parts.Add($"{QuoteIdent(key)} {type}");
-            }
-
+            var previousLayout = Layout;
+            var previousConfig = LayoutConfig;
             try
             {
-                Execute($"CREATE OR REPLACE TEMP TABLE {QuoteIdent(RowsTemp)} ({string.Join(", ", parts)})");
-                var columns = GetColumnsOf(RowsTemp);
-                using (var appender = _connection.CreateAppender(RowsTemp))
+                InTransaction(() =>
                 {
-                    foreach (var values in rows)
-                        WriteCoercedAppenderRow(appender, CoerceAppenderValues(columns, values));
-                }
+                    var viewCols = GetColumns();
+                    var widened = new List<(string Name, string Type)>();
+                    foreach (var column in viewCols)
+                    {
+                        var type = InferredNullColumnType("data", column, FirstValue(rows, column.Name), expectedTypes);
+                        if (type is not null)
+                            widened.Add((column.Name, type));
+                    }
+                    if (widened.Count > 0)
+                    {
+                        Execute("DROP VIEW \"data\"");
+                        foreach (var (name, type) in widened)
+                            Execute($"ALTER TABLE {QuoteIdent(Layout!.TableFor(name))} ALTER COLUMN {QuoteIdent(name)} SET DATA TYPE {type}");
+                        CreateDataView(Layout!);
+                        viewCols = GetColumns();
+                    }
+                    var parts = new List<string>(keyOrder.Count);
+                    foreach (var key in keyOrder)
+                    {
+                        var existing = viewCols.FirstOrDefault(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+                        var type = existing.Name is null
+                            ? ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))
+                            : existing.DuckDbType;
+                        parts.Add($"{QuoteIdent(key)} {type}");
+                    }
 
-                AppendStagingIntoLayout(RowsTemp);
+                    try
+                    {
+                        Execute($"CREATE OR REPLACE TEMP TABLE {QuoteIdent(RowsTemp)} ({string.Join(", ", parts)})");
+                        var columns = GetColumnsOf(RowsTemp);
+                        using (var appender = CreateAppender(RowsTemp))
+                        {
+                            foreach (var values in rows)
+                                WriteCoercedAppenderRow(appender, CoerceAppenderValues(columns, values));
+                        }
+
+                        AppendStagingIntoLayout(RowsTemp);
+                    }
+                    finally
+                    {
+                        DropTemp(RowsTemp);
+                    }
+                });
             }
-            finally
+            catch
             {
-                DropTemp(RowsTemp);
+                RestoreLayout(previousLayout, previousConfig);
+                if (_currentTx is null)
+                    ReloadMetadata();
+                throw;
             }
         }
 

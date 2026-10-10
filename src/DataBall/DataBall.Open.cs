@@ -9,6 +9,9 @@ namespace squalor.DataBall
 {
     public sealed partial class DataBall
     {
+        internal const int HandlerBatchSize = 10_000;
+        internal static Action<DataBall, int>? AfterHandlerBatchForTests;
+
         private static readonly object HandlerGate = new();
         private static readonly List<IFormatHandler> Handlers = new();
 
@@ -87,21 +90,37 @@ namespace squalor.DataBall
                 var handler = FindHandler(path);
                 if (handler is not null && !handler.DelegatesToGenericImport)
                 {
-                    var batch = new List<IReadOnlyDictionary<string, object?>>();
+                    var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);
                     await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
+                    {
                         batch.Add(row);
+                        if (batch.Count == HandlerBatchSize)
+                        {
+                            db._store.AddRows(batch, db._expectedColumnTypes);
+                            db.RememberRow(batch[^1]);
+                            AfterHandlerBatchForTests?.Invoke(db, batch.Count);
+                            batch.Clear();
+                        }
+                    }
                     if (batch.Count > 0)
-                        db.AddRows(batch);
+                    {
+                        db._store.AddRows(batch, db._expectedColumnTypes);
+                        db.RememberRow(batch[^1]);
+                        AfterHandlerBatchForTests?.Invoke(db, batch.Count);
+                    }
+                    db.SplitIfLayout();
                     return db;
                 }
 
                 await db.ImportAsync(path).ConfigureAwait(false);
                 return db;
             }
-            catch
+            catch (Exception ex)
             {
                 db.Dispose();
-                throw;
+                if (ex is DataBallException or OperationCanceledException)
+                    throw;
+                throw new DataBallException("Open failed", ex);
             }
         }
 
