@@ -37,15 +37,16 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Opens <paramref name="path"/> into a new session. Overlay schema JSON is optional.
-        /// Registered handlers run before generic import.
+        /// Native DuckDB files open directly, read-only by default, before registered handlers.
         /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
         /// <param name="path">File to open.</param>
-        /// <param name="schemaPath">Optional overlay config JSON (merged onto native defaults).</param>
+        /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
+        /// <param name="writable">Allow changes to a native .ball session.</param>
         /// <exception cref="DataBallException">Missing path/file, unknown format, or import failure.</exception>
-        public static DataBall Open(string path, string? schemaPath = null)
+        public static DataBall Open(string path, string? schemaPath = null, bool writable = false)
         {
-            return Task.Run(() => OpenAsync(path, schemaPath)).GetAwaiter().GetResult();
+            return Task.Run(() => OpenAsync(path, schemaPath, writable)).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -54,12 +55,28 @@ namespace squalor.DataBall
         public static async Task<DataBall> OpenAsync(
             string path,
             string? schemaPath = null,
+            bool writable = false,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
             if (!File.Exists(path))
                 throw new DataBallException($"File not found: {path}");
+
+            var native = false;
+            using (var sniff = File.OpenRead(path))
+            {
+                var magic = new byte[12];
+                var count = sniff.Read(magic, 0, magic.Length);
+                if (count >= 12 && magic.AsSpan(8, 4).SequenceEqual("DUCK"u8))
+                    native = true;
+                if (Path.GetExtension(path).Equals(".ball", StringComparison.OrdinalIgnoreCase)
+                    && count >= 2 && magic[0] == 'P' && magic[1] == 'K')
+                    throw new DataBallException("1.x ZIP .ball files are unsupported");
+            }
+
+            if (native)
+                return new DataBall(schemaPath, null, path, readOnly: !writable, native: true);
 
             var db = new DataBall(schemaPath);
             try

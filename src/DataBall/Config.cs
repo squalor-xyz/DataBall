@@ -143,13 +143,34 @@ namespace squalor.DataBall
             try
             {
                 var json = File.ReadAllText(path);
-                var loaded = JsonSerializer.Deserialize<Config>(json, LoadOptions) ?? throw new DataBallException("Failed to deserialize config");
-                return Normalize(loaded);
+                return FromJson(json);
             }
             catch (Exception ex)
             {
                 throw new DataBallException("Failed to load config", ex);
             }
+        }
+
+        internal string ToJson() => JsonSerializer.Serialize(this, LoadOptions);
+
+        private static void ValidateReservedTables(Config config)
+        {
+            if (config.Tables is null)
+                return;
+            foreach (var name in config.Tables.Keys)
+            {
+                if (name.Equals("_databall", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals("meta", StringComparison.OrdinalIgnoreCase))
+                    throw new DataBallException($"Reserved table name: {name}");
+            }
+        }
+
+        internal static Config FromJson(string json)
+        {
+            var loaded = JsonSerializer.Deserialize<Config>(json, LoadOptions)
+                ?? throw new DataBallException("Failed to deserialize config");
+            ValidateReservedTables(loaded);
+            return Normalize(loaded);
         }
 
         /// <summary>
@@ -170,6 +191,8 @@ namespace squalor.DataBall
             ArgumentNullException.ThrowIfNull(baseline);
             ArgumentNullException.ThrowIfNull(overlay);
 
+            ValidateReservedTables(overlay);
+            ValidateReservedTables(baseline);
             var result = new Config();
             CopyInto(result, baseline);
             CopyInto(result, overlay);
@@ -229,6 +252,28 @@ namespace squalor.DataBall
             return ParameterRole.Meas;
         }
 
+        /// <summary>
+        /// Maps supported CLR column types to their config names.
+        /// </summary>
+        internal static Dictionary<string, string> ToColumnTypeNames(IReadOnlyDictionary<string, Type> types)
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var (name, type) in types)
+                map[name] = TypeName(type);
+            return map;
+        }
+
+        private static string TypeName(Type type)
+        {
+            if (type == typeof(int)) return "int";
+            if (type == typeof(long)) return "long";
+            if (type == typeof(float)) return "float";
+            if (type == typeof(double)) return "double";
+            if (type == typeof(bool)) return "bool";
+            if (type == typeof(DateTime)) return "datetime";
+            if (type == typeof(string)) return "string";
+            return type.FullName ?? type.Name;
+        }
         /// <summary>
         /// Maps a config type name to a supported CLR type.
         /// </summary>

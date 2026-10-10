@@ -248,7 +248,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Tables_FileBacked_ReopenWithConfig_Reads_WithoutConfig_Throws()
+        public async Task Tables_FileBacked_ReopenUsesStoredConfig()
         {
             var dir = TempDir();
             var path = Path.Combine(dir, "session.duckdb");
@@ -264,8 +264,11 @@ namespace squalor.DataBall.Tests
                     Assert.Equal(9, Count(reopened, "setup"));
                 }
 
-                var ex = Assert.Throws<DataBallException>(() => new DataBall(databasePath: path));
-                Assert.Contains("tables", ex.Message, StringComparison.OrdinalIgnoreCase);
+                using (var stored = new DataBall(databasePath: path))
+                {
+                    Assert.Equal("VIEW", TableType(stored, "data"));
+                    Assert.Equal(81, Count(stored, "data"));
+                }
 
                 using var again = new DataBall(TablesConfig(), databasePath: path);
                 Assert.Equal(81, Count(again, "data"));
@@ -320,7 +323,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_WithLayout_ContainsManifestTablesAndDataParquet_AndRoundTrips()
+        public async Task Ball_WithLayout_Native_RoundTrips()
         {
             var dir = TempDir();
             try
@@ -333,17 +336,9 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                using (var zip = ZipFile.OpenRead(ball))
-                {
-                    var names = zip.Entries.Select(e => e.FullName).ToList();
-                    Assert.Contains("data.parquet", names);
-                    Assert.Contains("manifest.json", names);
-                    Assert.Contains("config.json", names);
-                    foreach (var table in FixtureTables)
-                        Assert.Contains("tables/" + table + ".parquet", names);
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(ball)[8..12]);
 
-                // No config on the reader: config.json in the ball declares the layout.
+                // The stored config declares the layout.
                 using var imported = new DataBall();
                 await imported.ImportAsync(ball);
                 Assert.Equal("VIEW", TableType(imported, "data"));
@@ -363,7 +358,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_WithLayout_Filtered_WritesOnlyWideParquet()
+        public async Task Ball_WithLayout_Filtered_SavesWholeSession()
         {
             var dir = TempDir();
             try
@@ -379,18 +374,12 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                using (var zip = ZipFile.OpenRead(ball))
-                {
-                    var names = zip.Entries.Select(e => e.FullName).ToList();
-                    Assert.Contains("data.parquet", names);
-                    Assert.DoesNotContain("manifest.json", names);
-                    Assert.DoesNotContain(names, n => n.StartsWith("tables/", StringComparison.Ordinal));
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(ball)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(ball);
                 Assert.Equal("VIEW", TableType(imported, "data"));
-                Assert.Equal(27, Count(imported, "data"));
+                Assert.Equal(81, Count(imported, "data"));
             }
             finally
             {
@@ -399,7 +388,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_V1_WideOnly_IntoLayoutSession_Splits()
+        public async Task Ball_Wide_IntoLayoutSession_Splits()
         {
             var dir = TempDir();
             try
@@ -411,8 +400,7 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                using (var zip = ZipFile.OpenRead(ball))
-                    Assert.DoesNotContain(zip.Entries, e => e.FullName == "manifest.json");
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(ball)[8..12]);
 
                 using var imported = new DataBall(TablesConfig());
                 await imported.ImportAsync(ball);
@@ -427,7 +415,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_V2_ConfigJsonTables_OverrideSessionLayout_LikeEveryOverlay()
+        public async Task Ball_StoredTables_OverrideSessionLayout()
         {
             var dir = TempDir();
             try
@@ -439,7 +427,7 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                // The ball's config.json is an overlay on the session config; its tables win, as columns/relationships do.
+                // The stored config overlays the session config.
                 var other = WriteConfig(dir, """{ "tables": { "rf": { "kind": "measurements", "columns": ["EVM", "Gain"] } } }""");
                 using var imported = new DataBall(other);
                 await imported.ImportAsync(ball);
@@ -447,35 +435,6 @@ namespace squalor.DataBall.Tests
                 Assert.Equal(FixtureTables, BaseTables(imported));
                 Assert.Equal(81, Count(imported, "data"));
                 Assert.Equal(new[] { "device", "setup", "sweep", "rf", "dc" }, imported.Schema.Tables.Keys);
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
-        [Fact]
-        public async Task Ball_V2_MissingTableParquet_FallsBackToWideParquet_AndResplits()
-        {
-            var dir = TempDir();
-            try
-            {
-                var ball = Path.Combine(dir, "sweep.ball");
-                using (var db = new DataBall(TablesConfig()))
-                {
-                    await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-                    await db.SaveAsync(ball);
-                }
-
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Update))
-                    zip.GetEntry("tables/dc.parquet")!.Delete();
-
-                using var imported = new DataBall();
-                await imported.ImportAsync(ball);
-                Assert.Equal("VIEW", TableType(imported, "data"));
-                Assert.Equal(FixtureTables, BaseTables(imported));
-                Assert.Equal(81, Count(imported, "data"));
-                Assert.Equal(81, Count(imported, "dc"));
             }
             finally
             {
@@ -1467,7 +1426,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_V2_AfterAppend_ManifestHasNewColumn_RoundTrips()
+        public async Task Ball_Native_AfterAppend_NewColumn_RoundTrips()
         {
             var dir = TempDir();
             try
@@ -1480,12 +1439,7 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                using (var zip = ZipFile.OpenRead(ball))
-                {
-                    using var reader = new StreamReader(zip.GetEntry("manifest.json")!.Open());
-                    var manifest = System.Text.Json.JsonSerializer.Deserialize<BallManifest>(reader.ReadToEnd(), BallManifest.JsonOptions)!;
-                    Assert.Equal("Note", manifest.Columns[^1]);
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(ball)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(ball);
@@ -1545,17 +1499,19 @@ namespace squalor.DataBall.Tests
                     await src.ImportAsync(Fixture("semiconductor-sweep.csv"));
                     await src.SaveAsync(ball);
                 }
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Update))
+                using (var store = new DuckDbStore(ball))
                 {
-                    zip.GetEntry("metadata.json")!.Delete();
-                    using var w = new StreamWriter(zip.CreateEntry("metadata.json").Open());
-                    w.Write("{ not json");
+                    store.Execute("DROP TABLE meta");
+                    store.Execute("CREATE TABLE meta (wrong VARCHAR)");
                 }
 
                 using var db = new DataBall(TablesConfig());
                 await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
                 db.SetMetadata("Operator", "Ada");
+                var versions = Count(db, "_databall");
                 await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(ball));
+                Assert.Equal(versions, Count(db, "_databall"));
+                Assert.Empty(db.Query("SELECT database_name FROM duckdb_databases() WHERE starts_with(database_name, 'import_')"));
 
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(FixtureTables, BaseTables(db));
@@ -1575,42 +1531,6 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_V2_TableParquetMissingColumn_OnLayoutSession_FallsBackToWide()
-        {
-            var dir = TempDir();
-            try
-            {
-                var ball = Path.Combine(dir, "sweep.ball");
-                using (var src = new DataBall(TablesConfig()))
-                {
-                    await src.ImportAsync(Fixture("semiconductor-sweep.csv"));
-                    await src.SaveAsync(ball);
-                }
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Update))
-                {
-                    // dc.parquet replaced by device.parquet: has device_key/SN, lacks _row/I_Total.
-                    var device = Path.Combine(dir, "device.parquet");
-                    zip.GetEntry("tables/device.parquet")!.ExtractToFile(device);
-                    zip.GetEntry("tables/dc.parquet")!.Delete();
-                    zip.CreateEntryFromFile(device, "tables/dc.parquet");
-                }
-
-                using var db = new DataBall(TablesConfig());
-                await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-                db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
-                await db.ImportAsync(ball);
-                Assert.Equal("VIEW", TableType(db, "data"));
-                Assert.Equal(FixtureTables, BaseTables(db));
-                Assert.Equal(81, Count(db, "data"));
-                Assert.Equal(81, Count(db, "dc"));
-            }
-            finally
-            {
-                Directory.Delete(dir, true);
-            }
-        }
-
-        [Fact]
         public async Task Ball_IntroducingBadTables_IntoWideSession_IsAtomic_LeavesSessionWide()
         {
             var dir = TempDir();
@@ -1622,11 +1542,11 @@ namespace squalor.DataBall.Tests
                     await src.ImportAsync(Fixture("semiconductor-sweep.csv"));
                     await src.SaveAsync(ball);
                 }
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Update))
+                using (var store = new DuckDbStore(ball))
                 {
-                    zip.GetEntry("config.json")!.Delete();
-                    using var w = new StreamWriter(zip.CreateEntry("config.json").Open());
-                    w.Write("""{ "tables": { "setup": { "kind": "dimension", "columns": ["Teststand", "Temp"], "key": ["Teststand"] } } }""");
+                    var config = store.ReadConfig();
+                    config.Tables["setup"] = new TableSpec { Kind = "dimension", Columns = new() { "Teststand", "Temp" }, Key = new() { "Teststand" } };
+                    store.WriteConfig(config);
                 }
 
                 using var db = new DataBall();
@@ -1757,23 +1677,19 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Ball_ConfigMetadata_StillWinsOverMetadataJson()
+        public async Task Ball_ConfigMetadata_WinsOverStoredMetadata()
         {
             var dir = TempDir();
             try
             {
                 var ball = Path.Combine(dir, "meta.ball");
-                using (var zip = ZipFile.Open(ball, ZipArchiveMode.Create))
-                {
-                    using (var w = new StreamWriter(zip.CreateEntry("metadata.json").Open()))
-                        w.Write("""{ "Operator": "lab" }""");
-                    using (var w = new StreamWriter(zip.CreateEntry("config.json").Open()))
-                        w.Write("""{ "metadata": { "Operator": "jon" } }""");
-                }
+                var cfg = WriteConfig(dir, """{"metadata":{"Operator":"Ada"}}""");
+                using (var source = new DataBall(cfg, databasePath: ball))
+                    source.SetMetadata("Operator", "metadata");
 
                 using var db = new DataBall();
                 await db.ImportAsync(ball);
-                Assert.Equal("jon", db.Metadata["Operator"]);
+                Assert.Equal("Ada", db.Metadata["Operator"]);
             }
             finally
             {
@@ -2250,7 +2166,7 @@ namespace squalor.DataBall.Tests
         {
             return db.Query("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name <> 'meta'
+                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name NOT IN ('meta', '_databall')
                 ORDER BY table_name
                 """).Select(r => (string)r["table_name"]!).ToArray();
         }

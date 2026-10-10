@@ -27,7 +27,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Stores a filter for export/save. Does not change <c>Query(sql)</c> or the <c>data</c> table.
+        /// Stores a filter for CSV, Parquet, and archive export. Native .ball saves ignore it. Does not change <c>Query(sql)</c> or the <c>data</c> table.
         /// Pass <c>null</c> to clear.
         /// </summary>
         public void ApplyFilter(SessionFilter? filter)

@@ -22,7 +22,7 @@ namespace squalor.DataBall.Export
         Archive,
 
         /// <summary>
-        /// Export as custom .ball format (ZIP with Parquet and metadata).
+        /// Save the whole session as a native DuckDB .ball file.
         /// </summary>
         Ball
     }

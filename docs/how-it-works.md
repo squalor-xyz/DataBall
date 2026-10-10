@@ -31,11 +31,11 @@ flowchart LR
     Read --> Out["Save / export<br/><small>SaveAsync .ball,<br/>ExportAsync</small>"]
 ```
 
-Compacting is optional. `ApplyFilter` limits what export and save write out.
+Compacting is optional. `ApplyFilter` limits CSV, Parquet, and archive exports; native saves write the whole session.
 
 ## 3. Where the data lives
 
-The working store and the file you share are two different things. By default DuckDB lives only in memory. A `.ball` is the portable copy.
+The default store lives in memory. A `.ball` is a native DuckDB file: open it directly as a read-only session, or request `writable: true`. Save produces a compact whole-session copy.
 
 ```mermaid
 flowchart LR
@@ -43,12 +43,13 @@ flowchart LR
         Mem["In memory<br/><small>default; gone on Dispose</small>"]
         File["session.duckdb<br/><small>opt-in databasePath;<br/>kept after Dispose</small>"]
     end
-    store -->|"SaveAsync"| Ball["session.ball<br/><small>zip of parquet + json</small>"]
-    Ball -->|"Open / ImportAsync"| New["New session<br/><small>fresh store</small>"]
+    store -->|"SaveAsync: COPY FROM DATABASE"| Ball["session.ball<br/><small>native DuckDB file</small>"]
+    Ball -->|"Open: direct read-only store"| Session["Session over the file"]
+    Ball -->|"ImportAsync: attach and stage"| New["Copy into the destination session"]
 ```
 
-- **Share or move data as `.ball`.** Any tool can read it: unzip it and open the parquet. It is what hosts hand to each other.
-- **A `.duckdb` file is the working engine, not an interchange format.** Reopen it with `new DataBall(databasePath: ...)`. A layout session needs the same `tables` config. Never point this at `catalog.duckdb`.
+- **Share or move data as `.ball`.** Open it with DataBall or DuckDB; config and metadata travel inside the database.
+- **A file-backed working store persists after disposal.** Reopen it with `new DataBall(databasePath: ...)`; its stored config binds the layout. Never point this at `catalog.duckdb`.
 
 ## 4. Imports are all-or-nothing
 
@@ -191,25 +192,24 @@ flowchart LR
 
 ## 11. The .ball file
 
-A `.ball` is a ZIP archive. v2 (layout sessions) adds per-table parquet files but keeps the wide `data.parquet`, so 1.2.0 readers still work. Source: `Export/ExportManager.cs`, `Import/ImportManager.cs`.
+A `.ball` v3 is a DuckDB database. `Open` checks native magic before handlers, opens read-only by default, reads the latest `_databall` config row, and binds the stored layout. An overlay must describe the same tables. Public write methods reject read-only sessions before changing session state. ZIP `.ball` v1/v2 support is removed.
 
 ```mermaid
 flowchart LR
-    subgraph ball["session.ball (zip)"]
-        meta["metadata.json"]
-        data["data.parquet<br/><small>wide rows</small>"]
-        cfg["config.json<br/><small>optional</small>"]
-        man["manifest.json<br/><small>v2</small>"]
-        tbl["tables/*.parquet<br/><small>v2</small>"]
+    subgraph ball["session.ball (DuckDB)"]
+        meta["meta: key / value"]
+        data["data: wide table or layout view"]
+        cfg["_databall: versioned config JSON<br/>ball_format = 3, engine / storage versions, last-save timestamp"]
+        tbl["physical layout tables"]
     end
 ```
 
-```mermaid
-flowchart TD
-    A["Open .ball"] --> B["Apply config.json"]
-    B --> C{"v2 manifest matches<br/>session tables?"}
-    C -- yes --> D["Load tables/*.parquet"]
-    C -- no --> E["Load data.parquet<br/>and re-split if needed"]
-    D --> F["Apply metadata.json"]
-    E --> F
-```
+`SaveAsync` ignores session filters and saves all rows. It attaches a temporary destination, uses `COPY FROM DATABASE`, detaches it, and replaces the destination. Saving a writable session to its own live path runs `CHECKPOINT`. Filters apply to CSV, Parquet, and archive export.
+
+Native `ImportAsync` attaches the source read-only, merges the schema config subset, stages its wide `data`, routes rows through the existing merge/append path, and loads metadata with config metadata taking precedence. All changes commit together or roll back together. Detach runs after commit or rollback because DuckDB prohibits it while the transaction has outstanding reads.
+
+Config history appends only when merged config changes; the highest version is current. `_databall` and `meta` are reserved table names. DuckDB's default storage version is retained; no older-engine reader floor is claimed. The same-path in-process gate also applies to read-only opens. Cross-process snapshot publication is outside this change.
+
+Native saves stamp the latest `_databall` row with the running engine's `version()`, the destination's actual `duckdb_databases()` storage tag, and `written_at` (time of that save). The engine and storage versions are read after the database copy and before detach. Saving a writable session to its own file stamps that row before checkpointing. Config history grows only when config changes, including a read-only overlay saved to a copy. A read-only session cannot save to its own path (it throws); save to another path, or open with `writable: true`.
+
+`Open` uses the full stored config; an overlay merges on top and must keep the same table layout (table order does not matter). Stored `meta` values are authoritative on reopen; only overlay metadata overrides them, in memory for a read-only session. Native `ImportAsync` merges only columns, relationships, tables, and config metadata. The receiving session keeps its CSV settings, metadata fields, metadata policy, and other settings.

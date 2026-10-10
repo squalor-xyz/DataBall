@@ -602,11 +602,7 @@ namespace squalor.DataBall.Tests
                 }
 
                 Assert.True(File.Exists(path));
-                using (var zip = ZipFile.OpenRead(path))
-                {
-                    Assert.Contains(zip.Entries, e => e.FullName.Replace('\\', '/') == "data.parquet");
-                    Assert.Contains(zip.Entries, e => e.FullName.Replace('\\', '/') == "metadata.json");
-                }
+                Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);

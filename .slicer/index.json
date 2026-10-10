@@ -157,7 +157,7 @@
       "id": "db-06",
       "title": "DataBall `.ball` v3 must be a DuckDB file",
       "short_title": "DataBall `.ball` v3 must be a DuckDB file",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-05"
@@ -270,7 +270,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 3,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
