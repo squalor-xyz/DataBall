@@ -157,6 +157,12 @@ namespace squalor.DataBall
 
         internal bool IsReadOnly { get; }
 
+        /// <summary>
+        /// The session's <c>metadataPolicy</c>, read when an append reconciles stored metadata with incoming
+        /// columns: under <c>first</c> the stored value wins and the incoming column is ignored.
+        /// </summary>
+        internal Func<string?>? MetadataPolicySource { get; set; }
+
         internal string? StorePath => _exclusivePath;
 
         internal bool HasStoredConfig => TableExists("_databall");
@@ -1221,7 +1227,7 @@ namespace squalor.DataBall
             var sourceRowCount = RowCountOf(sourceTable);
             // Every type merge is decided before the first change, so a conflict leaves the session as it was.
             var widen = PlanColumnWidening(GetColumns(), GetColumnsOf(sourceTable), sourceTable, incomingName, configTypes, _ => "data");
-            ApplyMetadataAgainstSource(sourceTable);
+            var backfills = ApplyMetadataAgainstSource(sourceTable);
 
             var srcCols = GetColumnsOf(sourceTable);
             var dstCols = GetColumns();
@@ -1235,16 +1241,20 @@ namespace squalor.DataBall
                 dstByName[srcName] = (srcName, srcType);
             }
 
+            // Widened columns take the wider type in place; their values insert without a cast.
+            var widened = new HashSet<string>(widen.Select(w => w.Column), StringComparer.OrdinalIgnoreCase);
+            foreach (var (column, _, target) in widen)
+                Execute($"ALTER TABLE \"data\" ALTER COLUMN {QuoteIdent(column)} SET DATA TYPE {target}");
+
+            // Every ALTER comes first: DuckDB fails the commit when an ALTER follows an UPDATE of the same table.
+            foreach (var (column, value) in backfills)
+                ExecuteParameterized($"UPDATE \"data\" SET {QuoteIdent(column)} = $v", Param("v", value));
+
             if (srcCols.Count == 0)
             {
                 InsertNullRows(sourceRowCount);
                 return;
             }
-
-            // Widened columns take the wider type in place; their values insert without a cast.
-            var widened = new HashSet<string>(widen.Select(w => w.Column), StringComparer.OrdinalIgnoreCase);
-            foreach (var (column, _, target) in widen)
-                Execute($"ALTER TABLE \"data\" ALTER COLUMN {QuoteIdent(column)} SET DATA TYPE {target}");
 
             var selectParts = new List<string>(srcCols.Count);
             foreach (var (srcName, srcType) in srcCols)
@@ -1362,7 +1372,7 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Imports a CSV. <paramref name="prepareStaging"/> runs against the staging table after type
-        /// coercion and before the merge (layout sessions apply the CSV schema there).
+        /// coercion and before the merge (the CSV schema is applied there, for wide and layout sessions alike).
         /// </summary>
         internal void ImportCsv(
             string path,
@@ -1670,7 +1680,12 @@ namespace squalor.DataBall
                 prepareStaging?.Invoke("_staging");
                 // Extracting metadata may have consumed every staging column (and the table with it).
                 if (!TableExists("_staging"))
+                {
+                    // A replace still replaces: the previous wide table goes, as it did when the merge created it first.
+                    if (!merging && Layout is null && DataTableExists())
+                        Execute("DROP TABLE \"data\"");
                     return;
+                }
                 MergeOrAppendFromTable("_staging", append, incomingName ?? $"'{path}'", configTypes ?? expectedTypes);
             }
             finally
@@ -1701,8 +1716,18 @@ namespace squalor.DataBall
                 Execute(sql);
         }
 
-        private void ApplyMetadataAgainstSource(string sourceTable)
+        /// <summary>
+        /// Reconciles the stored metadata with the columns of <paramref name="sourceTable"/> before an append.
+        /// A source column equal to the stored value is dropped from the source; so is any such column under
+        /// <c>metadataPolicy: first</c>, where the stored value wins. A differing column is demoted: it is added
+        /// to <c>"data"</c> and its key leaves the metadata. The old value is returned for the caller to backfill
+        /// once its own ALTERs are done. The source keeps <see cref="Lineage.KeyColumn"/>, so a row from a file
+        /// that held only metadata still carries its key.
+        /// </summary>
+        private List<(string Column, object? Value)> ApplyMetadataAgainstSource(string sourceTable)
         {
+            var backfills = new List<(string Column, object? Value)>();
+            var storedWins = string.Equals(MetadataPolicySource?.Invoke(), "first", StringComparison.OrdinalIgnoreCase);
             var dstNames = new HashSet<string>(GetColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
             var qSrc = QuoteIdent(sourceTable);
 
@@ -1720,23 +1745,28 @@ namespace squalor.DataBall
                     continue;
 
                 var qK = QuoteIdent(srcCol.Name);
-                var distinctCount = Convert.ToInt64(
+                var differing = storedWins ? 0 : Convert.ToInt64(
                     ExecuteScalarParameterized(
                         $"SELECT COUNT(*) FILTER (WHERE {qK} IS DISTINCT FROM $v) FROM {qSrc}",
                         Param("v", pair.Value)),
                     CultureInfo.InvariantCulture);
 
-                if (distinctCount == 0)
+                if (differing == 0)
                 {
-                    DropColumnFromTable(sourceTable, srcCol.Name);
+                    // Never drop the source table while another column (the key) remains.
+                    if (srcCols.Count > 1)
+                        Execute($"ALTER TABLE {qSrc} DROP COLUMN {qK}");
+                    else
+                        DropColumnFromTable(sourceTable, srcCol.Name);
                     continue;
                 }
 
                 Execute($"ALTER TABLE \"data\" ADD COLUMN {qK} {srcCol.DuckDbType}");
-                ExecuteParameterized($"UPDATE \"data\" SET {qK} = $v", Param("v", pair.Value));
+                backfills.Add((srcCol.Name, pair.Value));
                 dstNames.Add(srcCol.Name);
                 RemoveMetadata(pair.Key);
             }
+            return backfills;
         }
 
         /// <summary>Drops a column from any table; drops the table itself when it was the last column.</summary>
