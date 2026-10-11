@@ -45,18 +45,34 @@ namespace squalor.DataBall
             long inputBytes = 0;
             foreach (var path in inputPaths)
             {
-                if (Directory.Exists(path))
+                try
                 {
-                    foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
-                        inputBytes = checked(inputBytes + new FileInfo(file).Length);
+                    if (Directory.Exists(path))
+                    {
+                        foreach (var file in Directory.EnumerateFiles(path, "*", SearchOption.AllDirectories))
+                            inputBytes = checked(inputBytes + new FileInfo(file).Length);
+                    }
+                    else
+                    {
+                        if (!File.Exists(path))
+                            throw new DataBallException($"File not found: {path}");
+                        inputBytes = checked(inputBytes + new FileInfo(path).Length);
+                    }
                 }
-                else
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                 {
-                    if (!File.Exists(path))
-                        throw new DataBallException($"File not found: {path}");
-                    inputBytes = checked(inputBytes + new FileInfo(path).Length);
+                    throw new DataBallException($"Cannot read '{path}': {ex.Message}", ex);
                 }
             }
+            return ResolveStore(inputBytes);
+        }
+
+        /// <summary>The store for inputs whose total size is already known (an open measures each file and directory once).</summary>
+        internal StoreMode ResolveStore(long inputBytes)
+        {
+            Validate();
+            if (Store != StoreMode.Auto)
+                return Store;
             return inputBytes > (InMemoryMaxBytes ?? GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / 4)
                 ? StoreMode.File : StoreMode.Memory;
         }

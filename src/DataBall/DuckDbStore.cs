@@ -116,12 +116,16 @@ namespace squalor.DataBall
             return _isViewBacked;
         }
 
-        internal void AttachParquetView(string path, long sourceKey)
+        /// <summary><c>read_parquet</c> over the data files of a hive directory; partition columns come from the files, not the paths.</summary>
+        internal static string ReadHiveParquet(IReadOnlyList<string> files) =>
+            $"read_parquet([{string.Join(", ", files.Select(f => QuoteString(Path.GetFullPath(f).Replace('\\', '/'))))}], hive_partitioning = false)";
+
+        internal void AttachParquetView(string path, long sourceKey, IReadOnlyList<string>? hiveFiles = null)
         {
             ThrowIfConnectionBusy();
             var full = Path.GetFullPath(path).Replace('\\', '/');
             var source = Directory.Exists(path)
-                ? $"read_parquet({QuoteString(full.TrimEnd('/') + "/**/*.parquet")}, hive_partitioning = false)"
+                ? ReadHiveParquet(hiveFiles ?? HiveFiles.List(path))
                 : $"read_parquet({QuoteString(full)})";
             var schema = Query($"DESCRIBE SELECT * FROM {source}");
             var fileColumns = schema.Select(c => (string)c["column_name"]!).ToList();
@@ -373,17 +377,40 @@ namespace squalor.DataBall
 
         private const string SourceColumnList = "source_key, path, sha256, type, bytes, modified_utc, added_utc";
 
+        /// <summary>The built-in columns of the <c>source</c> table, as they are declared.</summary>
+        private const string SourceColumnDefinitions =
+            "source_key BIGINT, path VARCHAR, sha256 VARCHAR, type VARCHAR, bytes BIGINT, modified_utc TIMESTAMP, added_utc TIMESTAMP";
+
         internal bool HasSourceTable() => TableExists(Lineage.Table);
 
         /// <summary>Creates the <c>source</c> table on first need. Runs inside the caller's transaction.</summary>
         internal void EnsureSourceTable()
         {
-            Execute("""
-                CREATE TABLE IF NOT EXISTS "source" (
-                    source_key BIGINT, path VARCHAR, sha256 VARCHAR, type VARCHAR,
-                    bytes BIGINT, modified_utc TIMESTAMP, added_utc TIMESTAMP
-                )
-                """);
+            Execute($"CREATE TABLE IF NOT EXISTS \"source\" ({SourceColumnDefinitions})");
+        }
+
+        private static readonly string[] BuiltInSourceColumns = { "source_key", "path", "sha256", "type", "bytes", "modified_utc", "added_utc" };
+
+        /// <summary>True for a column the <c>source</c> table always has; a per-source metadata column cannot take its name.</summary>
+        internal static bool IsBuiltInSourceColumn(string name) =>
+            BuiltInSourceColumns.Any(c => c.Equals(name, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>The columns of <c>source</c> beyond the built-in ones: per-source metadata, in table order. Empty without a table.</summary>
+        internal IReadOnlyList<(string Name, string DuckDbType)> SourceMetadataColumns()
+        {
+            if (!HasSourceTable())
+                return Array.Empty<(string, string)>();
+            return GetColumnsOf(Lineage.Table).Where(c => !IsBuiltInSourceColumn(c.Name)).ToList();
+        }
+
+        /// <summary>
+        /// The per-source metadata columns that a read of <c>"data"</c> may add: those whose name is not already one of
+        /// <paramref name="dataColumns"/> (a row column of the same name wins).
+        /// </summary>
+        internal IReadOnlyList<(string Name, string DuckDbType)> SourceColumnsNotShadowedBy(IEnumerable<string> dataColumns)
+        {
+            var taken = new HashSet<string>(dataColumns, StringComparer.OrdinalIgnoreCase);
+            return SourceMetadataColumns().Where(c => !taken.Contains(c.Name)).ToList();
         }
 
         /// <summary>Highest <c>source_key</c> in use; 0 when there is no table or no row.</summary>
@@ -394,11 +421,20 @@ namespace squalor.DataBall
             return Convert.ToInt64(ExecuteScalar("SELECT COALESCE(MAX(source_key), 0) FROM \"source\""), CultureInfo.InvariantCulture);
         }
 
-        /// <summary>Forgets every source (a replacing import starts the keys over). The table stays.</summary>
+        /// <summary>Forgets every source (a replacing import starts the keys over). The table stays, without per-source columns.</summary>
         internal void ResetSources()
         {
-            if (HasSourceTable())
-                Execute("DELETE FROM \"source\"");
+            if (!HasSourceTable())
+                return;
+            if (SourceMetadataColumns().Count > 0)
+            {
+                // Per-source columns belong to the sources being forgotten, and DuckDB cannot alter a table it has deleted from in the same
+                // transaction: start over with a fresh table.
+                Execute("DROP TABLE \"source\"");
+                EnsureSourceTable();
+                return;
+            }
+            Execute("DELETE FROM \"source\"");
         }
 
         /// <summary>Records <paramref name="record"/> under the next key and returns that key.</summary>
@@ -466,7 +502,11 @@ namespace squalor.DataBall
         private void AttachSourceKey(string table, Func<long> recordSource)
         {
             NormalizeIncomingColumns(table, allowKey: false);
-            var key = recordSource();
+            AddSourceKeyColumn(table, recordSource());
+        }
+
+        private void AddSourceKeyColumn(string table, long key)
+        {
             Execute($"ALTER TABLE {QuoteIdent(table)} ADD COLUMN {QuoteIdent(Lineage.KeyColumn)} BIGINT DEFAULT {key.ToString(CultureInfo.InvariantCulture)}");
         }
 
@@ -1076,6 +1116,27 @@ namespace squalor.DataBall
             if (rows.Count == 0)
                 return;
 
+            var keyOrder = RowColumnOrder(rows);
+
+            if (keyOrder.Count == 0)
+                throw new DataBallException("AddRows requires at least one column");
+
+            if (Layout is not null)
+            {
+                AddRowsIntoLayout(rows, keyOrder, expectedTypes);
+                return;
+            }
+
+            InTransaction(() =>
+            {
+                MaterializeView();
+                AppendRowsTo("data", string.Empty, rows, keyOrder, expectedTypes);
+            });
+        }
+
+        /// <summary>The column names of <paramref name="rows"/> in order of first appearance, validated: a name per row at most once.</summary>
+        private static List<string> RowColumnOrder(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows)
+        {
             var keyOrder = new List<string>();
             var keySet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var values in rows)
@@ -1092,52 +1153,54 @@ namespace squalor.DataBall
                         keyOrder.Add(key);
                 }
             }
+            return keyOrder;
+        }
 
-            if (keyOrder.Count == 0)
-                throw new DataBallException("AddRows requires at least one column");
-
-            if (Layout is not null)
+        /// <summary>
+        /// Appends <paramref name="rows"/> to the base table <paramref name="table"/> (<c>"data"</c>, or a handler source's staging table),
+        /// creating it as <paramref name="createKind"/> (empty or <c>TEMP </c>) from their columns, adding the columns it lacks, and giving an
+        /// all-null VARCHAR column the type of a later typed value. Values are coerced to the column types.
+        /// </summary>
+        private void AppendRowsTo(
+            string table,
+            string createKind,
+            IReadOnlyList<IReadOnlyDictionary<string, object?>> rows,
+            IReadOnlyList<string> keyOrder,
+            IReadOnlyDictionary<string, Type>? expectedTypes)
+        {
+            var qTable = QuoteIdent(table);
+            if (!TableExists(table))
             {
-                AddRowsIntoLayout(rows, keyOrder, expectedTypes);
-                return;
+                var parts = new List<string>(keyOrder.Count);
+                foreach (var key in keyOrder)
+                    parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                Execute($"CREATE {createKind}TABLE {qTable} ({string.Join(", ", parts)})");
+            }
+            else
+            {
+                var cols = GetColumnsOf(table);
+                foreach (var key in keyOrder)
+                {
+                    var existing = cols.FirstOrDefault(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
+                    if (existing.Name is not null)
+                    {
+                        var widened = InferredNullColumnType(table, existing, FirstValue(rows, key), expectedTypes);
+                        if (widened is not null)
+                            Execute($"ALTER TABLE {qTable} ALTER COLUMN {QuoteIdent(existing.Name)} SET DATA TYPE {widened}");
+                        continue;
+                    }
+                    Execute($"ALTER TABLE {qTable} ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
+                }
             }
 
-            InTransaction(() =>
-            {
-                MaterializeView();
-                if (!DataTableExists())
-                {
-                    var parts = new List<string>(keyOrder.Count);
-                    foreach (var key in keyOrder)
-                        parts.Add($"{QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
-                    Execute($"CREATE TABLE \"data\" ({string.Join(", ", parts)})");
-                }
-                else
-                {
-                    var cols = GetColumns();
-                    foreach (var key in keyOrder)
-                    {
-                        var existing = cols.FirstOrDefault(c => c.Name.Equals(key, StringComparison.OrdinalIgnoreCase));
-                        if (existing.Name is not null)
-                        {
-                            var widened = InferredNullColumnType("data", existing, FirstValue(rows, key), expectedTypes);
-                            if (widened is not null)
-                                Execute($"ALTER TABLE \"data\" ALTER COLUMN {QuoteIdent(existing.Name)} SET DATA TYPE {widened}");
-                            continue;
-                        }
-                        Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(key)} {ToDuckDbType(ResolveColumnType(key, FirstValue(rows, key), expectedTypes))}");
-                    }
-                }
+            var columns = GetColumnsOf(table);
+            var coercedRows = new List<object?[]>(rows.Count);
+            foreach (var values in rows)
+                coercedRows.Add(CoerceAppenderValues(columns, values));
 
-                var columns = GetColumns();
-                var coercedRows = new List<object?[]>(rows.Count);
-                foreach (var values in rows)
-                    coercedRows.Add(CoerceAppenderValues(columns, values));
-
-                using var appender = CreateAppender("data");
-                foreach (var coerced in coercedRows)
-                    WriteCoercedAppenderRow(appender, coerced);
-            });
+            using var appender = CreateAppender(table);
+            foreach (var coerced in coercedRows)
+                WriteCoercedAppenderRow(appender, coerced);
         }
 
         internal IReadOnlyDictionary<string, object?> SnapshotMetadata()
@@ -1232,6 +1295,11 @@ namespace squalor.DataBall
             var srcCols = GetColumnsOf(sourceTable);
             var dstCols = GetColumns();
             var dstByName = dstCols.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
+            // A new column that is a per-source column of the source table: the rows already in "data" take their source's value.
+            var perSource = dstByName.ContainsKey(Lineage.KeyColumn)
+                ? new HashSet<string>(SourceMetadataColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>();
+            var fromSource = new List<(string Name, string Type)>();
 
             foreach (var (srcName, srcType) in srcCols)
             {
@@ -1239,6 +1307,8 @@ namespace squalor.DataBall
                     continue;
                 Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(srcName)} {srcType}");
                 dstByName[srcName] = (srcName, srcType);
+                if (perSource.Contains(srcName))
+                    fromSource.Add((srcName, srcType));
             }
 
             // Widened columns take the wider type in place; their values insert without a cast.
@@ -1249,6 +1319,8 @@ namespace squalor.DataBall
             // Every ALTER comes first: DuckDB fails the commit when an ALTER follows an UPDATE of the same table.
             foreach (var (column, value) in backfills)
                 ExecuteParameterized($"UPDATE \"data\" SET {QuoteIdent(column)} = $v", Param("v", value));
+            foreach (var (column, type) in fromSource)
+                BackfillFromSource("\"data\"", column, type);
 
             if (srcCols.Count == 0)
             {
@@ -1273,6 +1345,17 @@ namespace squalor.DataBall
             }
 
             Execute($"INSERT INTO \"data\" BY NAME SELECT {string.Join(", ", selectParts)} FROM {qSrc}");
+        }
+
+        /// <summary>
+        /// Fills a new column of <paramref name="qTable"/> (<c>"data"</c> or a layout spine table) for the rows it already holds, from the
+        /// per-source column of the same name on <c>source</c>, by <c>_source_key</c>. Runs after every ALTER of the append and before its rows are inserted.
+        /// </summary>
+        private void BackfillFromSource(string qTable, string column, string type)
+        {
+            var q = QuoteIdent(column);
+            var key = QuoteIdent(Lineage.KeyColumn);
+            Execute($"UPDATE {qTable} SET {q} = CAST(s.{q} AS {type}) FROM \"source\" AS s WHERE {qTable}.{key} = s.\"source_key\"");
         }
 
         /// <summary>
@@ -1302,6 +1385,39 @@ namespace squalor.DataBall
             if (e == "TIMESTAMP" && i == "DATE")
                 return existing;
             return null;
+        }
+
+        /// <summary>What happens to a column when an incoming column of another type joins it.</summary>
+        internal enum ColumnMerge
+        {
+            /// <summary>The column keeps its type; the incoming values cast into it, or are empty.</summary>
+            Keep,
+
+            /// <summary>The column takes the type given with the decision.</summary>
+            Become,
+
+            /// <summary>The types cannot merge.</summary>
+            Conflict,
+        }
+
+        /// <summary>
+        /// The one decision of the merge ladder, for an append (<see cref="PlanColumnWidening"/>) and for the sources of a many-file open
+        /// (<c>PlanStagedSchema</c>) alike: values that cast into the existing type keep it; an incoming column with no value
+        /// (the reader types an all-empty column VARCHAR) keeps it; types that do not merge are a conflict unless the existing column is empty,
+        /// which adopts the incoming type; otherwise the column takes the merged type. <paramref name="incomingEmpty"/> and
+        /// <paramref name="existingEmpty"/> are asked only when needed. The caller has handled equal types.
+        /// </summary>
+        internal static (ColumnMerge Kind, string Type) DecideColumnMerge(
+            string existing, string incoming, Func<bool> incomingEmpty, Func<bool> existingEmpty)
+        {
+            var merged = MergedColumnType(existing, incoming);
+            if (merged is not null && NormalizeType(merged) == NormalizeType(existing))
+                return (ColumnMerge.Keep, existing);
+            if (incomingEmpty())
+                return (ColumnMerge.Keep, existing);
+            if (merged is null)
+                return existingEmpty() ? (ColumnMerge.Become, incoming) : (ColumnMerge.Conflict, existing);
+            return (ColumnMerge.Become, merged);
         }
 
         private static int IntegerRank(string normalized) => normalized switch
@@ -1340,25 +1456,15 @@ namespace squalor.DataBall
                     continue;
                 if (NormalizeType(match.DuckDbType) == NormalizeType(incomingType))
                     continue;
-                var merged = MergedColumnType(match.DuckDbType, incomingType);
-                // The incoming values cast into the existing type: nothing to widen.
-                if (merged is not null && NormalizeType(merged) == NormalizeType(match.DuckDbType))
-                    continue;
-                // No value to conflict with (the reader types an all-empty column VARCHAR): keep the existing type.
-                if (IsAllNull(sourceTable, name))
-                    continue;
-                if (merged is null)
+                var decision = DecideColumnMerge(match.DuckDbType, incomingType,
+                    () => IsAllNull(sourceTable, name), () => IsAllNull(ownerOf(match.Name), match.Name));
+                if (decision.Kind == ColumnMerge.Conflict)
                 {
-                    // An empty undeclared column (any type) has no value to conflict with: it adopts the incoming type.
-                    if (IsAllNull(ownerOf(match.Name), match.Name))
-                    {
-                        widen.Add((match.Name, match.DuckDbType, incomingType));
-                        continue;
-                    }
                     throw new DataBallException(
                         $"Cannot append {incomingName}: column '{match.Name}' has type {match.DuckDbType} in the session and {incomingType} in the incoming data");
                 }
-                widen.Add((match.Name, match.DuckDbType, merged));
+                if (decision.Kind == ColumnMerge.Become)
+                    widen.Add((match.Name, match.DuckDbType, decision.Type));
             }
             return widen;
         }
@@ -1485,13 +1591,11 @@ namespace squalor.DataBall
             string? incomingName)
         {
             ThrowIfDisposed();
-            var files = Directory.GetFiles(directory, "*.parquet", SearchOption.AllDirectories);
-            if (files.Length == 0)
+            var files = HiveFiles.List(directory);
+            if (files.Count == 0)
                 throw new DataBallException($"No parquet files in hive directory: {directory}");
 
-            var dir = Path.GetFullPath(directory).Replace('\\', '/').TrimEnd('/');
-            var glob = QuoteString(dir + "/**/*.parquet");
-            Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM read_parquet({glob}, hive_partitioning = false)");
+            Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM {ReadHiveParquet(files)}");
             try
             {
                 if (recordSource is not null)
@@ -1554,8 +1658,10 @@ namespace squalor.DataBall
                     FROM ({sql}) AS q
                     """;
             }
+            // Per-source metadata columns of a many-file open follow the lineage columns; a row column of the same name wins.
+            var perSource = string.Concat(SourceColumnsNotShadowedBy(names).Select(c => $", s.{QuoteIdent(c.Name)}"));
             return $"""
-                SELECT q.* EXCLUDE ({QuoteIdent(key)}), s."path" AS {file}, s."type" AS {type}
+                SELECT q.* EXCLUDE ({QuoteIdent(key)}), s."path" AS {file}, s."type" AS {type}{perSource}
                 FROM ({sql}) AS q LEFT JOIN "source" AS s ON q.{QuoteIdent(key)} = s."source_key"
                 """;
         }
@@ -1833,7 +1939,8 @@ namespace squalor.DataBall
                 var q = QuoteIdent(c.Name);
                 return IsDateType(c.DuckDbType) ? $"CAST({q} AS TIMESTAMP) AS {q}" : q;
             }));
-            Execute($"CREATE OR REPLACE TEMP TABLE {qTable} AS SELECT {select} FROM {qTable}");
+            var temp = IsTempTable(tableName) ? "TEMP " : string.Empty;
+            Execute($"CREATE OR REPLACE {temp}TABLE {qTable} AS SELECT {select} FROM {qTable}");
         }
 
         private long RowCountOf(string tableName)

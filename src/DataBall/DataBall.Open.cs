@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -117,7 +118,7 @@ namespace squalor.DataBall
             var fallbackReason = $"Unknown extension; no built-in path for '{path}'";
             if (probe.IsDirectory)
             {
-                if (Directory.EnumerateFiles(path, "*.parquet", SearchOption.AllDirectories).Any())
+                if (HiveFiles.List(path).Count > 0)
                     (builtIn, fallbackReason) = (BuiltInPath.ParquetView, "hive Parquet directory");
                 else
                     fallbackReason = "Not a hive Parquet directory";
@@ -223,9 +224,10 @@ namespace squalor.DataBall
         /// Opens <paramref name="path"/> into a new session. Overlay schema JSON is optional.
         /// Native DuckDB files open directly, read-only by default, before registered handlers.
         /// A snapshot pointer (<c>&lt;name&gt;.latest</c>, published by <see cref="PublishSnapshotAsync"/>) opens the generation it names, always read-only; see <see cref="OpenedSnapshot"/>.
+        /// Equivalent to <see cref="Open(IReadOnlyList{string}, OpenOptions?)"/> with one input: a directory or a glob opens every file it names.
         /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
-        /// <param name="path">File or hive Parquet directory to open.</param>
+        /// <param name="path">File, hive Parquet directory, directory of files, or glob to open.</param>
         /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
         /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
         /// <param name="writable">Allow changes to a native .ball session. A snapshot pointer cannot be opened writable.</param>
@@ -236,7 +238,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Async counterpart of <see cref="Open"/>. Prefer this from UI hosts.
+        /// Async counterpart of <see cref="Open(string, string?, bool, EngineOptions?)"/>. Prefer this from UI hosts.
         /// </summary>
         public static async Task<DataBall> OpenAsync(
             string path,
@@ -247,55 +249,115 @@ namespace squalor.DataBall
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
-            var directory = Directory.Exists(path);
-            if (directory && !Directory.EnumerateFiles(path, "*.parquet", SearchOption.AllDirectories).Any())
-                throw new DataBallException($"{path} is not a hive Parquet directory");
-            if (!directory && !File.Exists(path))
-                throw new DataBallException($"File not found: {path}");
+            return await OpenAsync(new[] { path }, new OpenOptions { SchemaPath = schemaPath, Writable = writable, Engine = engine }, cancellationToken).ConfigureAwait(false);
+        }
 
-            if (!directory && SnapshotFiles.TryReadPointer(path) is { } generationFile)
-                return OpenSnapshot(path, generationFile, schemaPath, writable, engine);
+        /// <summary>
+        /// Opens every file the <paramref name="inputs"/> name into one new session. An input is a file, a hive Parquet
+        /// directory, a directory of files, or a glob with <c>*</c> and <c>?</c> in its last segment (matched without regard to case).
+        /// A directory whose files are all Parquet is one hive source; any other directory opens its files, those of its subdirectories
+        /// too with <see cref="OpenOptions.Recursive"/>. The files are sorted by full path (ordinal), duplicates removed, and each is detected as
+        /// by <see cref="Detect"/>: a file from a directory or glob that is no known format is listed in <see cref="OpenReport.Ignored"/>, a file
+        /// named by the caller that is no known format fails the open. Every file becomes a source (see <see cref="Sources"/>); the rows of all
+        /// of them are staged first, then merged and split once, with column types merged as for an append.
+        /// </summary>
+        /// <remarks>
+        /// A metadata field (<c>metadataFields</c>) is kept at the lowest level its values need: constant in every source and present in all
+        /// of them, it goes to <see cref="Metadata"/>; constant within each source that has it but not the same everywhere, it becomes a column
+        /// of the <c>source</c> table (NULL for a source without it); varying within any source, it stays a column of <c>"data"</c> for all rows.
+        /// More than one source copies Parquet in instead of viewing it. A native <c>.ball</c> or a snapshot pointer opens only as the sole
+        /// input.
+        /// </remarks>
+        /// <param name="inputs">Paths, directories and globs to open.</param>
+        /// <param name="options">Optional schema overlay, recursion and engine settings.</param>
+        /// <exception cref="DataBallException">No input, a missing file, a wildcard outside the last segment, nothing to open, an unrecognized named file, columns that cannot merge, or an import failure.</exception>
+        public static DataBall Open(IReadOnlyList<string> inputs, OpenOptions? options = null)
+        {
+            return Task.Run(() => OpenAsync(inputs, options)).GetAwaiter().GetResult();
+        }
 
-            var native = !directory && IsNativeBall(path);
-
-            if (native)
-                return new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, path, readOnly: !writable, native: true, engine);
-
-            var report = Detect(path);
-            if (report.Outcome is DetectionOutcome.Ambiguous or DetectionOutcome.None)
-                throw new DataBallException(report.ToString());
-            var handler = report.Winner;
-            Config effective;
-            bool delegates;
-            StoreMode store;
-            try
+        /// <summary>
+        /// Async counterpart of <see cref="Open(IReadOnlyList{string}, OpenOptions?)"/>. Prefer this from UI hosts.
+        /// </summary>
+        public static async Task<DataBall> OpenAsync(
+            IReadOnlyList<string> inputs,
+            OpenOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            options ??= new OpenOptions();
+            var plan = OpenInputs.Plan(inputs, options.Recursive);
+            // One source opens as a single path does. An archive is always staged: its CSV entries are sources of their own.
+            if (plan.Entries.Count == 1 && !IsArchive(plan.Entries[0]))
             {
-                delegates = handler is null || handler.DelegatesToGenericImport;
-                if (delegates && report.BuiltInPath is null)
-                    throw new DataBallException($"No built-in import path for this match{Environment.NewLine}{report}");
-                effective = Config.CreateDefaults();
-                if (handler?.Overlay is { } overlay)
-                    effective = Config.Merge(effective, overlay);
-                if (!string.IsNullOrEmpty(schemaPath))
-                    effective = Config.Merge(effective, Config.LoadConfig(schemaPath));
-                TableLayout.Validate(effective);
-                store = (engine ?? new EngineOptions()).ResolveStore(new[] { path });
+                var db = await OpenOneAsync(plan.Entries[0], plan.Bytes, options, cancellationToken).ConfigureAwait(false);
+                if (db.OpenReport is null && plan.Entries[0].Kind == OpenKind.Detected)
+                    db.OpenReport = db.ReportSources(plan.Ignored);
+                return db;
             }
-            catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
+            return await OpenManyAsync(plan, options, cancellationToken).ConfigureAwait(false);
+        }
+
+        private static bool IsArchive(OpenEntry entry) =>
+            entry.Kind == OpenKind.Detected
+            && entry.Report!.Winner is null or { DelegatesToGenericImport: true }
+            && entry.Report.BuiltInPath == BuiltInPath.ArchiveImport;
+
+        /// <summary>What <c>Open</c> did with its inputs; null for a native <c>.ball</c> or a snapshot, whose sources were recorded when it was written.</summary>
+        public OpenReport? OpenReport { get; private set; }
+
+        /// <summary>The sources the session holds, with the rows each contributed.</summary>
+        private OpenReport ReportSources(IReadOnlyList<string> ignored, IReadOnlyDictionary<long, long>? rowsByKey = null)
+        {
+            var sources = _store.ReadSources();
+            if (rowsByKey is null)
             {
-                throw new DataBallException("Open configuration failed", ex);
+                var counts = new Dictionary<long, long>();
+                if (sources.Count == 1)
+                {
+                    // Every row came from the one source.
+                    counts[sources[0].Key] = _store.RowCount();
+                }
+                else if (sources.Count > 1 && _store.DataTableExists() && _store.GetColumns().Any(c => c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase)))
+                {
+                    foreach (var row in _store.Query($"SELECT {DuckDbStore.QuoteIdent(Lineage.KeyColumn)} AS k, count(*) AS n FROM \"data\" GROUP BY 1"))
+                    {
+                        if (row["k"] is not null)
+                            counts[Convert.ToInt64(row["k"], CultureInfo.InvariantCulture)] = Convert.ToInt64(row["n"], CultureInfo.InvariantCulture);
+                    }
+                }
+                rowsByKey = counts;
             }
+            return new OpenReport(
+                sources.Select(s => new OpenedSource(s, rowsByKey.TryGetValue(s.Key, out var n) ? n : 0)).ToList(),
+                ignored.ToList());
+        }
+
+        /// <summary>Opens a sole entry exactly as a single-path open always did.</summary>
+        private static async Task<DataBall> OpenOneAsync(OpenEntry entry, long inputBytes, OpenOptions options, CancellationToken cancellationToken)
+        {
+            var path = entry.OpenPath;
+            var schemaPath = options.SchemaPath;
+            var engine = options.Engine;
+            if (entry.Kind == OpenKind.Pointer)
+                return OpenSnapshot(path, entry.PointerTarget!, schemaPath, options.Writable, engine);
+
+            if (entry.Kind == OpenKind.Native)
+                return new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, path, readOnly: !options.Writable, native: true, engine);
+
+            var (effective, store, routes) = ResolveOpenConfig(new[] { entry }, inputBytes, options);
+            var handler = routes[0].Handler;
+            var delegates = routes[0].Delegates;
+            var report = entry.Report!;
             var db = new DataBall(effective, engine, temporary: store == StoreMode.File);
             try
             {
-                // What the source table records as the type: the handler's name (a JSON type's id) or the built-in path.
-                var sourceType = handler?.Name ?? report.BuiltInPath?.ToString() ?? nameof(BuiltInPath.CsvImport);
+                var sourceType = routes[0].SourceType;
                 if (delegates && report.BuiltInPath == BuiltInPath.ParquetView && !db.HasLayoutConfig)
                 {
-                    var source = SourceFile.Describe(path, sourceType);
+                    var source = SourceFile.Describe(path, sourceType, entry.HiveFiles);
                     db.RunImport(false, () =>
                     {
-                        db._store.AttachParquetView(path, db._store.AddSource(source));
+                        db._store.AttachParquetView(path, db._store.AddSource(source), entry.HiveFiles);
                         db.ExtractConfiguredMetadata("data", false);
                     });
                     return db;
@@ -310,16 +372,7 @@ namespace squalor.DataBall
                     await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
                     {
                         last = row;
-                        // Columns are renamed as in a file (_source_file becomes origin_source_file); _source_key is the session's.
-                        var keyed = new Dictionary<string, object?>(row.Count + 1);
-                        foreach (var pair in row)
-                        {
-                            var name = Lineage.IncomingName(pair.Key);
-                            if (!keyed.TryAdd(name, pair.Value))
-                                throw new DataBallException($"Column '{name}' already exists; it is where '{pair.Key}' would go, because source lineage reserves that name");
-                        }
-                        keyed[Lineage.KeyColumn] = key;
-                        batch.Add(keyed);
+                        batch.Add(KeyHandlerRow(row, key));
                         if (batch.Count == HandlerBatchSize)
                         {
                             db._store.AddRows(batch, db._expectedColumnTypes);
@@ -350,8 +403,70 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>How an entry is read: its handler, whether that handler delegates, the type its source records, and the route when several sources are staged.</summary>
+        private sealed record EntryRoute(OpenEntry Entry, IFormatHandler? Handler, bool Delegates, string SourceType, SourceRoute? Route);
+
+        /// <summary>
+        /// The effective config (defaults, each handler's overlay in source order, then <c>schemaPath</c>), the store sized over the
+        /// input bytes, and how each detected entry is read. Shared by a single-source open and a many-source open.
+        /// </summary>
+        private static (Config Config, StoreMode Store, List<EntryRoute> Routes) ResolveOpenConfig(
+            IReadOnlyList<OpenEntry> entries, long inputBytes, OpenOptions options)
+        {
+            try
+            {
+                var effective = Config.CreateDefaults();
+                var routes = new List<EntryRoute>(entries.Count);
+                foreach (var entry in entries)
+                {
+                    var report = entry.Report!;
+                    var handler = report.Winner;
+                    var delegates = handler is null || handler.DelegatesToGenericImport;
+                    if (delegates && report.BuiltInPath is null)
+                        throw new DataBallException($"No built-in import path for this match{Environment.NewLine}{report}");
+                    if (handler?.Overlay is { } overlay)
+                        effective = Config.Merge(effective, overlay);
+                    // What the source table records as the type: the handler's name (a JSON type's id) or the built-in path.
+                    var type = handler?.Name ?? report.BuiltInPath?.ToString() ?? nameof(BuiltInPath.CsvImport);
+                    SourceRoute? route = !delegates ? SourceRoute.Handler : report.BuiltInPath switch
+                    {
+                        BuiltInPath.CsvImport => SourceRoute.Csv,
+                        BuiltInPath.ParquetView => entry.Hive ? SourceRoute.Hive : SourceRoute.Parquet,
+                        BuiltInPath.ArchiveImport => SourceRoute.Archive,
+                        _ => null,
+                    };
+                    routes.Add(new EntryRoute(entry, handler, delegates, type, route));
+                }
+                if (!string.IsNullOrEmpty(options.SchemaPath))
+                    effective = Config.Merge(effective, Config.LoadConfig(options.SchemaPath));
+                TableLayout.Validate(effective);
+                return (effective, (options.Engine ?? new EngineOptions()).ResolveStore(inputBytes), routes);
+            }
+            catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
+            {
+                throw new DataBallException("Open configuration failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// A handler row as the session stores it: columns renamed as in a file (<c>_source_file</c> becomes <c>origin_source_file</c>)
+        /// and carrying <paramref name="key"/>, the key of its source, which the handler cannot choose.
+        /// </summary>
+        private static Dictionary<string, object?> KeyHandlerRow(IReadOnlyDictionary<string, object?> row, long key)
+        {
+            var keyed = new Dictionary<string, object?>(row.Count + 1);
+            foreach (var pair in row)
+            {
+                var name = Lineage.IncomingName(pair.Key);
+                if (!keyed.TryAdd(name, pair.Value))
+                    throw new DataBallException($"Column '{name}' already exists; it is where '{pair.Key}' would go, because source lineage reserves that name");
+            }
+            keyed[Lineage.KeyColumn] = key;
+            return keyed;
+        }
+
         /// <summary>True for a native DuckDB file; throws for a 1.x ZIP <c>.ball</c>.</summary>
-        private static bool IsNativeBall(string path)
+        internal static bool IsNativeBall(string path)
         {
             var native = false;
             using (var sniff = File.OpenRead(path))

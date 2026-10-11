@@ -452,7 +452,7 @@ namespace squalor.DataBall
         public Task ImportAsync(string path, ImportOptions? options = null) => ImportCoreAsync(path, options, null);
 
         /// <summary>
-        /// <see cref="ImportAsync"/> with the <c>type</c> the <c>source</c> table records. <see cref="Open"/> passes
+        /// <see cref="ImportAsync"/> with the <c>type</c> the <c>source</c> table records. <see cref="Open(string, string?, bool, EngineOptions?)"/> passes
         /// the winning handler's name or the built-in path of its detection report; the public call derives it from the format.
         /// </summary>
         internal Task ImportCoreAsync(string path, ImportOptions? options, string? sourceType)
@@ -895,13 +895,22 @@ namespace squalor.DataBall
         {
             if (!_store.TableExists(table))
                 return;
+            if (CanonicalizeCsvStaging(table, merging))
+                ExtractConfiguredMetadata(table, append);
+        }
 
+        /// <summary>
+        /// Renames the raw headers of <paramref name="table"/> to canonical names and coerces configured types, learning the
+        /// types the headers imply. False when the table has no header to resolve (nothing to extract either).
+        /// </summary>
+        private bool CanonicalizeCsvStaging(string table, bool merging)
+        {
             var headers = _store.GetColumnsOf(table)
                 .Select(c => c.Name)
                 .Where(n => !string.IsNullOrWhiteSpace(n) && !n.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (headers.Count == 0)
-                return;
+                return false;
 
             var parsed = SchemaResolver.ResolveAll(headers, _config);
             var tableCols = _store.GetColumnsOf(table);
@@ -926,7 +935,7 @@ namespace squalor.DataBall
             }
 
             _store.CoerceColumnsOf(table, _expectedColumnTypes, merging ? _learnedColumnNames : null);
-            ExtractConfiguredMetadata(table, append);
+            return true;
         }
 
         /// <summary>Expected types the session declares (config or AddColumn&lt;T&gt;); learned types are left out.</summary>
@@ -1005,6 +1014,10 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>True when a declared <c>tables</c> entry names <paramref name="column"/> in its <c>key</c>.</summary>
+        private bool IsLayoutKeyColumn(string column) =>
+            _config.Tables.Values.Any(t => t.Key.Any(k => k.Equals(column, StringComparison.OrdinalIgnoreCase)));
+
         private void ExtractConfiguredMetadata(string table, bool append, IReadOnlySet<string>? reconciled = null)
         {
             if (!_store.TableExists(table) || _config.MetadataFields.Count == 0)
@@ -1013,15 +1026,21 @@ namespace squalor.DataBall
             var qTable = DuckDbStore.QuoteIdent(table);
             var policy = _config.MetadataPolicy ?? "liftConstant";
             var existing = _store.SnapshotMetadata();
+            // A field a many-file open made a column of the source table stays out of Metadata for good: an append makes it a row column.
+            var perSource = _store.SourceMetadataColumns().Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var field in _config.MetadataFields.ToList())
             {
                 if (reconciled?.Contains(field) == true)
                     continue; // already compared with stored metadata by the append path
                 if (field.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
                     continue; // lineage, never a metadata field
+                if (IsLayoutKeyColumn(field))
+                    continue; // a declared table key stays data: the split needs it, even when it is constant
                 var cols = _store.GetColumnsOf(table);
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
+                    continue;
+                if (perSource.Contains(match.Name))
                     continue;
                 var storedValue = append && existing.ContainsKey(match.Name);
                 var enforceConstant = policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase);

@@ -71,11 +71,11 @@ namespace squalor.DataBall
             {
                 if (!_store.DataTableExists())
                     throw new DataBallException("No data to filter");
-                var tableCols = _store.GetColumns();
-                _ = BuildSelectList(filter.Columns, tableCols);
+                var scope = ReadScope();
+                _ = BuildSelectList(filter.Columns, scope);
                 var parameters = new List<DuckDBParameter>();
-                var where = BuildWhere(filter.Predicates, tableCols, parameters);
-                var sql = new StringBuilder("SELECT COUNT(*) AS c FROM \"data\"");
+                var where = BuildWhere(filter.Predicates, scope, parameters);
+                var sql = new StringBuilder("SELECT COUNT(*) AS c").Append(scope.From);
                 if (where.Length > 0)
                     sql.Append(" WHERE ").Append(where);
                 var rows = _store.Query(sql.ToString(), parameters.ToArray());
@@ -153,22 +153,57 @@ namespace squalor.DataBall
             if (!_store.DataTableExists())
                 throw new DataBallException("No data to filter");
 
-            var tableCols = _store.GetColumns();
-            var select = BuildSelectList(filter.Columns, tableCols);
+            var scope = ReadScope();
+            var select = BuildSelectList(filter.Columns, scope);
             var parameters = new List<DuckDBParameter>();
-            var where = BuildWhere(filter.Predicates, tableCols, parameters);
-            var sql = new StringBuilder("SELECT ").Append(select).Append(" FROM \"data\"");
+            var where = BuildWhere(filter.Predicates, scope, parameters);
+            var sql = new StringBuilder("SELECT ").Append(select).Append(scope.From);
             if (where.Length > 0)
                 sql.Append(" WHERE ").Append(where);
             return new ParameterizedSql(sql.ToString(), parameters.ToArray());
         }
 
-        private static string BuildSelectList(
-            IReadOnlyList<string>? columns,
-            IReadOnlyList<(string Name, string DuckDbType)> tableCols)
+        /// <summary>
+        /// What a typed read can name and where it reads from. A session whose <c>source</c> table has per-source metadata
+        /// columns (a many-file open) reads <c>"data"</c> joined to <c>source</c> by <c>_source_key</c>: those columns follow the data
+        /// columns, <c>_source_key</c> stays, and a data column of the same name wins. Any other session reads <c>"data"</c> alone.
+        /// </summary>
+        private sealed record FilterScope(
+            IReadOnlyList<(string Name, string DuckDbType)> Columns, IReadOnlySet<string> Joined, string From)
+        {
+            internal bool IsJoined => Joined.Count > 0;
+
+            internal string Quote(string name) => !IsJoined
+                ? DuckDbStore.QuoteIdent(name)
+                : (Joined.Contains(name) ? "s." : "d.") + DuckDbStore.QuoteIdent(name);
+
+            /// <summary>The select list for all columns.</summary>
+            internal string Star => !IsJoined ? "*" : "d.*, " + string.Join(", ", Columns.Where(c => Joined.Contains(c.Name)).Select(c => Quote(c.Name)));
+        }
+
+        private FilterScope ReadScope()
+        {
+            var data = _store.GetColumns();
+            var joined = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var columns = data.ToList();
+            if (data.Any(c => c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase)))
+            {
+                foreach (var extra in _store.SourceColumnsNotShadowedBy(data.Select(c => c.Name)))
+                {
+                    joined.Add(extra.Name);
+                    columns.Add(extra);
+                }
+            }
+            var from = joined.Count == 0
+                ? " FROM \"data\""
+                : $" FROM \"data\" AS d LEFT JOIN \"source\" AS s ON d.{DuckDbStore.QuoteIdent(Lineage.KeyColumn)} = s.\"source_key\"";
+            return new FilterScope(columns, joined, from);
+        }
+
+        private static string BuildSelectList(IReadOnlyList<string>? columns, FilterScope scope)
         {
             if (columns is null)
-                return "*";
+                return scope.Star;
             if (columns.Count == 0)
                 throw new DataBallException("Filter columns is empty");
 
@@ -176,10 +211,10 @@ namespace squalor.DataBall
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var col in columns)
             {
-                var name = ResolveColumn(col, tableCols);
+                var name = ResolveColumn(col, scope.Columns);
                 if (!seen.Add(name))
                     throw new DataBallException($"Duplicate filter column '{col}'");
-                parts.Add(DuckDbStore.QuoteIdent(name));
+                parts.Add(scope.Quote(name));
             }
 
             return string.Join(", ", parts);
@@ -187,7 +222,7 @@ namespace squalor.DataBall
 
         private static string BuildWhere(
             IReadOnlyList<ColumnPredicate> predicates,
-            IReadOnlyList<(string Name, string DuckDbType)> tableCols,
+            FilterScope scope,
             List<DuckDBParameter> parameters)
         {
             if (predicates is null || predicates.Count == 0)
@@ -197,8 +232,8 @@ namespace squalor.DataBall
             foreach (var pred in predicates)
             {
                 ArgumentNullException.ThrowIfNull(pred);
-                var name = ResolveColumn(pred.Column, tableCols);
-                var q = DuckDbStore.QuoteIdent(name);
+                var name = ResolveColumn(pred.Column, scope.Columns);
+                var q = scope.Quote(name);
                 clauses.Add(pred.Op switch
                 {
                     PredicateOp.Eq => EqClause(q, pred.Value, parameters),

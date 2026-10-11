@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-26 items · — 12 · done 13 · parked 1
+26 items · — 11 · done 14 · parked 1
 
 ## v2.0
 
@@ -35,7 +35,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 5 | [db-09](slices/db-09.md) | DataBall must attach Parquet and hive inputs as views | M | 2 | databall | owner interview (2026-10-08) | done |
 | 6 | [db-10](slices/db-10.md) | DataBall must score format detection and explain it | M | 2 | databall | owner interview (2026-10-08) | done |
 | Many-file open | | | | | | | |
-| 7 | [db-11](slices/db-11.md) | DataBall must open many files into one session | M | 2 | databall | owner interview (2026-10-08) | — |
+| 7 | [db-11](slices/db-11.md) | DataBall must open many files into one session | M | 2 | databall | owner interview (2026-10-08) | done |
 | 8 | [db-12](slices/db-12.md) | DataBall CSV must handle preambles, trailers and strict casts | M | 2 | databall | owner interview (2026-10-08) | — |
 | 9 | [db-13](slices/db-13.md) | DataBall must apply declarative transforms from config | M | 2 | databall | owner interview (2026-10-08) | — |
 | 10 | [db-14](slices/db-14.md) | DataBall must join, dedupe and aggregate across sources | L | 3 | databall | owner interview (2026-10-08) | — |
