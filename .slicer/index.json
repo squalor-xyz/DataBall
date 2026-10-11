@@ -1255,7 +1255,7 @@
       "title": "DataBall must publish closed .ball snapshots for live readers",
       "short_title": "Live-reader .ball snapshots",
       "status": "open",
-      "has_slice": false,
+      "has_slice": true,
       "depends_on": [
         "db-06"
       ],
@@ -1303,6 +1303,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "fa0564ca-5354-46a1-8c5f-ac0b89ce3ba5",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-18 interview): (1) generations <name>.<n>.ball plus an atomically replaced pointer <name>.latest; (2) host calls PublishSnapshotAsync; (3) keep last N (default 2), skip undeletable held files and retry later, never delete the pointer's generation; (4) accept the writer pause during the copy, measure it, narrow FileGate to reserve-then-release; (5) DataBall.Open(pointer) opens the named generation read-only and exposes it; (6) view-backed sessions link in snapshots unless EmbedViews. Spec review: pointer recognized by a magic first line (DATABALL-SNAPSHOT 1), generation = max existing + 1, Open retries the pointer once if the generation vanished. Implementer Sonnet 5.5 high.",
+          "created_at": "2026-10-11T05:30:48Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1318,7 +1329,7 @@
         "cites": [],
         "key": "",
         "pass": "v2.0",
-        "group": "",
+        "group": "Live snapshots",
         "reason": "",
         "importance": 2,
         "urgency": 2,

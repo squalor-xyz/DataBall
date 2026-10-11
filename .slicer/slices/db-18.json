@@ -1,0 +1,50 @@
+{
+  "id": "db-18",
+  "title": "DataBall must publish closed .ball snapshots for live readers",
+  "lead": [
+    "A writer session that is still capturing publishes a **closed snapshot generation** on request. This lets readers in other processes (squalplot) see its data without touching the live capture file.",
+    "- Each snapshot is a new, complete `.ball` file, `<name>.<n>.ball`.\n- A small pointer file, `<name>.latest`, is then replaced atomically to name that generation.\n- Readers call `DataBall.Open(\"<name>.latest\")` and get the latest generation, read-only.\n- Old generations beyond the last N (default 2) are pruned when it's safe."
+  ],
+  "depends_note": null,
+  "findings_note": "db-05 decision record; owner 2026-10-10 split from db-06",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** automatic cadence (timer or row count; the host calls the API); incremental or delta snapshots; network-filesystem guarantees; cross-process reads of the live capture file (not promised; db-05 measured a conflicting lock).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "Split out of db-06, 2026-10-10. The owner's earlier decision: the writer publishes a separate, completed, closed snapshot generation that readers open read-only.\n\nOwner decisions, 2026-10-11 (db-18 interview):\n\n1. **Generations plus a pointer.** Each snapshot is a new file `<name>.<n>.ball` with an increasing `n`. After it is complete, `<name>.latest` is replaced atomically, through a uniquely named temp file and `File.Move(overwrite: true)`, and names that generation. Readers never see a partial file, and no file a reader may hold is ever overwritten. This works on Windows, where a reader holding a file blocks replacing it.\n2. **Cadence:** the host calls `PublishSnapshotAsync`. squaltest decides when.\n3. **Retention:** keep the last N generations, default 2, configurable. A generation that fails to delete (held by a reader on Windows) is skipped, then retried at the next publish. The generation the pointer names is never deleted.\n4. **Writer pause:**\n   - Capture writes pause during the copy (single connection). That is accepted.\n   - Measure it at a realistic size and record it.\n   - Narrow `FileGate`: reserve the target in `OpenFiles` under the gate, release the gate during the copy, and remove the reservation after the move. Other sessions' opens, disposes and saves no longer wait for the whole copy (db-06 architect note).\n5. **Reader:** `DataBall.Open(\"<name>.latest\")` recognizes the pointer, opens the named generation read-only, and exposes which generation and path it opened. Re-opening the pointer later picks up newer generations. No new opener.\n6. **View-backed sessions** (db-09): a snapshot links (`SaveOptions.Link`) unless the host asks to embed (`SnapshotOptions.EmbedViews`), because an embed would re-read the whole Parquet each time (db-09 note).\n\nFrom earlier notes on this item:\n\n- `DuckDbStore.SaveTo` (`src/DataBall/DuckDbStore.cs:214`, core at `:225`) is the publication primitive: `ATTACH` a temp file, `COPY FROM DATABASE`, `DETACH`, `File.Move`. Today it uses one fixed temp name, `target + \".tmp\"`, and holds `FileGate` for the whole copy (`:219`).\n- Saving to the session's own path is only a `CHECKPOINT`, and doesn't compact.\n- A pending row (`InitializeRow`) never reaches the database, and `SaveTo` refuses to run inside a store transaction. So a snapshot holds only committed data.\n\nSpec-review decisions (orchestrator, 2026-10-11):\n\n- **Pointer format:** UTF-8 text, two lines. Line 1 is the magic line `DATABALL-SNAPSHOT 1`; line 2 is the generation file name, a bare name in the same directory. `Open` recognizes the pointer by its content (the magic line), not by its extension.\n- **Generation number:** one more than the highest existing `<name>.<n>.ball` in the directory, so numbering survives a writer restart.\n- **Reader race:** `Open` reads the pointer, then the generation. If that generation has just been deleted by retention, `Open` reads the pointer once more and retries, then fails with a clear error naming the pointer and the missing generation.\n\n**Model note (owner):** Claude-only relay. Implementer: **Sonnet 5.5, high**. Haiku 5.5 high, launched by the orchestrator, takes small scoped pieces. Reviewer, architect and gate: Opus, medium."
+    },
+    {
+      "heading": "Files",
+      "body": "- `src/DataBall/SnapshotOptions.cs` (new): `Directory`, `Name`, `Keep` (default 2, at least 1), `EmbedViews` (default false).\n- `src/DataBall/SnapshotInfo.cs` (new): `Generation`, `Path`, `PointerPath`, `Bytes`, `Duration`, as init properties, matching `SourceInfo`'s shape.\n- `src/DataBall/DataBall.cs`: `public Task<SnapshotInfo> PublishSnapshotAsync(SnapshotOptions options)`, with these steps:\n  1. Check the stream guard and that the session is not disposed. A read-only session may publish, since it's a copy.\n  2. Choose the next generation.\n  3. Copy through the store with a unique temp name (link for view-backed sessions unless `EmbedViews`), write the config and metadata as `SaveTo` does, then move the generation into place.\n  4. Replace the pointer atomically.\n  5. Prune.\n\n  Also `public SnapshotInfo? OpenedSnapshot` (or `SnapshotGeneration`/`SnapshotPath`) on sessions opened through a pointer.\n- `src/DataBall/DuckDbStore.cs`:\n  - Refactor `SaveToCore` so the copy core takes a temp name and a target, shared by `SaveTo` and publish.\n  - Narrow `FileGate`: reserve the target in `OpenFiles` under the gate, then release the gate for the copy. This applies to `SaveTo` too.\n  - An internal test seam pauses inside the copy, so a test can prove the gate is released.\n- `src/DataBall/DataBall.Open.cs`: before the native magic check, recognize a pointer (the magic first line), resolve the generation, apply the reader race rule, and open it read-only through the existing native path.\n- `README.md` (a new \"Live snapshots\" section, `.ball` format) and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/SnapshotTests.cs`.\n- No new dependencies."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "In `SnapshotTests`, each asserts:\n\n1. `Publish_FirstAndSecond_GenerationsAndPointer`: generation 1 is created and the pointer names it; a second publish creates generation 2 and the pointer names that. The files exist with literal names.\n2. `Publish_ReaderOnOldGeneration_StaysValid`: a reader opened on generation 1 keeps reading correct rows while generation 2 is published.\n3. `Publish_Retention_KeepsLastN_SkipsHeldFile`: with `Keep = 2`, generation 1 is deleted at the third publish. A held or undeletable generation is skipped without failing, and deleted at a later publish (simulate the delete failure through a test seam so the test is portable). The pointer's generation is never deleted.\n4. `Publish_ExcludesPendingRow`: a pending `InitializeRow` row is not in the snapshot; committed rows are.\n5. `OpenPointer_OpensLatestReadOnly_ExposesGeneration`.\n6. `OpenPointer_GenerationVanished_RetriesThenClearError`.\n7. `Publish_ViewSession_LinksByDefault_EmbedsOnRequest`.\n8. `Publish_GateReleasedDuringCopy`: while one session's publish is paused inside the copy (test seam), another session can open, save and dispose a different file.\n9. `Publish_GenerationNumbering_SurvivesRestart`: with existing generations 1 and 2 in the directory and a new writer session, the next publish is 3.\n10. `Publish_DuringOpenStream_Throws` (db-08 guard).\n11. `SaveAsync_Unchanged_WithNarrowedGate`: the existing save tests stay green, and a save while the target is open elsewhere still throws.\n\nThe pause measurement is recorded in the report, not asserted: publish time at about 1M rows, in-memory and temp-file store."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. `slicer start db-18 --render --strict`. Write tests 1–11 and watch them fail.\n2. Refactor the copy core, then narrow the gate.\n3. Publish, the pointer, retention, and pointer recognition in `Open`.\n4. Docs; mutation checks; full Release suite; format. While iterating, build once and run tests with `--no-build --filter` (AGENTS.md). Record the pause measurement."
+    },
+    {
+      "heading": "Check",
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- `slicer check`"
+    },
+    {
+      "heading": "Git",
+      "body": "One DataBall commit on branch `db-18` (worktree `.worktrees/db-18`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- `SaveTo`/`SaveToCore` and the `FileGate`/`OpenFiles` gate (`src/DataBall/DuckDbStore.cs:22-75`, `:214-300`): every file-backed open, dispose and save in the process uses it.\n- Native `.ball` open (db-06): read-only default, the stored config, and the ZIP `.ball` message.\n- The db-07 temp-file store; the db-08 stream guard; db-09 views and `SaveOptions.Link`; db-22 `source` lineage (copied by `COPY FROM DATABASE`); db-10 detection, since the pointer is recognized before detection, as native `.ball` already is.\n- Hosts: squaltest (the writer calls publish), squalplot (the reader opens the pointer)."
+    },
+    {
+      "heading": "Must not change",
+      "body": "- `SaveAsync` and `ExportAsync(Ball)` produce the same files. The same-path save rules hold (a `CHECKPOINT`; a read-only session throws). A save while the target is open in another session still throws.\n- Native `.ball` open behaves as before for real `.ball` files.\n- The `FileGate` guarantees for opens and disposes: no two sessions open the same file, and that check is still made under the gate.\n- Every write path, including capture, behaves as before outside a publish."
+    }
+  ],
+  "notes": []
+}

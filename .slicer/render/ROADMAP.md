@@ -43,7 +43,9 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 12 | [db-16](slices/db-16.md) | DataBall API must have one clear way in and out | M | 2 | databall | owner interview (2026-10-08) | — |
 | 13 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
 | 14 | [db-17](slices/db-17.md) | Tag and release DataBall v2.0.0 | S `[OWNER]` | 1 | databall | owner interview (2026-10-08) | — |
-| 15 | db-18 | Live-reader .ball snapshots | M | 2 | databall | db-05 decision record; owner 2026-10-10 split from db-06 | — |
+| Live snapshots | | | | | | | |
+| 15 | [db-18](slices/db-18.md) | Live-reader .ball snapshots | M | 2 | databall | db-05 decision record; owner 2026-10-10 split from db-06 | — |
+| Many-file open | | | | | | | |
 | 16 | [db-22](slices/db-22.md) | DataBall must record source lineage for every file it opens | M | 2 | databall | db-11 split (owner, 2026-10-10) | done |
 | 17 | [db-23](slices/db-23.md) | DataBall appends must merge schemas by name with numeric widening | S | 1 | databall | db-11 split (owner, 2026-10-10) | — |
 | 18 | [db-24](slices/db-24.md) | DataBall many-file opens must have a bad-file policy and an open report | S | 1 | databall | db-11 split (owner, 2026-10-10) | — |
