@@ -1,0 +1,45 @@
+{
+  "id": "db-22",
+  "title": "DataBall must record source lineage for every file it opens",
+  "lead": [
+    "Every file-opened session gets source lineage, even when only one file is opened. In a wide session the lineage columns `_source_file`, `_source_hash` (SHA-256 hex) and `_source_type` are part of `\"data\"`. In a layout session they go in a built-in `\"source\"` dimension joined into the `\"data\"` view. Every churn in existing tests caused by the new columns is isolated in this slice. Opening many files (db-11), schema merge (db-23), bad-file policy (db-24) and native `.ball` sources (db-25) come later."
+  ],
+  "depends_note": null,
+  "findings_note": "db-11 split (owner, 2026-10-10)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** more than one input per open (db-11); per-source metadata as `source` columns (db-11); schema merge and widening (db-23); bad-file policy (db-24); `.ball` sources in a many-file open (db-25).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "Split out of db-11 on 2026-10-10. Owner decisions from the db-11 spec interview, 2026-10-10:\n\n- A built-in `\"source\"` dimension carries `_source_file`, `_source_hash` and `_source_type`.\n- A wide session carries the lineage columns directly in `\"data\"`.\n- Every file-opened session has lineage, even with one file, so hosts always see one shape.\n- Sessions built with `AddRow` and no file source have no lineage; their rows get NULL lineage if a file is imported later.\n\n`_source_type` comes from db-10's `DetectionReport`: the handler `Name`, the JSON type `id`, or the built-in path (`BuiltInPath`).\n\n**Model note (owner, 2026-10-10):** Claude-only relay. Implementer: **Sonnet 5.5, high**. The layout `source` dimension touches `TableLayout` and the split. Use a **Haiku 5.5 (high)** subagent for the mechanical churn: updating existing tests' expected columns, which must be listed. The reviewer and architect models are set at relay start.\n\n**Verify first, during spec review:**\n- Does a native `.ball` opened directly, with no import, get lineage, and what is its `_source_file`?\n- What does a Parquet *view* (db-09) look like with lineage: constant columns in the view's select list?"
+    },
+    {
+      "heading": "Files",
+      "body": "- `src/DataBall/Config.cs`: reserve the table name `source` and every name that starts with `_source`.\n- `src/DataBall/DuckDbStore.cs` and `DuckDbStore.Layout.cs`:\n  - Lineage constants are added on staging for every import path: CSV, Parquet import, each archive CSV entry (`_source_file` = `<archive>!<entry>`), and the db-08 handler drain. The db-09 Parquet view gets them as constant columns in its select list.\n  - In a layout session the lineage lives in a built-in `source` dimension keyed by `_source_file` + `_source_hash`, and the spine carries `source_key`.\n- `src/DataBall/DataBall.cs`: `ImportAsync` adds a source; `Bounce` keeps the lineage columns (its keep list).\n- `README.md` (\"Tables\", \"Library usage\") and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/LineageTests.cs`. Existing tests whose expected columns or CSV output change gain the lineage columns.\n- No new dependencies. SHA-256 comes from `System.Security.Cryptography`."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "1. `Open_SingleCsv_HasLineage`: `_source_file`, `_source_type` and `_source_hash` equal literals; the hash is the fixture's precomputed SHA-256.\n2. `Open_LayoutSession_LineageInSourceDimension`.\n3. `Open_Archive_EachEntryIsASource`.\n4. `Open_ParquetView_HasLineage`.\n5. `Open_Handler_HasLineage`.\n6. `ImportAsync_Append_AddsSource`.\n7. `Bounce_KeepsLineage`.\n8. `Config_ReservedSourceNames_Rejected` (`ConfigTests`)."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Spec review: resolve the two verify-first questions; probe as needed.\n2. `slicer start` with `--render --strict`. Write tests 1–8, watch them fail.\n3. Implement. Update the affected existing tests and list every changed assertion.\n4. Docs; mutation checks; full Release suite; `dotnet format --verify-no-changes`."
+    },
+    {
+      "heading": "Check",
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- `slicer check`"
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    },
+    {
+      "heading": "Must not change",
+      "body": "- Apart from the lineage columns, a single-file open gives the same rows, column order, column types, metadata and layout tables as before.\n- The changed existing assertions are listed, and that list is the only allowed change.\n- Layout append, growth, rollback and `_row` rules are unchanged.\n- The db-08 stream guard and read map, and the db-09 view, behave as before."
+    }
+  ],
+  "notes": []
+}

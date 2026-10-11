@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 22,
+  "next_id": 26,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -608,7 +608,9 @@
       "depends_on": [
         "db-07",
         "db-09",
-        "db-10"
+        "db-10",
+        "db-22",
+        "db-23"
       ],
       "note_records": [
         {
@@ -709,11 +711,22 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "66342f42-30ba-4d4e-8ab3-4c3acd454d04",
+          "kind": "",
+          "text": "**2026-10-11** — Split 2026-10-10 (owner): db-11 is now the many-input core; lineage moved to db-22, schema merge and widening to db-23, bad-file policy, Skipped report and CLI multi-input to db-24, native .ball sources to db-25 (all in group 'Many-file open'). Model note: Claude-only relay; implementer Sonnet 5.5 high, Haiku 5.5 high subagents for well-scoped pieces.",
+          "created_at": "2026-10-11T00:02:13Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
       "fields": {
-        "size": "L",
+        "size": "M",
         "flags": [],
         "trees": [
           "databall"
@@ -724,11 +737,11 @@
         "cites": [],
         "key": "",
         "pass": "v2.0",
-        "group": "",
+        "group": "Many-file open",
         "reason": "",
         "importance": 3,
         "urgency": 2,
-        "effort": 3,
+        "effort": 2,
         "attempts": 0
       }
     },
@@ -1130,7 +1143,9 @@
         "db-14",
         "db-15",
         "db-16",
-        "db-18"
+        "db-18",
+        "db-24",
+        "db-25"
       ],
       "note_records": [
         {
@@ -1354,6 +1369,126 @@
         "reason": "",
         "importance": 2,
         "urgency": 1,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-22",
+      "title": "DataBall must record source lineage for every file it opens",
+      "short_title": "DataBall must record source lineage for every file it opens",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-11 split (owner, 2026-10-10)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-23",
+      "title": "DataBall appends must merge schemas by name with numeric widening",
+      "short_title": "DataBall appends must merge schemas by name with numeric widening",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-11 split (owner, 2026-10-10)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-24",
+      "title": "DataBall many-file opens must have a bad-file policy and an open report",
+      "short_title": "DataBall many-file opens must have a bad-file policy and an open report",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-11"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-11 split (owner, 2026-10-10)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 3,
+        "urgency": 2,
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-25",
+      "title": "DataBall many-file opens must accept native .ball sources",
+      "short_title": "DataBall many-file opens must accept native .ball sources",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [
+        "db-11"
+      ],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-11 split (owner, 2026-10-10)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
         "effort": 2,
         "attempts": 0
       }
