@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-26 items · — 15 · done 10 · parked 1
+26 items · — 14 · done 11 · parked 1
 
 ## v2.0
 
@@ -44,7 +44,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 13 | [db-03](slices/db-03.md) | DataBall snowflake `parent` and a perf measurement | M | 3 | databall,suite | owner charter (2026-09-23) (was suite S49) | — |
 | 14 | [db-17](slices/db-17.md) | Tag and release DataBall v2.0.0 | S `[OWNER]` | 1 | databall | owner interview (2026-10-08) | — |
 | Live snapshots | | | | | | | |
-| 15 | [db-18](slices/db-18.md) | Live-reader .ball snapshots | M | 2 | databall | db-05 decision record; owner 2026-10-10 split from db-06 | — |
+| 15 | [db-18](slices/db-18.md) | Live-reader .ball snapshots | M | 2 | databall | db-05 decision record; owner 2026-10-10 split from db-06 | done |
 | Many-file open | | | | | | | |
 | 16 | [db-22](slices/db-22.md) | DataBall must record source lineage for every file it opens | M | 2 | databall | db-11 split (owner, 2026-10-10) | done |
 | 17 | [db-23](slices/db-23.md) | DataBall appends must merge schemas by name with numeric widening | S | 1 | databall | db-11 split (owner, 2026-10-10) | — |

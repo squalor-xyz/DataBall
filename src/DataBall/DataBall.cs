@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -548,6 +549,88 @@ namespace squalor.DataBall
         /// <returns>A completed task after the save finishes.</returns>
         /// <exception cref="DataBallException">Thrown when the save operation fails.</exception>
         public Task SaveAsync(string path, SaveOptions? options = null) => SaveCore(path, options?.Link ?? false);
+
+        /// <summary>
+        /// Publishes a closed snapshot generation for readers in other processes: a complete
+        /// <c>&lt;Name&gt;.&lt;n&gt;.ball</c> in <see cref="SnapshotOptions.Directory"/>, then the pointer
+        /// <c>&lt;Name&gt;.latest</c> is replaced atomically to name it, then older generations beyond
+        /// <see cref="SnapshotOptions.Keep"/> are pruned when they can be deleted. Readers call
+        /// <see cref="Open(string, string?, bool, EngineOptions?)"/> on the pointer.
+        /// </summary>
+        /// <remarks>
+        /// The snapshot holds committed data only: a pending row is not in it. Capture writes pause while the data is
+        /// copied. A read-only session may publish. A view-backed session links the Parquet unless
+        /// <see cref="SnapshotOptions.EmbedViews"/> is set.
+        /// </remarks>
+        /// <param name="options">Where to publish and how many generations to keep.</param>
+        /// <returns>A completed task with the generation that was published.</returns>
+        /// <exception cref="DataBallException">Thrown for invalid options, an open row stream, or when publishing fails.</exception>
+        public Task<SnapshotInfo> PublishSnapshotAsync(SnapshotOptions options)
+        {
+            ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(options);
+            SnapshotFiles.Validate(options);
+            _logger.LogInformation("Publishing snapshot {Name} to {Directory}", options.Name, options.Directory);
+            try
+            {
+                var clock = Stopwatch.StartNew();
+                var directory = Path.GetFullPath(options.Directory);
+                var generation = SnapshotFiles.NextGeneration(directory, options.Name);
+                var fileName = SnapshotFiles.GenerationFile(options.Name, generation);
+                var target = Path.Combine(directory, fileName);
+                var pointer = SnapshotFiles.PointerPath(directory, options.Name);
+                if (File.Exists(pointer) && SnapshotFiles.TryReadPointer(pointer) is null)
+                    throw new DataBallException($"{pointer} exists and is not a snapshot pointer");
+                _store.PublishTo(target, target + "." + Guid.NewGuid().ToString("N") + ".tmp", ConfigForPersistence(), link: !options.EmbedViews);
+                SnapshotFiles.WritePointer(pointer, fileName);
+                clock.Stop();
+                SnapshotFiles.Prune(directory, options.Name, options.Keep, _logger);
+                return Task.FromResult(new SnapshotInfo(generation, target, pointer, new FileInfo(target).Length, clock.Elapsed));
+            }
+            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
+            {
+                _logger.LogError(ex, "Snapshot publish failed");
+                throw new DataBallException("Failed to publish snapshot", ex);
+            }
+        }
+
+        /// <summary>
+        /// The generation a session opened through a snapshot pointer, or null for any other session.
+        /// <see cref="SnapshotInfo.Duration"/> is zero for it.
+        /// </summary>
+        public SnapshotInfo? OpenedSnapshot { get; private set; }
+
+        /// <summary>
+        /// Reads the generation number a snapshot pointer names, without opening the generation. Cheap enough to poll:
+        /// compare it with <see cref="SnapshotInfo.Generation"/> of <see cref="OpenedSnapshot"/> and reopen only when it is newer.
+        /// </summary>
+        /// <param name="pointerPath">The <c>&lt;Name&gt;.latest</c> file.</param>
+        /// <returns>The generation, or null when the file does not exist.</returns>
+        /// <exception cref="DataBallException">The file is not a snapshot pointer, is malformed, or cannot be read.</exception>
+        public static int? ReadSnapshotGeneration(string pointerPath)
+        {
+            if (string.IsNullOrWhiteSpace(pointerPath))
+                throw new DataBallException("Path is required");
+            try
+            {
+                string? generationFile;
+                try
+                {
+                    generationFile = SnapshotFiles.TryReadPointer(pointerPath);
+                }
+                catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+                {
+                    return null;
+                }
+                if (generationFile is null)
+                    throw new DataBallException($"{pointerPath} is not a snapshot pointer");
+                return SnapshotFiles.ParseGeneration(pointerPath, generationFile);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                throw new DataBallException($"Snapshot pointer {pointerPath} cannot be read", ex);
+            }
+        }
 
         private Task SaveCore(string path, bool link)
         {

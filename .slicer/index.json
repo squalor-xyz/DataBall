@@ -745,6 +745,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "6bfe3827-34d3-45b0-8d56-b9edd1839f0f",
+          "kind": "",
+          "text": "**2026-10-11** — From db-18 relay (2026-10-11): globs or directories over a snapshot directory match every <Name>.<n>.ball plus the pointer; decide whether an expanded pointer resolves to its generation and whether generations behind a pointer are skipped.",
+          "created_at": "2026-10-11T13:31:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1116,6 +1127,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "47b8843c-57f7-4f8f-a59e-8c8628e72843",
+          "kind": "",
+          "text": "**2026-10-11** — From db-18 relay (2026-10-11): new public surface: PublishSnapshotAsync(SnapshotOptions), SnapshotOptions, SnapshotInfo, DataBall.OpenedSnapshot, DataBall.ReadSnapshotGeneration. Open recognizes a snapshot pointer by its first line before the native check; a pointer is always read-only. Fold into the one-way-in/out API with Sources. The CLI and ImportAsync route by extension and don't follow a .latest pointer.",
+          "created_at": "2026-10-11T13:31:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1254,7 +1276,7 @@
       "id": "db-18",
       "title": "DataBall must publish closed .ball snapshots for live readers",
       "short_title": "Live-reader .ball snapshots",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-06"
@@ -1314,6 +1336,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "e4a1d14b-5f16-4416-b28e-69ef60578fd7",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-18 review round 1): (1) publish refuses (DataBallException, nothing written) when <Name>.latest exists and is not a valid snapshot pointer. (2) The narrowed FileGate's effect on plain saves is accepted: a second save to, or an open of, a file another session is saving now throws at once instead of waiting; document it and test it. (3) Add public static int? DataBall.ReadSnapshotGeneration(string pointerPath), reading the pointer only, so readers can poll; document 'dispose the old session before reopening the same generation'. Orchestrator: Open(pointer, writable: true) throwing, OpenedSnapshot Duration 0, publish not persisting config to the live file, and publish-time option validation are accepted.",
+          "created_at": "2026-10-11T13:31:29Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1334,7 +1367,7 @@
         "importance": 2,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -1602,6 +1635,17 @@
           "kind": "",
           "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): db-22 makes .ball import bring the source file's source rows with remapped keys (NULL keys when the .ball has no source table). db-25 decides the many-file policy on top of that, for example whether to also record the .ball itself as a source.",
           "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "97b4da4e-fa00-492b-81b8-f24e6c6a6998",
+          "kind": "",
+          "text": "**2026-10-11** — From db-18 relay (2026-10-11): decide whether a snapshot pointer (<Name>.latest) is accepted as a many-file source, and whether the source row records the pointer or the generation file.",
+          "created_at": "2026-10-11T13:31:30Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
