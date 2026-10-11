@@ -767,6 +767,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "8037f360-84f0-46f4-89a6-7b01be703e51",
+          "kind": "",
+          "text": "**2026-10-11** — From the db-26 relay (architect, 2026-10-11): (a) wide and layout keep two metadata-reconciliation loops (ApplyMetadataAgainstSource in DuckDbStore.cs, the PlanAppend metadata loop in DuckDbStore.Layout.cs); unify them into one planner before many-file opens multiply the cases. (b) Wide Parquet appends still extract metadata after the merge rather than on staging; align with the CSV path. (c) The wide replace-drop of \"data\" sits in ImportFromFunction; consider moving it into RunImport and gating it to the wide CSV caller.",
+          "created_at": "2026-10-11T16:08:02Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -816,6 +827,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-10 relay (2026-10-10): (1) a delegating JSON type that wins on a non-.csv text feed (.txt/.tsv/.dat) cannot open, because the built-in route still comes from DetectFormat's extension table; when CSV settings live in a type's config, let the winning type choose the CSV reader regardless of extension. (2) FileProbe.HeaderFields is line 0 with the sniffed delimiter and fileNameRegex named groups are not retained;  and preambles must expose captures and a post-preamble header to conditions. (3) Precedence is defaults < type overlay < host schemaPath (owner, 2026-10-10).",
           "created_at": "2026-10-10T23:13:11Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "cae3f695-e352-4d2a-970e-2c096013be27",
+          "kind": "",
+          "text": "**2026-10-11** — From the db-26 relay (2026-10-11): (a) declared CSV column types are cast twice (expected-type coercion, then ApplyCsvSchema); collapse to one cast. (b) A metadata header whose canonical type cannot hold the stored value (stored 'W1', appended Wafer(id)) surfaces a raw DuckDB conversion error from reconciliation; name the field and both types, like the db-23 conflict message.",
+          "created_at": "2026-10-11T16:08:02Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1744,7 +1766,7 @@
       "id": "db-26",
       "title": "DataBall wide CSV appends must apply the CSV schema before merging",
       "short_title": "DataBall wide CSV appends must apply the CSV schema before merging",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [],
       "note_records": [
@@ -1754,6 +1776,17 @@
           "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-26 spec review): (1) under explicit requireConstant, a wide CSV append with a differing metadata value is demoted to a column with the old value backfilled, like layout; a value varying within one file still throws. (2) The whole-table re-cast of existing columns when config types grow is dropped; wide behaves like layout and the db-23 merge rule applies. Together these remove the documented wide/layout CSV differences. Implementer Sonnet 5.5 high.",
           "created_at": "2026-10-11T15:37:22Z",
           "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "9391bc89-32d7-4213-96ab-b11aea17b982",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions, 2026-10-11 (db-26 round-1 review): (1) Under requireConstant, a field that varies within one appended file throws in BOTH wide and layout sessions (layout no longer demotes a stored field that varies within a file); values that differ across files still demote to a column. requireConstant stays the strict check. (2) metadataPolicy 'first' is one rule for every wide append format (CSV, Parquet, .ball, MergeOrAppend): the store holds the policy, the stored value wins, the column is ignored. (3) Layout gets the same guard as wide: a metadata field that is already a data column stays data, never also in Metadata. (4) Accepted: a new metadata field with NULLs in the appended file demotes to a column with its lifted value backfilled, as layout does. Orchestrator fixes in round 2: demote+add/widen commit crash (backfill UPDATEs run after the ALTERs); metadata-only appends keep _source_key (never drop the source table).",
+          "created_at": "2026-10-11T16:07:55Z",
+          "attempt": 1,
           "by": "Jon R",
           "verified_by": "",
           "verified_at": "",
@@ -1778,7 +1811,7 @@
         "importance": 2,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     }
   ],

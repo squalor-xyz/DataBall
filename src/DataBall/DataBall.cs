@@ -53,7 +53,10 @@ namespace squalor.DataBall
         private DataBall(Config? overlay, ILogger? logger, string? databasePath, bool readOnly, bool native, EngineOptions? engine = null, bool temporary = false)
         {
             _logger = logger ?? NullLogger.Instance;
-            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly, engine, temporary);
+            _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly, engine, temporary)
+            {
+                MetadataPolicySource = CurrentMetadataPolicy,
+            };
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
             _learnedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
@@ -792,6 +795,8 @@ namespace squalor.DataBall
                 throw new DataBallException($"Column '{name}' expected type {expected.Name}, got {actual.Name}");
         }
 
+        private string? CurrentMetadataPolicy() => _config.MetadataPolicy;
+
         internal void ApplyImportedConfig(Config config)
         {
             ArgumentNullException.ThrowIfNull(config);
@@ -865,9 +870,9 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Imports a CSV and applies the CSV schema. Legacy sessions apply it to <c>"data"</c> after
-        /// the merge (unchanged behavior); layout sessions apply it to the staging table before
-        /// the rows are routed, because <c>"data"</c> is a view.
+        /// Imports a CSV and applies the CSV schema. Wide and layout sessions alike apply it to the staging
+        /// table before the rows are merged (or routed, because a layout's <c>"data"</c> is a view), so an
+        /// append sees canonical column names, typed values and extracted metadata.
         /// </summary>
         internal void ImportCsvWithSchema(string path, bool append, SourceRecord? source = null)
         {
@@ -875,23 +880,18 @@ namespace squalor.DataBall
             long RecordSource() => _store.AddSource(record);
             // A merge into a live session: learned types then never narrow the incoming values (see ApplyCsvSchema).
             var merging = append && (_store.Layout is not null || (_store.DataTableExists() && _store.RowCount() > 0));
-            if (HasLayoutConfig)
-            {
-                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null, merging: merging), RecordSource, DeclaredMergeTypes(), _learnedColumnNames);
-                return;
-            }
-
-            _store.ImportCsv(path, append, _expectedColumnTypes, recordSource: RecordSource, configTypes: DeclaredMergeTypes(), learnedNames: _learnedColumnNames);
-            ApplyCsvSchema(merging: merging);
+            // Staging rows join an existing session: stored metadata is left for the append reconciliation.
+            var joinsSession = HasLayoutConfig ? append && _store.Layout is not null : merging;
+            _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, append: joinsSession, merging: merging), RecordSource, DeclaredMergeTypes(), _learnedColumnNames);
         }
 
         /// <summary>
         /// Renames raw headers to canonical names, coerces configured types, and extracts
-        /// configured metadata fields on <paramref name="table"/>. With <paramref name="layoutAppend"/>
-        /// (staging rows joining a live layout) fields already in metadata are left in place for
+        /// configured metadata fields on <paramref name="table"/>. With <paramref name="append"/>
+        /// (staging rows joining a live session) fields already in metadata are left in place for
         /// the append reconciliation, and no column is dropped here.
         /// </summary>
-        internal void ApplyCsvSchema(string table = "data", bool layoutAppend = false, bool merging = false)
+        internal void ApplyCsvSchema(string table, bool append = false, bool merging = false)
         {
             if (!_store.TableExists(table))
                 return;
@@ -926,7 +926,7 @@ namespace squalor.DataBall
             }
 
             _store.CoerceColumnsOf(table, _expectedColumnTypes, merging ? _learnedColumnNames : null);
-            ExtractConfiguredMetadata(table, layoutAppend);
+            ExtractConfiguredMetadata(table, append);
         }
 
         /// <summary>Expected types the session declares (config or AddColumn&lt;T&gt;); learned types are left out.</summary>
@@ -1005,7 +1005,7 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExtractConfiguredMetadata(string table, bool layoutAppend, IReadOnlySet<string>? reconciled = null)
+        private void ExtractConfiguredMetadata(string table, bool append, IReadOnlySet<string>? reconciled = null)
         {
             if (!_store.TableExists(table) || _config.MetadataFields.Count == 0)
                 return;
@@ -1023,7 +1023,12 @@ namespace squalor.DataBall
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
                     continue;
-                if (layoutAppend && existing.ContainsKey(match.Name))
+                var storedValue = append && existing.ContainsKey(match.Name);
+                var enforceConstant = policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase);
+                var sessionColumn = !storedValue && append && _store.GetColumns().Any(c => c.Name.Equals(match.Name, StringComparison.OrdinalIgnoreCase));
+                if (sessionColumn && !enforceConstant)
+                    continue; // the session already holds the field as a column: it stays data, never also metadata
+                if (storedValue && !enforceConstant)
                     continue; // the append reconciliation compares against the stored value
 
                 var q = DuckDbStore.QuoteIdent(match.Name);
@@ -1038,12 +1043,28 @@ namespace squalor.DataBall
                 var nulls = Convert.ToInt64(rows[0]["n"], CultureInfo.InvariantCulture);
                 var value = rows[0]["v"];
 
+                if (storedValue)
+                {
+                    // Only requireConstant gets here: a value differing from the stored one demotes, but one file must still be constant.
+                    if (distinct > 1)
+                        throw new DataBallException($"Metadata field '{match.Name}' is not constant");
+                    continue;
+                }
+
+                if (sessionColumn)
+                {
+                    // requireConstant still checks a column field within this file; the field itself is never lifted.
+                    if (distinct > 1)
+                        throw new DataBallException($"Metadata field '{match.Name}' is not constant");
+                    continue;
+                }
+
                 if (policy.Equals("first", StringComparison.OrdinalIgnoreCase))
                 {
                     var first = _store.Query($"SELECT {q} FROM {qTable} WHERE {q} IS NOT NULL LIMIT 1");
                     if (first.Count > 0)
                         _store.SetMetadata(match.Name, first[0][match.Name]);
-                    if (!layoutAppend)
+                    if (!append)
                     {
                         if (table == "data" && _store.IsViewBacked)
                             _store.ExcludeFromView(match.Name);
@@ -1057,7 +1078,7 @@ namespace squalor.DataBall
                 if (distinct == 1 && (nulls == 0 || policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) is false))
                 {
                     _store.SetMetadata(match.Name, value);
-                    if (!layoutAppend)
+                    if (!append)
                     {
                         if (table == "data" && _store.IsViewBacked)
                             _store.ExcludeFromView(match.Name);
@@ -1068,7 +1089,7 @@ namespace squalor.DataBall
                     continue;
                 }
 
-                if (policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase) && distinct > 1)
+                if (enforceConstant && distinct > 1)
                     throw new DataBallException($"Metadata field '{match.Name}' is not constant");
             }
         }

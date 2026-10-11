@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-26 items · — 13 · done 12 · parked 1
+26 items · — 12 · done 13 · parked 1
 
 ## v2.0
 
@@ -50,7 +50,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 17 | [db-23](slices/db-23.md) | DataBall appends must merge schemas by name with numeric widening | S | 1 | databall | db-11 split (owner, 2026-10-10) | done |
 | 18 | [db-24](slices/db-24.md) | DataBall many-file opens must have a bad-file policy and an open report | S | 1 | databall | db-11 split (owner, 2026-10-10) | — |
 | 19 | [db-25](slices/db-25.md) | DataBall many-file opens must accept native .ball sources | S | 2 | databall | db-11 split (owner, 2026-10-10) | — |
-| 20 | [db-26](slices/db-26.md) | DataBall wide CSV appends must apply the CSV schema before merging | M | 2 | databall | db-22 relay (pre-existing on 7c17c59), owner 2026-10-11 | — |
+| 20 | [db-26](slices/db-26.md) | DataBall wide CSV appends must apply the CSV schema before merging | M | 2 | databall | db-22 relay (pre-existing on 7c17c59), owner 2026-10-11 | done |
 
 ---
 
