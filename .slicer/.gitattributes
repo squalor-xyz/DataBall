@@ -12,3 +12,7 @@ log.jsonl merge=union
 render/ROADMAP.md merge=slicer-generated
 render/ROADMAP.html merge=slicer-generated
 render/slices/*.md merge=slicer-generated
+
+# index.json is merged by `slicer merge-index` (keeps the larger next_id). Defined per clone:
+#   git config merge.slicer-index.driver "slicer merge-index %O %A %B"
+index.json merge=slicer-index
