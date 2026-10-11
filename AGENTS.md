@@ -25,6 +25,15 @@ dotnet format DataBall.sln --verify-no-changes
 
 CI (`.github/workflows/ci.yml`) runs restore, build and test in Release on Windows, macOS and Linux. Run all three commands above before handing off a change.
 
+While iterating (red tests, mutation checks), build once and then run only the tests you need without rebuilding:
+
+```bash
+dotnet build DataBall.sln -c Release
+dotnet test tests/DataBall.Tests/DataBall.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~LineageTests"
+```
+
+Rebuild after every source edit; `--no-build` runs whatever was built last. The full suite and the format check above still run before any hand-off.
+
 ## Code rules
 
 - Every source file starts with `// SPDX-License-Identifier: Apache-2.0`. Namespace `squalor.DataBall` (`.Import`, `.Export`, `.Handlers`, `.Cli`).
