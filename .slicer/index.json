@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 26,
+  "next_id": 27,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -610,7 +610,8 @@
         "db-09",
         "db-10",
         "db-22",
-        "db-23"
+        "db-23",
+        "db-26"
       ],
       "note_records": [
         {
@@ -1498,6 +1499,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "d11e237b-e4f2-41a2-b8b6-48cb46046974",
+          "kind": "",
+          "text": "**2026-10-11** — Spec review 2026-10-11 (probes + owner): integer widths hash equally, so integer->wider-integer widening keeps dimension keys; integer->DOUBLE changes hash(), so widening a declared dimension key column to DOUBLE takes the re-split path. ALTER ... SET DATA TYPE rolls back in a transaction. The unit-header canonical-name append bug is split to db-26 (owner). Implementer Haiku 5.5 high; hand off to Sonnet if it stalls or fails the gate twice.",
+          "created_at": "2026-10-11T05:29:37Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1595,6 +1607,35 @@
         ],
         "trees_literal": false,
         "findings": "db-11 split (owner, 2026-10-10)",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-26",
+      "title": "DataBall wide CSV appends must apply the CSV schema before merging",
+      "short_title": "DataBall wide CSV appends must apply the CSV schema before merging",
+      "status": "open",
+      "has_slice": true,
+      "depends_on": [],
+      "note_records": [],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-22 relay (pre-existing on 7c17c59), owner 2026-10-11",
         "discovered_from": "",
         "cites": [],
         "key": "",

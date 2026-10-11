@@ -2,8 +2,9 @@
   "id": "db-23",
   "title": "DataBall appends must merge schemas by name with numeric widening",
   "lead": [
-    "An append into an existing session merges schemas:\n- columns are unioned by name, case-insensitively;\n- a missing column is NULL;\n- numeric types widen: an integer pair to the wider integer, and an integer with FLOAT or DOUBLE to DOUBLE.",
-    "The physical column is widened in place with `ALTER COLUMN … SET DATA TYPE`, for wide and layout sessions alike. Any other type conflict throws, naming the column, both types and both sources. db-11 reuses this rule for many-file opens."
+    "An append into an existing session merges schemas:",
+    "- Columns are unioned by name, case-insensitive; a missing column becomes NULL. Wide sessions already do this.\n- Integer types widen to the wider integer.\n- An integer meeting FLOAT or DOUBLE widens to DOUBLE.\n- The physical column is widened in place with `ALTER COLUMN … SET DATA TYPE`, inside the append transaction, for wide and layout sessions.\n- Any other type conflict throws a `DataBallException`. The message names the column, both types, and the incoming source.",
+    "Today, a mismatch is silently cast to the existing type: DOUBLE into BIGINT truncates, and VARCHAR into DOUBLE fails with an engine error that names no column. db-11 reuses this rule for many-file opens."
   ],
   "depends_note": null,
   "findings_note": "db-11 split (owner, 2026-10-10)",
@@ -11,23 +12,23 @@
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:** opening many files (db-11); DATE/TIMESTAMP widening; changes to replace imports.",
+  "boundary": "**Not in this slice:** many-file opens (db-11); DATE/TIMESTAMP widening; the unit-header canonical-name append bug (db-26); changes to replace imports.",
   "sections": [
     {
       "heading": "Why",
-      "body": "Split out of db-11 on 2026-10-10. Owner decisions: schema merge by default with numeric widening (suite alignment doc), and widening in layout sessions alters the owning physical column (db-11 spec interview, 2026-10-10).\n\nFrom reviews:\n- Layout physical types were fixed at first import, and appends were cast to them.\n- db-08 added an in-place `ALTER … SET DATA TYPE` path for all-null columns (`InferredNullColumnType`). Reuse it.\n\n**Model note (owner, 2026-10-10):** Claude-only relay. Implementer: **Haiku 5.5, high**, a trial on a small, well-scoped slice. The reviewer and architect models are set at relay start."
+      "body": "Split out of db-11, 2026-10-10.\n\nOwner decisions:\n- Schema merge by default, with numeric widening (suite alignment doc).\n- In layout sessions, widening alters the owning physical column (db-11 spec interview, 2026-10-10).\n- The unit-header bug is a separate item, db-26 (2026-10-11).\n\nFrom reviews: layout physical types were fixed at first import, and appends cast to them. db-08 added an in-place `ALTER … SET DATA TYPE` path for all-null columns (`InferredNullColumnType`, `src/DataBall/DuckDbStore.cs:1698`). Reuse its approach.\n\nVerified in the 2026-10-11 spec-review probe (DuckDB.NET 1.5.5):\n- `hash()` is identical for the same value as TINYINT, SMALLINT, INTEGER and BIGINT, so widening an integer dimension key column to a wider integer keeps existing key hashes matching.\n- `hash(25.0::DOUBLE)` differs from `hash(25::INTEGER)`. Widening a **declared dimension key column** to DOUBLE would therefore stop matching existing dimension rows and duplicate them. That case must go through the existing full re-split (`AppendByRematerializing`, `src/DataBall/DuckDbStore.Layout.cs`), which recomputes keys.\n- `ALTER TABLE … ALTER COLUMN … SET DATA TYPE` rolls back inside a transaction, and works while a view depends on the table.\n\nThe current code is:\n- the wide append in `AppendFromTable` (`DuckDbStore.cs:1171`): `ADD COLUMN` for new columns, then `CAST` to the existing type on mismatch;\n- the layout cast to physical types in `InsertStagingRows` (`DuckDbStore.Layout.cs:~521-551`), reached from `AppendStagingIntoLayout` (`:127`).\n\n**Model note (owner, 2026-10-10):** Claude-only relay. Implementer: **Haiku 5.5, high**, as a trial on a small, well-scoped slice. If Haiku stalls or fails the gate twice, hand off to Sonnet 5.5 high. The reviewer, architect and gate are Opus, medium."
     },
     {
       "heading": "Files",
-      "body": "- `src/DataBall/DuckDbStore.cs` (`AppendFromTable`, `MergeOrAppendFromTable`) and `DuckDbStore.Layout.cs` (`AppendStagingIntoLayout`): the merge and widening rules above, inside the append transaction. Config-typed columns keep casting to their configured type.\n- `README.md` \"Tables\" (\"physical column types are fixed at the first import\") and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/SchemaMergeTests.cs`."
+      "body": "- `src/DataBall/DuckDbStore.cs`. Add one helper deciding, per incoming column against the existing column type, one of:\n  - keep, when the types are equal;\n  - widen to a target type;\n  - conflict.\n\n  Apply it:\n  - In `AppendFromTable` (wide), before the insert, `ALTER` widened columns, then insert without casting those columns. Config-typed columns (`expectedTypes`) keep casting to their configured type, unchanged.\n  - Throw on a conflict, before any change.\n- `src/DataBall/DuckDbStore.Layout.cs`. In the layout append (`AppendStagingIntoLayout` / `PlanAppend`):\n  - `ALTER` the owning physical table's column (`Layout.TableFor(name)`) for a widen.\n  - A widen of a declared dimension key column to DOUBLE (any integer to DOUBLE) takes the rematerialize path.\n  - Throw on a conflict, before any change.\n- `_source_key` (db-22) is never widened or treated as a data conflict.\n- `README.md` \"Tables\": \"physical column types are fixed at the first import\" no longer holds for numeric widening. Document the rule, plus the conflict error, in README and `docs/how-it-works.md`.\n- Tests: new `tests/DataBall.Tests/SchemaMergeTests.cs`."
     },
     {
       "heading": "Failing tests",
-      "body": "1. `Append_UnionByName_NullForMissing` (wide and layout).\n2. `Append_Widens` (theory, wide and layout): INTEGER then BIGINT then DOUBLE. Assert the owning physical column's type in `information_schema.columns`.\n3. `Append_VarcharVsDouble_Throws`: the message names the column, both types and both sources; the session is unchanged.\n4. `Append_ConfigTypedColumn_StillCasts`."
+      "body": "1. `Append_UnionByName_NullForMissing` (wide and layout): a column only in the second file is NULL for the first file's rows, and vice versa.\n2. `Append_Widens_IntegerToBigint` and `Append_Widens_IntegerToDouble` (theory, wide and layout). Assert the owning physical column's type in `information_schema.columns` and the values exactly.\n3. `Append_Layout_DimensionKeyToDouble_Rekeys`: a declared-key dimension column widened INTEGER→DOUBLE still reuses the dimension row for an equal value. No duplicate dimension rows.\n4. `Append_VarcharVsDouble_Throws`: the message names the column, both types, and the incoming file. The session is unchanged (rows, columns and types).\n5. `Append_ConfigTypedColumn_StillCasts`.\n6. `Append_SourceKey_NotWidened`: `_source_key` stays BIGINT."
     },
     {
       "heading": "Implement",
-      "body": "1. Spec review.\n2. `slicer start` with `--render --strict`. Write tests 1–4, watch them fail.\n3. Implement; docs; mutation checks; full Release suite; format."
+      "body": "1. `slicer start db-23 --render --strict`. Write tests 1–6 and watch them fail.\n2. The widen/conflict helper; the wide path; the layout path, including the DOUBLE-key re-split.\n3. Docs; mutation checks; full Release suite; format. While iterating, build once and use `dotnet test … --no-build --filter …` (AGENTS.md)."
     },
     {
       "heading": "Check",
@@ -35,11 +36,15 @@
     },
     {
       "heading": "Git",
-      "body": ""
+      "body": "One DataBall commit on branch `db-23` (worktree `.worktrees/db-23`), merged to `main` after the gate and the owner's go-ahead."
+    },
+    {
+      "heading": "Interacts with",
+      "body": "- The CSV schema path. A wide session applies the CSV schema after the merge (the db-26 bug), so widening sees raw header names for CSV appends. Merge by exact name only; canonical-name merging is db-26.\n- The db-08 null-batch widening (`InferredNullColumnType`) on `AddRows`. Keep both rules consistent.\n- The db-22 lineage. `_source_key` comes in on staging and must not be widened. `source` is not a data table.\n- Layout growth, re-split and rollback (`AppendByRematerializing`, `RestoreLayout`).\n- The db-08 stream guard: an append during a stream already throws."
     },
     {
       "heading": "Must not change",
-      "body": "- Replace imports and their column types are unchanged.\n- Config-typed columns still cast.\n- A failed append leaves the session unchanged (one transaction)."
+      "body": "- A replace import and its column types are unchanged.\n- Config-typed columns still cast.\n- An append with identical types behaves exactly as before.\n- A failed append (a conflict, or any error) leaves the session unchanged: one transaction, view and tables restored.\n- Layout dimension key reuse for equal values holds after a widen."
     }
   ],
   "notes": []

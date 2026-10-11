@@ -1,0 +1,42 @@
+{
+  "id": "db-26",
+  "title": "DataBall wide CSV appends must apply the CSV schema before merging",
+  "lead": [
+    "Appending a CSV with a unit header (`Gain(dB)`) to a wide session that already has `Gain` throws `Duplicate canonical column 'Gain' from header 'Gain(dB)'`.",
+    "The cause: a wide session applies the CSV schema (header canonicalization, configured types, metadata extraction) to the whole `\"data\"` table *after* the merge (`ImportCsvWithSchema`, `src/DataBall/DataBall.cs`). The raw header `Gain(dB)` therefore lands as a new column next to `Gain`, and canonicalizing it collides. Layout sessions already apply the schema to staging before routing."
+  ],
+  "depends_note": null,
+  "findings_note": "db-22 relay (pre-existing on 7c17c59), owner 2026-10-11",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** schema merge and widening rules (db-23); many-file opens (db-11).",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "Found during the db-22 relay and confirmed on base 7c17c59. Owner, 2026-10-11: track it separately from db-23 to keep db-23 small. db-11 opens many CSVs and will hit this, so db-11 depends on this item.\n\n**Model note:** Claude-only. The implementer is Sonnet 5.5 at high effort, because CSV schema ordering is subtle.\n\n**Verify first, in spec review:**\n- which tests depend on the current order (header renames and metadata extraction over the whole table after the merge);\n- whether applying the schema on staging changes wide-session behavior that README \"Differences from a wide session\" documents."
+    },
+    {
+      "heading": "Files",
+      "body": "- `src/DataBall/DataBall.cs` (`ImportCsvWithSchema`, `ApplyCsvSchema`): for wide sessions, apply the schema to staging before the merge, as layout sessions do.\n- README and `docs/how-it-works.md`, if wide/layout differences change."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "1. `WideAppend_UnitHeader_MergesIntoCanonicalColumn`: `a.csv` has `Gain`; appending `b.csv` with `Gain(dB)` yields one `Gain` column and no throw.\n2. Existing wide CSV tests stay green; list any whose expectations change."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Spec review.\n2. `slicer start`. Write the tests and watch them fail.\n3. Implement, mutation-check, run the full suite and the format check."
+    },
+    {
+      "heading": "Check",
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- `slicer check`"
+    },
+    {
+      "heading": "Git",
+      "body": ""
+    }
+  ],
+  "notes": []
+}
