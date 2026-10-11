@@ -295,11 +295,14 @@ namespace squalor.DataBall
             var db = new DataBall(effective, engine, temporary: store == StoreMode.File);
             try
             {
+                // What the source table records as the type: the handler's name (a JSON type's id) or the built-in path.
+                var sourceType = handler?.Name ?? report.BuiltInPath?.ToString() ?? nameof(BuiltInPath.CsvImport);
                 if (delegates && report.BuiltInPath == BuiltInPath.ParquetView && !db.HasLayoutConfig)
                 {
+                    var source = SourceFile.Describe(path, sourceType);
                     db.RunImport(false, () =>
                     {
-                        db._store.AttachParquetView(path);
+                        db._store.AttachParquetView(path, db._store.AddSource(source));
                         db.ExtractConfiguredMetadata("data", false);
                     });
                     return db;
@@ -307,14 +310,27 @@ namespace squalor.DataBall
 
                 if (handler is not null && !delegates)
                 {
+                    // The handler's rows are the file's rows: each carries the key of its source, which the handler cannot choose.
+                    var key = db._store.AddSource(SourceFile.Describe(path, sourceType));
                     var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);
+                    IReadOnlyDictionary<string, object?>? last = null;
                     await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
                     {
-                        batch.Add(row);
+                        last = row;
+                        // Columns are renamed as in a file (_source_file becomes origin_source_file); _source_key is the session's.
+                        var keyed = new Dictionary<string, object?>(row.Count + 1);
+                        foreach (var pair in row)
+                        {
+                            var name = Lineage.IncomingName(pair.Key);
+                            if (!keyed.TryAdd(name, pair.Value))
+                                throw new DataBallException($"Column '{name}' already exists; it is where '{pair.Key}' would go, because source lineage reserves that name");
+                        }
+                        keyed[Lineage.KeyColumn] = key;
+                        batch.Add(keyed);
                         if (batch.Count == HandlerBatchSize)
                         {
                             db._store.AddRows(batch, db._expectedColumnTypes);
-                            db.RememberRow(batch[^1]);
+                            db.RememberRow(last);
                             AfterHandlerBatchForTests?.Invoke(db, batch.Count);
                             batch.Clear();
                         }
@@ -322,14 +338,14 @@ namespace squalor.DataBall
                     if (batch.Count > 0)
                     {
                         db._store.AddRows(batch, db._expectedColumnTypes);
-                        db.RememberRow(batch[^1]);
+                        db.RememberRow(last!);
                         AfterHandlerBatchForTests?.Invoke(db, batch.Count);
                     }
                     db.SplitIfLayout();
                     return db;
                 }
 
-                await db.ImportAsync(path).ConfigureAwait(false);
+                await db.ImportCoreAsync(path, null, sourceType).ConfigureAwait(false);
                 return db;
             }
             catch (Exception ex)

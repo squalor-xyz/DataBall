@@ -82,9 +82,10 @@ namespace squalor.DataBall.Tests
                 ORDER BY ordinal_position
                 """).Select(r => (string)r["column_name"]!).ToList();
             Assert.Equal(
-                new[] { "stimulusGrp", "sweep", "SN", "Date", "Teststand", "Temp", "Vcc", "Frequency", "Pout", "Pin", "Gain", "I_Total", "EVM" },
+                new[] { "stimulusGrp", "sweep", "SN", "Date", "Teststand", "Temp", "Vcc", "Frequency", "Pout", "Pin", "Gain", "I_Total", "EVM", "_source_key" },
                 columns);
-            Assert.DoesNotContain(columns, c => c.EndsWith("_key", StringComparison.Ordinal) || c == "_row");
+            // _source_key is lineage; the surrogate dimension keys and the row key stay out of the view.
+            Assert.DoesNotContain(columns, c => (c.EndsWith("_key", StringComparison.Ordinal) && c != "_source_key") || c == "_row");
         }
 
         [Fact]
@@ -502,7 +503,7 @@ namespace squalor.DataBall.Tests
             using var db = new DataBall(TablesConfig());
             await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
             db.AddRows(new[] { new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["evm"] = -1.5 } });
-            Assert.Equal(13, ViewColumns(db).Count);
+            Assert.Equal(14, ViewColumns(db).Count);
             var added = Assert.Single(db.Query("SELECT EVM FROM data WHERE stimulusGrp = 99"));
             Assert.Equal(-1.5, Assert.IsType<double>(added["EVM"]));
         }
@@ -599,7 +600,7 @@ namespace squalor.DataBall.Tests
             Assert.Equal("A", db.Metadata["Tester"]);
             Assert.Single(db.Query("SELECT 1 AS one FROM meta WHERE \"key\" = 'Tester'"));
             Assert.NotNull(db.Layout);
-            Assert.Equal(13, ViewColumns(db).Count);
+            Assert.Equal(14, ViewColumns(db).Count);
             Assert.Equal(81, Count(db, "data"));
 
             db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
@@ -631,7 +632,7 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(csv, "stimulusGrp(id),sweep(id),EVM(dB),Temp(degC)\n99,1,-1.5,25.0\n");
                 await db.ImportAsync(csv, new ImportOptions { Append = true });
 
-                Assert.Equal(13, ViewColumns(db).Count);
+                Assert.Equal(14, ViewColumns(db).Count);
                 var added = Assert.Single(db.Query("SELECT EVM, Temp FROM data WHERE stimulusGrp = 99"));
                 Assert.Equal(-1.5, Assert.IsType<double>(added["EVM"]));
                 Assert.Equal(25.0, Assert.IsType<double>(added["Temp"]));
@@ -794,8 +795,8 @@ namespace squalor.DataBall.Tests
             await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
             db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Note"] = "x" });
 
-            Assert.Equal(14, ViewColumns(db).Count);
-            Assert.Equal("Note", ViewColumns(db)[13]);
+            Assert.Equal(15, ViewColumns(db).Count);
+            Assert.Equal("Note", ViewColumns(db)[14]); // after _source_key
             Assert.Contains("Note", db.Query("SELECT column_name FROM information_schema.columns WHERE table_name = 'sweep'").Select(r => (string)r["column_name"]!));
             Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Note IS NULL")[0]["c"]);
             Assert.Equal("x", Assert.Single(db.Query("SELECT Note FROM data WHERE stimulusGrp = 99"))["Note"]);
@@ -846,7 +847,7 @@ namespace squalor.DataBall.Tests
                 Assert.Equal(82, Count(db, "data"));
                 Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
                 Assert.Equal(40.0, Assert.Single(db.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
-                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal(15, ViewColumns(db).Count);
                 Assert.Equal("VIEW", TableType(db, "data"));
             }
             finally
@@ -871,7 +872,7 @@ namespace squalor.DataBall.Tests
                 db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
 
                 Assert.Contains("Humidity", TableColumns(db, "setup"));
-                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal(15, ViewColumns(db).Count);
                 Assert.Equal(10, Count(db, "setup"));
                 Assert.Equal("VIEW", TableType(db, "data"));
 
@@ -1310,7 +1311,7 @@ namespace squalor.DataBall.Tests
 
                 Assert.Equal(82, Count(db, "data"));
                 Assert.Contains("Humidity", TableColumns(db, "setup"));
-                Assert.Equal(14, ViewColumns(db).Count);
+                Assert.Equal(15, ViewColumns(db).Count);
                 Assert.Equal(81L, db.Query("SELECT COUNT(*) AS c FROM data WHERE Humidity IS NULL")[0]["c"]);
                 Assert.Equal(40.0, Assert.Single(db.Query("SELECT Humidity FROM data WHERE stimulusGrp = 99"))["Humidity"]);
                 Assert.Equal("VIEW", TableType(db, "data"));
@@ -2202,7 +2203,7 @@ namespace squalor.DataBall.Tests
         {
             return db.Query("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name NOT IN ('meta', '_databall')
+                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name NOT IN ('meta', '_databall', 'source')
                 ORDER BY table_name
                 """).Select(r => (string)r["table_name"]!).ToArray();
         }

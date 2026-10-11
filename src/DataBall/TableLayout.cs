@@ -237,7 +237,9 @@ namespace squalor.DataBall
             var spineName = order.FirstOrDefault(n => KindOf(config.Tables[n]) == KindRows) ?? ImpliedSpineName;
             foreach (var column in wide)
             {
-                if (!assigned.ContainsKey(column))
+                // The source key is lineage, not data: a role selector never moves it off the spine. Config rejects an
+                // explicit claim (Config.ValidateReservedTables), so the second test is a defensive guard only.
+                if (!assigned.ContainsKey(column) || column.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
                     assigned[column] = spineName;
             }
 

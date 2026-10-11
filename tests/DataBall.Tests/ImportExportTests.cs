@@ -52,7 +52,7 @@ namespace squalor.DataBall.Tests
             using var db = new DataBall(f.Config(metadata: true));
             db.SetMetadata("Site", "old");
             await db.ImportAsync(f.Source, new ImportOptions { Append = true });
-            Assert.Equal(("007", "Id,Day", "1,2"),
+            Assert.Equal(("007", "Id,Day,_source_key", "1,2"),
                 (db.Metadata["Site"], string.Join(",", db.Store.GetColumns().Select(c => c.Name)), string.Join(",", ParquetViewTests.Ids(db))));
         }
 

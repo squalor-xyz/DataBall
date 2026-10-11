@@ -115,7 +115,7 @@ namespace squalor.DataBall.Tests
         {
             var csv = Path.Combine(AppContext.BaseDirectory, "fixtures", "semiconductor-sweep.csv");
             using var opened = DataBall.Open(csv);
-            var source = opened.Query("SELECT * FROM data");
+            var source = opened.Query("SELECT * EXCLUDE (_source_key) FROM data");
             Assert.Equal(81, source.Count);
 
             using var db = new DataBall();

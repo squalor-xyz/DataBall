@@ -122,6 +122,21 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>
+        /// The files whose rows the session holds, in import order: one entry per row of the built-in
+        /// <c>source</c> table. Each row of <c>"data"</c> points at its entry with <c>_source_key</c>; rows
+        /// written by <c>AddRow</c> and the row builder have a NULL key. Empty for a session that never
+        /// imported a file. Each call reads a fresh snapshot.
+        /// </summary>
+        public IReadOnlyList<SourceInfo> Sources
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _store.ReadSources();
+            }
+        }
+
         internal DuckDbStore Store
         {
             get
@@ -175,6 +190,7 @@ namespace squalor.DataBall
             ThrowIfReadOnly();
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(values);
+            Lineage.ThrowIfReservedColumn(name);
             EnsureExpectedType(name, typeof(T));
             var list = values as IReadOnlyList<T> ?? values.ToList();
             OnWideData(() => _store.AddColumn(name, list));
@@ -192,6 +208,7 @@ namespace squalor.DataBall
             ThrowIfReadOnly();
             ThrowIfDisposed();
             ArgumentNullException.ThrowIfNull(values);
+            Lineage.ThrowIfReservedColumn(name);
             EnsureExpectedType(name, typeof(string));
             var list = values as IReadOnlyList<string?> ?? values.ToList();
             OnWideData(() => _store.AddColumn(name, list));
@@ -207,6 +224,7 @@ namespace squalor.DataBall
         {
             ThrowIfReadOnly();
             ThrowIfDisposed();
+            Lineage.ThrowIfReservedColumn(name);
             ThrowIfDeclaredKey(name);
             OnWideData(() => _store.RemoveColumn(name));
             _expectedColumnTypes.Remove(name);
@@ -220,6 +238,7 @@ namespace squalor.DataBall
         {
             ThrowIfReadOnly();
             ThrowIfDisposed();
+            ThrowIfReservedColumns(values);
             _store.AddRow(values, _expectedColumnTypes);
             RememberRow(values);
             SplitIfLayout();
@@ -238,6 +257,8 @@ namespace squalor.DataBall
             var list = rows as IReadOnlyList<IReadOnlyDictionary<string, object?>> ?? rows.ToList();
             if (list.Count == 0)
                 return;
+            foreach (var row in list)
+                ThrowIfReservedColumns(row);
             _store.AddRows(list, _expectedColumnTypes);
             RememberRow(list[list.Count - 1]);
             SplitIfLayout();
@@ -294,8 +315,10 @@ namespace squalor.DataBall
                 try
                 {
                     var path = Path.Combine(dir, "data.parquet");
-                    other.Store.ExportParquet(path);
-                    RunImport(append, () => _store.ImportParquet(path, append));
+                    // Not the resolving export: the key travels, and the other session's sources follow it below.
+                    other.Store.ExportParquetKeepingSourceKey(path);
+                    var otherSources = other.Store.ReadSources();
+                    RunImport(append, () => _store.ImportParquet(path, append, t => _store.RemapStagingSources(t, otherSources)));
                 }
                 finally
                 {
@@ -413,7 +436,13 @@ namespace squalor.DataBall
         /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c>.</param>
         /// <returns>A completed task after the import finishes.</returns>
         /// <exception cref="DataBallException">Thrown when the path is missing, the format is unknown, or import fails.</exception>
-        public Task ImportAsync(string path, ImportOptions? options = null)
+        public Task ImportAsync(string path, ImportOptions? options = null) => ImportCoreAsync(path, options, null);
+
+        /// <summary>
+        /// <see cref="ImportAsync"/> with the <c>type</c> the <c>source</c> table records. <see cref="Open"/> passes
+        /// the winning handler's name or the built-in path of its detection report; the public call derives it from the format.
+        /// </summary>
+        internal Task ImportCoreAsync(string path, ImportOptions? options, string? sourceType)
         {
             ThrowIfReadOnly();
             ThrowIfDisposed();
@@ -430,18 +459,26 @@ namespace squalor.DataBall
             _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, append);
             try
             {
+                // Hashing can fail on an unreadable file; it runs before the first write.
+                var source = format switch
+                {
+                    ExportType.Csv => SourceFile.Describe(path, sourceType ?? nameof(BuiltInPath.CsvImport)),
+                    ExportType.Parquet => SourceFile.Describe(path, sourceType ?? nameof(BuiltInPath.ParquetView)),
+                    _ => null
+                };
+
                 void Import()
                 {
                     switch (format)
                     {
                         case ExportType.Csv:
-                            ImportCsvWithSchema(path, append);
+                            ImportCsvWithSchema(path, append, source);
                             break;
                         case ExportType.Parquet:
-                            ImportParquetWithMetadata(path, append);
+                            ImportParquetWithMetadata(path, append, source);
                             break;
                         case ExportType.Archive:
-                            ImportManager.ImportFromArchiveCore(this, path, append);
+                            ImportManager.ImportFromArchiveCore(this, path, append, sourceType);
                             break;
                         case ExportType.Ball:
                             ImportManager.ImportFromBallCore(this, path, append);
@@ -605,6 +642,9 @@ namespace squalor.DataBall
                     break;
                 if (skip is not null && skip.Contains(name))
                     continue;
+                // Constant in a single-file session, but it is lineage: it stays a column.
+                if (name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 var q = DuckDbStore.QuoteIdent(name);
                 var rows = _store.Query($"""
@@ -630,7 +670,28 @@ namespace squalor.DataBall
             // Extracting the last constant column drops "data"; DuckDB cannot DISTINCT a 0-column table.
             if (!_store.DataTableExists())
                 return;
-            _store.Execute("CREATE OR REPLACE TABLE \"data\" AS SELECT DISTINCT * FROM \"data\"");
+            var columns = _store.GetColumns().Select(c => c.Name).ToList();
+            var key = columns.FirstOrDefault(c => c.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase));
+            if (key is null)
+            {
+                _store.Execute("CREATE OR REPLACE TABLE \"data\" AS SELECT DISTINCT * FROM \"data\"");
+                return;
+            }
+            // Rows equal in every data column are one row, whichever file they came from: the lowest key survives.
+            var select = string.Join(", ", columns.Select(c => c == key
+                ? $"min({DuckDbStore.QuoteIdent(c)}) AS {DuckDbStore.QuoteIdent(c)}"
+                : DuckDbStore.QuoteIdent(c)));
+            var groupBy = string.Join(", ", columns.Where(c => c != key).Select(DuckDbStore.QuoteIdent));
+            _store.Execute($"CREATE OR REPLACE TABLE \"data\" AS SELECT {select} FROM \"data\" GROUP BY {groupBy}");
+        }
+
+        /// <summary>Host writes may not name a <c>_source*</c> column; checked before anything is written.</summary>
+        private static void ThrowIfReservedColumns(IReadOnlyDictionary<string, object?>? values)
+        {
+            if (values is null)
+                return;
+            foreach (var key in values.Keys)
+                Lineage.ThrowIfReservedColumn(key);
         }
 
         private void EnsureExpectedType(string name, Type actual)
@@ -695,17 +756,19 @@ namespace squalor.DataBall
             => fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Copies Parquet, extracting configured metadata at the CSV path's staging/merge boundary.</summary>
-        internal void ImportParquetWithMetadata(string path, bool append)
+        internal void ImportParquetWithMetadata(string path, bool append, SourceRecord? source = null)
         {
+            var record = source ?? SourceFile.Describe(path, nameof(BuiltInPath.ParquetView));
+            long RecordSource() => _store.AddSource(record);
             if (HasLayoutConfig)
             {
-                _store.ImportParquet(path, append, t => ExtractConfiguredMetadata(t, append && _store.Layout is not null));
+                _store.ImportParquet(path, append, t => ExtractConfiguredMetadata(t, append && _store.Layout is not null), RecordSource);
                 return;
             }
             var reconciled = append && _store.DataTableExists() && _store.RowCount() > 0
                 ? new HashSet<string>(_store.SnapshotMetadata().Keys, StringComparer.OrdinalIgnoreCase)
                 : null;
-            _store.ImportParquet(path, append);
+            _store.ImportParquet(path, append, recordSource: RecordSource);
             ExtractConfiguredMetadata("data", false, reconciled);
         }
 
@@ -714,15 +777,17 @@ namespace squalor.DataBall
         /// the merge (unchanged behavior); layout sessions apply it to the staging table before
         /// the rows are routed, because <c>"data"</c> is a view.
         /// </summary>
-        internal void ImportCsvWithSchema(string path, bool append)
+        internal void ImportCsvWithSchema(string path, bool append, SourceRecord? source = null)
         {
+            var record = source ?? SourceFile.Describe(path, nameof(BuiltInPath.CsvImport));
+            long RecordSource() => _store.AddSource(record);
             if (HasLayoutConfig)
             {
-                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null));
+                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null), RecordSource);
                 return;
             }
 
-            _store.ImportCsv(path, append, _expectedColumnTypes);
+            _store.ImportCsv(path, append, _expectedColumnTypes, recordSource: RecordSource);
             ApplyCsvSchema();
         }
 
@@ -739,7 +804,7 @@ namespace squalor.DataBall
 
             var headers = _store.GetColumnsOf(table)
                 .Select(c => c.Name)
-                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Where(n => !string.IsNullOrWhiteSpace(n) && !n.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             if (headers.Count == 0)
                 return;
@@ -801,6 +866,8 @@ namespace squalor.DataBall
             {
                 if (reconciled?.Contains(field) == true)
                     continue; // already compared with stored metadata by the append path
+                if (field.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                    continue; // lineage, never a metadata field
                 var cols = _store.GetColumnsOf(table);
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
@@ -926,6 +993,10 @@ namespace squalor.DataBall
                     }
                     else
                         _store.MaterializeView();
+
+                    // A replacing import starts the sources over; an append keeps their keys.
+                    if (!append)
+                        _store.ResetSources();
 
                     import();
                     SplitIfLayout();

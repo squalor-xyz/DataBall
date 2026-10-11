@@ -13,7 +13,7 @@ public class ParquetViewTests
         using var db = DataBall.Open(f.Source);
         AssertView(db);
         Assert.Equal(new[] { 1, 2 }, Ids(db));
-        Assert.Equal(new[] { "Id", "Site", "Day" }, db.Store.GetColumns().Select(c => c.Name));
+        Assert.Equal(new[] { "Id", "Site", "Day", "_source_key" }, db.Store.GetColumns().Select(c => c.Name));
     }
 
     [Fact]
@@ -25,8 +25,8 @@ public class ParquetViewTests
         await imported.ImportAsync(f.Hive);
         AssertView(db);
         Assert.Equal(new[] { 1, 2 }, Ids(db));
-        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP") }, db.Store.GetColumns());
-        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP") }, imported.Store.GetColumns());
+        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP"), ("_source_key", "BIGINT") }, db.Store.GetColumns());
+        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP"), ("_source_key", "BIGINT") }, imported.Store.GetColumns());
         Assert.Equal(new[] { "007", "007" }, db.Query("SELECT Site FROM data ORDER BY Id").Select(r => r["Site"]));
         Assert.Equal(new[] { new DateTime(2026, 1, 1), new DateTime(2026, 1, 2) },
             db.Query("SELECT Day FROM data ORDER BY Id").Select(r => (DateTime)r["Day"]!));
@@ -43,8 +43,8 @@ public class ParquetViewTests
         await imported.ImportAsync(f.Source);
         AssertView(db);
         Assert.Equal("TIMESTAMP", db.Store.GetColumns().Single(c => c.Name == "Day").DuckDbType);
-        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP") }, db.Store.GetColumns());
-        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP") }, imported.Store.GetColumns());
+        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP"), ("_source_key", "BIGINT") }, db.Store.GetColumns());
+        Assert.Equal(new[] { ("Id", "INTEGER"), ("Site", "VARCHAR"), ("Day", "TIMESTAMP"), ("_source_key", "BIGINT") }, imported.Store.GetColumns());
         Assert.Equal(new DateTime(2026, 1, 1), db.Query("SELECT Day FROM data WHERE Id = 1")[0]["Day"]);
     }
 
@@ -245,7 +245,7 @@ public class ParquetViewTests
             Assert.Equal("007", db.Metadata["Site"]);
             db.SetMetadata("Operator", "Ada");
             AssertView(db);
-            Assert.Equal(new[] { "Id", "Day" }, db.Store.GetColumns().Select(c => c.Name));
+            Assert.Equal(new[] { "Id", "Day", "_source_key" }, db.Store.GetColumns().Select(c => c.Name));
             Assert.Equal(new[] { 1, 2 }, Ids(db));
         }
         using (var writer = new DataBall())
@@ -309,7 +309,7 @@ public class ParquetViewTests
         using var db = kind == "view" ? DataBall.Open(source) : new DataBall();
         if (kind != "view") await db.ImportAsync(source);
         Assert.Equal("A", db.Metadata["Lot"]);
-        Assert.Equal(new[] { "Id" }, db.Store.GetColumns().Select(c => c.Name));
+        Assert.Equal(new[] { "Id", "_source_key" }, db.Store.GetColumns().Select(c => c.Name));
         Assert.Equal(new[] { 1, 2 }, Ids(db));
     }
 

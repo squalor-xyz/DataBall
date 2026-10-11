@@ -75,14 +75,17 @@ namespace squalor.DataBall.Import
         }
 
         /// <summary>Archive import body; <see cref="DataBall.ImportAsync"/> runs it inside its own <c>RunImport</c>.</summary>
-        internal static void ImportFromArchiveCore(DataBall db, string path, bool append)
+        internal static void ImportFromArchiveCore(DataBall db, string path, bool append, string? sourceType = null)
         {
             db.Logger.LogInformation("Importing archive from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-in-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
+            // Each CSV entry is its own source, recorded as <archive>!<entry>.
+            var entrySource = new ArchiveEntrySource(Path.GetFullPath(path), sourceType ?? nameof(BuiltInPath.ArchiveImport));
             try
             {
                 var rowsBefore = db.Store.DataTableExists() ? db.Store.RowCount() : 0;
+                var sourcesBefore = db.Store.MaxSourceKey();
                 Exception? factoryError = null;
                 var imported = false;
 
@@ -91,20 +94,21 @@ namespace squalor.DataBall.Import
                 {
                     try
                     {
-                        imported = ImportArchiveViaFactory(db, path, dir, append);
+                        imported = ImportArchiveViaFactory(db, path, dir, append, entrySource);
                     }
                     catch (Exception ex) when (ex is not DataBallException)
                     {
                         db.Logger.LogError(ex, "Archive factory import failed for {Path}", path);
                         factoryError = ex;
                         var rowsNow = db.Store.DataTableExists() ? db.Store.RowCount() : 0;
-                        if (rowsNow > rowsBefore)
+                        // Rows or recorded sources mean entries were already imported: the reader fallback would record them twice.
+                        if (rowsNow > rowsBefore || db.Store.MaxSourceKey() > sourcesBefore)
                             throw new DataBallException("Failed to import archive", ex);
                     }
                 }
 
                 if (!imported)
-                    imported = ImportArchiveViaReader(db, path, dir, append);
+                    imported = ImportArchiveViaReader(db, path, dir, append, entrySource);
 
                 if (!imported)
                 {
@@ -159,7 +163,9 @@ namespace squalor.DataBall.Import
 
         internal static ExportType DetectImportFormat(string path) => DataBall.DetectFormat(path);
 
-        private static bool ImportArchiveViaFactory(DataBall db, string path, string dir, bool append)
+        private sealed record ArchiveEntrySource(string ArchivePath, string Type);
+
+        private static bool ImportArchiveViaFactory(DataBall db, string path, string dir, bool append, ArchiveEntrySource entrySource)
         {
             try
             {
@@ -176,7 +182,7 @@ namespace squalor.DataBall.Import
                 var first = true;
                 foreach (var entry in csvEntries)
                 {
-                    ExtractAndImportCsv(db, dir, entry.Key!, entry.OpenEntryStream(), first ? append : true);
+                    ExtractAndImportCsv(db, dir, entry.Key!, entry.OpenEntryStream(), first ? append : true, entrySource, entry.LastModifiedTime);
                     first = false;
                 }
                 return true;
@@ -188,7 +194,7 @@ namespace squalor.DataBall.Import
             }
         }
 
-        private static bool ImportArchiveViaReader(DataBall db, string path, string dir, bool append)
+        private static bool ImportArchiveViaReader(DataBall db, string path, string dir, bool append, ArchiveEntrySource entrySource)
         {
             using var stream = File.OpenRead(path);
             using var reader = ReaderFactory.OpenReader(stream);
@@ -200,7 +206,7 @@ namespace squalor.DataBall.Import
                 if (entry.IsDirectory || entry.Key is null
                     || !entry.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
                     continue;
-                ExtractAndImportCsv(db, dir, entry.Key, reader.OpenEntryStream(), first ? append : true);
+                ExtractAndImportCsv(db, dir, entry.Key, reader.OpenEntryStream(), first ? append : true, entrySource, entry.LastModifiedTime);
                 first = false;
                 anyCsv = true;
             }
@@ -215,7 +221,8 @@ namespace squalor.DataBall.Import
                 || name.EndsWith(".xz", StringComparison.OrdinalIgnoreCase);
         }
 
-        private static void ExtractAndImportCsv(DataBall db, string dir, string entryKey, Stream entryStream, bool append)
+        private static void ExtractAndImportCsv(
+            DataBall db, string dir, string entryKey, Stream entryStream, bool append, ArchiveEntrySource source, DateTime? modified)
         {
             using (entryStream)
             {
@@ -225,7 +232,8 @@ namespace squalor.DataBall.Import
                     Directory.CreateDirectory(destDir);
                 using (var fileStream = File.Create(dest))
                     entryStream.CopyTo(fileStream);
-                db.ImportCsvWithSchema(dest, append);
+                var record = SourceFile.DescribeEntry(dest, source.ArchivePath + "!" + entryKey, source.Type, modified);
+                db.ImportCsvWithSchema(dest, append, record);
             }
         }
 
