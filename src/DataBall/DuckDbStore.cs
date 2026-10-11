@@ -211,21 +211,15 @@ namespace squalor.DataBall
                 """);
         }
 
+        /// <summary>Test seam: runs inside a copy, after the data is copied and before the file moves into place.</summary>
+        internal static Action<string>? AfterCopyForTests;
+
         internal void SaveTo(string path, Config? config = null, bool link = false)
         {
             ThrowIfConnectionBusy();
             if (_currentTx is not null)
                 throw new DataBallException("Cannot save inside a store transaction");
-            lock (FileGate)
-            {
-                SaveToCore(path, config, link);
-            }
-        }
-
-        private void SaveToCore(string path, Config? config, bool link)
-        {
-            if (!DataTableExists() && _metadata.Count == 0)
-                throw new DataBallException("No data to export");
+            ThrowIfNothingToSave();
             var target = Path.GetFullPath(path);
             if (FilePathComparer.Equals(target, _exclusivePath))
             {
@@ -237,10 +231,55 @@ namespace squalor.DataBall
                 Execute("CHECKPOINT");
                 return;
             }
-            if (OpenFiles.Contains(target))
-                throw new DataBallException("Save target is already open in another session");
+            CopyToFile(target, target + ".tmp", config, link, overwrite: true);
+        }
+
+        /// <summary>
+        /// Writes a new snapshot generation: a complete copy at <paramref name="target"/>, built under <paramref name="temporary"/>.
+        /// The target must not exist.
+        /// </summary>
+        internal void PublishTo(string target, string temporary, Config config, bool link)
+        {
+            ThrowIfConnectionBusy();
+            if (_currentTx is not null)
+                throw new DataBallException("Cannot save inside a store transaction");
+            ThrowIfNothingToSave();
+            CopyToFile(Path.GetFullPath(target), Path.GetFullPath(temporary), config, link, overwrite: false);
+        }
+
+        private void ThrowIfNothingToSave()
+        {
+            if (!DataTableExists() && _metadata.Count == 0)
+                throw new DataBallException("No data to export");
+        }
+
+        /// <summary>
+        /// Copies the session into <paramref name="temporary"/> and moves it to <paramref name="target"/>.
+        /// The target is reserved in <see cref="OpenFiles"/> under <see cref="FileGate"/>, then the gate is released
+        /// for the copy, so other sessions' opens, disposes and saves do not wait for it. The reservation ends after the move.
+        /// </summary>
+        private void CopyToFile(string target, string temporary, Config? config, bool link, bool overwrite)
+        {
+            lock (FileGate)
+            {
+                if (OpenFiles.Contains(target))
+                    throw new DataBallException("Save target is already open in another session");
+                OpenFiles.Add(target);
+            }
+            try
+            {
+                CopyCore(target, temporary, config, link, overwrite);
+            }
+            finally
+            {
+                lock (FileGate)
+                    OpenFiles.Remove(target);
+            }
+        }
+
+        private void CopyCore(string target, string temporary, Config? config, bool link, bool overwrite)
+        {
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            var temporary = target + ".tmp";
             File.Delete(temporary);
             File.Delete(temporary + ".wal");
             var alias = "save_" + Guid.NewGuid().ToString("N");
@@ -251,6 +290,7 @@ namespace squalor.DataBall
                 attached = true;
                 var source = Convert.ToString(ExecuteScalar("SELECT current_database()"), CultureInfo.InvariantCulture)!;
                 Execute($"COPY FROM DATABASE {QuoteIdent(source)} TO {QuoteIdent(alias)}");
+                AfterCopyForTests?.Invoke(target);
                 if (!link && IsViewBacked)
                 {
                     InTransaction(() =>
@@ -270,7 +310,7 @@ namespace squalor.DataBall
                     Execute($"INSERT OR REPLACE INTO {QuoteIdent(alias)}.meta VALUES ({QuoteString(key)}, {QuoteString(SerializeMetadataValue(value))})");
                 Execute($"DETACH {QuoteIdent(alias)}");
                 attached = false;
-                File.Move(temporary, target, overwrite: true);
+                File.Move(temporary, target, overwrite);
             }
             catch
             {

@@ -297,11 +297,37 @@ A `.ball` v3 is a DuckDB database file, with `DUCK` at bytes 8–11. It contains
 
 Save attaches a temporary destination, runs `COPY FROM DATABASE`, embeds an external Parquet view as a table in the saved copy by default, detaches it, then replaces the destination. When saving to another path, the live session keeps its view. A default save by a writable session to its own live path embeds the Parquet in place and checkpoints the resulting table. `await session.SaveAsync("linked.ball", new SaveOptions { Link = true })` preserves the view and absolute source paths instead; that file requires its Parquet sources, and opening it with a missing source throws `DataBallException` naming the path. Native import attaches the source read-only and copies rows, metadata and `source` rows (keys moved after the session's own) through staging and merges the schema config subset in one transaction; the source is detached before the call returns. ZIP `.ball` v1/v2 is unsupported. DuckDB's default storage version is retained, with no older-engine reader floor claimed.
 
-The same-path in-process gate applies to read-only and writable sessions. Cross-process live-reader snapshot publication is outside this release's native-file change.
+The same-path in-process gate applies to read-only and writable sessions. A save reserves its destination in that gate and then releases the gate for the copy, so other sessions' opens, disposes and saves do not wait for it. Saving to a file that another session has open or is saving to throws at once, and so does opening a file while another session saves to it, instead of waiting. For readers in other processes, see [Live snapshots](#live-snapshots).
 
 Native saves stamp the latest `_databall` row with the running engine's `version()`, the destination's actual `duckdb_databases()` storage tag, and `written_at` (time of that save). The engine and storage versions are read after the database copy and before detach. Saving a writable session to its own file stamps that row before checkpointing. Config history grows only when config changes, including a read-only overlay saved to a copy. A read-only session cannot save to its own path (it throws); save to another path, or open with `writable: true`.
 
 `Open` uses the full stored config; an overlay merges on top and must keep the same table layout (table order does not matter). Stored `meta` values are authoritative on reopen; only overlay metadata overrides them, in memory for a read-only session. Native `ImportAsync` merges only columns, relationships, tables, and config metadata. The receiving session keeps its CSV settings, metadata fields, metadata policy, and other settings.
+
+## Live snapshots
+
+A writer that is still capturing can publish a **closed snapshot generation** on request, so readers in other processes see its data without touching the live capture file. Reading the active capture file from another process is not promised: DuckDB holds a conflicting lock on it.
+
+```csharp
+// Writer (the host decides when; there is no timer)
+SnapshotInfo info = await session.PublishSnapshotAsync(new SnapshotOptions { Directory = "live", Name = "run" });
+// live/run.1.ball, then live/run.latest names it; the next publish writes run.2.ball and re-points run.latest
+
+// Reader, in another process
+using var reader = DataBall.Open("live/run.latest");   // read-only; the newest generation at this moment
+SnapshotInfo opened = reader.OpenedSnapshot!;          // Generation, Path, PointerPath
+```
+
+- **Generations.** Each publish writes a new, complete `.ball` named `<Name>.<n>.ball` and never overwrites a generation. `n` is one more than the highest existing `<Name>.<n>.ball` in the directory, so numbering survives a writer restart. The file is built under a unique temporary name and moved into place when complete.
+- **Pointer.** `<Name>.latest` is a UTF-8 text file of two lines: `DATABALL-SNAPSHOT 1`, then the generation file name (a bare name in the same directory). It is replaced atomically (a uniquely named temporary file, then a move over the old pointer), so a reader sees either the old or the new generation, never a partial file. `DataBall.Open` recognizes a pointer by that first line, not by its extension, and opens the named generation read-only (`writable: true` throws). Opening the pointer again later picks up newer generations (see Polling below). If retention deletes the generation between the reader's two reads, `Open` reads the pointer once more and retries, then throws a `DataBallException` that names the pointer and the missing generation.
+- **Polling.** `DataBall.ReadSnapshotGeneration("live/run.latest")` reads only the pointer and returns the generation it names (null when the file does not exist; it throws `DataBallException` when the file is not a pointer). A long-lived reader compares that number with `OpenedSnapshot.Generation` and reopens only when it is newer. Dispose the old session before reopening the same generation in one process: a process cannot hold the same file open twice, so the second `Open` would throw "already open". A reader that wants to keep the old session while it opens the newer one is fine, because the newer generation is a different file.
+- **Retention.** `SnapshotOptions.Keep` (default 2, at least 1) newest generations stay. Older ones are deleted at the end of a publish, except the generation the pointer names. A generation that cannot be deleted (on Windows a reader holding it blocks the delete) is skipped without failing the publish and retried at the next one.
+- **What a snapshot holds.** Committed data, metadata and config, as `SaveAsync` writes them. A pending row from `InitializeRow` is not included. A read-only session may publish, since the snapshot is a copy. Publishing while a row stream is open throws.
+- **View-backed sessions.** A session over an external Parquet view publishes a snapshot that links to the Parquet (as `SaveOptions.Link`), because embedding would re-read the whole Parquet on every publish. Set `SnapshotOptions.EmbedViews` to copy it into the snapshot instead.
+- **Writer pause.** The writer uses a single connection, so capture writes wait while the data is copied, about as long as a `SaveAsync` of the same session. Other sessions in the process do not wait: the copy holds no process-wide lock.
+
+- **One writer per Name.** Run one publishing session per `Name`; two writers publishing the same `Name` into one directory would race for generation numbers and pointer updates. The snapshot directory belongs to the publisher: any `<Name>.<n>.ball` in it counts as a generation (and is pruned by retention), so do not keep other files with that pattern there. Publish refuses to replace a `<Name>.latest` that exists and is not a snapshot pointer; nothing is written. The pointer is UTF-8 without a byte-order mark.
+
+Not covered: automatic cadence, incremental snapshots, and network filesystems.
 
 ## Platforms
 

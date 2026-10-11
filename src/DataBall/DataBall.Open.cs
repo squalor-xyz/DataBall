@@ -222,12 +222,13 @@ namespace squalor.DataBall
         /// <summary>
         /// Opens <paramref name="path"/> into a new session. Overlay schema JSON is optional.
         /// Native DuckDB files open directly, read-only by default, before registered handlers.
+        /// A snapshot pointer (<c>&lt;name&gt;.latest</c>, published by <see cref="PublishSnapshotAsync"/>) opens the generation it names, always read-only; see <see cref="OpenedSnapshot"/>.
         /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
         /// <param name="path">File or hive Parquet directory to open.</param>
         /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
         /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
-        /// <param name="writable">Allow changes to a native .ball session.</param>
+        /// <param name="writable">Allow changes to a native .ball session. A snapshot pointer cannot be opened writable.</param>
         /// <exception cref="DataBallException">Missing path/file, unknown format, or import failure.</exception>
         public static DataBall Open(string path, string? schemaPath = null, bool writable = false, EngineOptions? engine = null)
         {
@@ -252,18 +253,10 @@ namespace squalor.DataBall
             if (!directory && !File.Exists(path))
                 throw new DataBallException($"File not found: {path}");
 
-            var native = false;
-            if (!directory)
-                using (var sniff = File.OpenRead(path))
-                {
-                    var magic = new byte[12];
-                    var count = sniff.Read(magic, 0, magic.Length);
-                    if (count >= 12 && magic.AsSpan(8, 4).SequenceEqual("DUCK"u8))
-                        native = true;
-                    if (Path.GetExtension(path).Equals(".ball", StringComparison.OrdinalIgnoreCase)
-                        && count >= 2 && magic[0] == 'P' && magic[1] == 'K')
-                        throw new DataBallException("1.x ZIP .ball files are unsupported");
-                }
+            if (!directory && SnapshotFiles.TryReadPointer(path) is { } generationFile)
+                return OpenSnapshot(path, generationFile, schemaPath, writable, engine);
+
+            var native = !directory && IsNativeBall(path);
 
             if (native)
                 return new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, path, readOnly: !writable, native: true, engine);
@@ -354,6 +347,68 @@ namespace squalor.DataBall
                 if (ex is DataBallException or OperationCanceledException)
                     throw;
                 throw new DataBallException("Open failed", ex);
+            }
+        }
+
+        /// <summary>True for a native DuckDB file; throws for a 1.x ZIP <c>.ball</c>.</summary>
+        private static bool IsNativeBall(string path)
+        {
+            var native = false;
+            using (var sniff = File.OpenRead(path))
+            {
+                var magic = new byte[12];
+                var count = sniff.Read(magic, 0, magic.Length);
+                if (count >= 12 && magic.AsSpan(8, 4).SequenceEqual("DUCK"u8))
+                    native = true;
+                if (Path.GetExtension(path).Equals(".ball", StringComparison.OrdinalIgnoreCase)
+                    && count >= 2 && magic[0] == 'P' && magic[1] == 'K')
+                    throw new DataBallException("1.x ZIP .ball files are unsupported");
+            }
+            return native;
+        }
+
+        /// <summary>
+        /// Opens the generation a snapshot pointer names, read-only. If that generation has just been deleted by
+        /// retention, the pointer is read once more and the new target is tried; then the open fails clearly.
+        /// </summary>
+        private static DataBall OpenSnapshot(string pointerPath, string generationFile, string? schemaPath, bool writable, EngineOptions? engine)
+        {
+            if (writable)
+                throw new DataBallException($"A snapshot is read-only; {pointerPath} cannot be opened with writable: true");
+            var pointerFull = Path.GetFullPath(pointerPath);
+            var directory = Path.GetDirectoryName(pointerFull)!;
+            for (var attempt = 0; ; attempt++)
+            {
+                var generation = SnapshotFiles.ParseGeneration(pointerPath, generationFile);
+                var generationPath = Path.Combine(directory, generationFile);
+                if (File.Exists(generationPath))
+                {
+                    try
+                    {
+                        if (!IsNativeBall(generationPath))
+                            throw new DataBallException($"Snapshot generation {generationPath} is not a native .ball");
+                        var bytes = new FileInfo(generationPath).Length;
+                        var db = new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, generationPath, readOnly: true, native: true, engine);
+                        db.OpenedSnapshot = new SnapshotInfo(generation, generationPath, pointerFull, bytes, TimeSpan.Zero);
+                        return db;
+                    }
+                    catch (Exception ex) when (ex is DataBallException or IOException && !File.Exists(generationPath))
+                    {
+                        // Deleted between the check and the open: handled like a missing generation.
+                    }
+                }
+                if (attempt == 1)
+                    throw new DataBallException($"Snapshot pointer {pointerPath} names generation {generationFile}, which does not exist");
+                SnapshotFiles.GenerationMissingForTests?.Invoke(pointerPath);
+                try
+                {
+                    generationFile = SnapshotFiles.TryReadPointer(pointerPath)
+                        ?? throw new DataBallException($"{pointerPath} is no longer a snapshot pointer");
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    throw new DataBallException($"Snapshot pointer {pointerPath} cannot be read", ex);
+                }
             }
         }
 
