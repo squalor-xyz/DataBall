@@ -151,7 +151,7 @@ namespace squalor.DataBall.Import
             {
                 var config = db.Store.ReadConfig(alias);
                 db.ApplyImportedConfig(config);
-                db.Store.ImportNativeRows(alias, append);
+                db.Store.ImportNativeRows(alias, append, db.DeclaredMergeTypes(), $"'{path}'");
                 db.Store.ImportNativeMetadata(alias);
                 db.ApplyImportedConfigMetadata(config);
             }

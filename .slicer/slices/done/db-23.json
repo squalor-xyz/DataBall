@@ -12,7 +12,7 @@
   "flags": [],
   "trees_note": "databall",
   "trees_plural": false,
-  "boundary": "**Not in this slice:** many-file opens (db-11); DATE/TIMESTAMP widening; the unit-header canonical-name append bug (db-26); changes to replace imports.",
+  "boundary": "**Not in this slice:** many-file opens (db-11); the unit-header canonical-name append bug (db-26); changes to replace imports; widening beyond the owner's pairs (integer widths, integer/FLOAT to DOUBLE, DATE to TIMESTAMP).",
   "sections": [
     {
       "heading": "Why",

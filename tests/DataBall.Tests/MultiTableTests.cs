@@ -1163,7 +1163,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task Append_DimensionGrowth_CastFailure_RollsBack()
+        public async Task Append_DimensionGrowth_TypeConflict_LeavesSessionUnchanged()
         {
             var dir = TempDir();
             try
@@ -1176,8 +1176,8 @@ namespace squalor.DataBall.Tests
                 var layoutShape = LayoutShape(db);
                 var before = db.Query("SELECT * FROM data ORDER BY stimulusGrp, sweep");
 
-                // A wide session whose EVM is text: MergeOrAppend stages parquet without expected types,
-                // so the failing CAST to DOUBLE happens inside the re-split, not before PlanAppend.
+                // A wide session whose EVM is text. EVM is learned from the CSV unit header, so it widens by the normal
+                // rules: VARCHAR into DOUBLE is a conflict, thrown before any change, naming the column and both types.
                 using var other = new DataBall();
                 other.AddRows(new[]
                 {
@@ -1185,7 +1185,9 @@ namespace squalor.DataBall.Tests
                 });
                 Assert.Equal("VARCHAR", other.Query("SELECT typeof(EVM) AS t FROM data")[0]["t"]);
                 var ex = Assert.Throws<DataBallException>(() => db.MergeOrAppend(other, append: true));
-                Assert.Contains("not-a-number", FullMessage(ex), StringComparison.Ordinal);
+                Assert.Contains("'EVM'", FullMessage(ex), StringComparison.Ordinal);
+                Assert.Contains("DOUBLE", FullMessage(ex), StringComparison.Ordinal);
+                Assert.Contains("VARCHAR", FullMessage(ex), StringComparison.Ordinal);
 
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(viewColumns, ViewColumns(db));

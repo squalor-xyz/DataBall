@@ -745,6 +745,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "5163ad20-1591-4ddc-af33-58d39fb03a79",
+          "kind": "",
+          "text": "**2026-10-11** — From db-23 relay (2026-10-11): db-23's merge rule is pairwise (MergedColumnType, PlanColumnWidening(existing, staging, ...)); fold it across staged sources against a running merged schema, with per-source all-null checks and per-source names in conflicts. AddRows and handler-drained sources (DataBall.Open.cs drain) bypass the merge rule and coerce to the existing type; route handler sources through staging plus PlanColumnWidening when they become many-file sources. A dimension-key widen to DOUBLE or TIMESTAMP re-splits the whole session once per column; an in-place re-key (ALTER the dimension column, recompute KeyExpression, UPDATE dimension key and spine FK) would avoid the wide materialization.",
+          "created_at": "2026-10-11T14:02:36Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1111,6 +1122,17 @@
           "kind": "",
           "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): db-22 adds public IReadOnlyList<SourceInfo> Sources; fold it into the read API.",
           "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "592d52f3-2ccc-46df-b837-d706b7e431d5",
+          "kind": "",
+          "text": "**2026-10-11** — From db-23 relay (2026-10-11): configTypes is threaded through about 8 store signatures, each defaulting to null, and ImportFromFunction folds configTypes ?? expectedTypes. Consider a store-held declared-type map set by DataBall (as UpdateLayoutConfig does), so a new call site cannot silently skip the declared-type exemption.",
+          "created_at": "2026-10-11T14:02:36Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1485,7 +1507,7 @@
       "id": "db-23",
       "title": "DataBall appends must merge schemas by name with numeric widening",
       "short_title": "DataBall appends must merge schemas by name with numeric widening",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [],
       "note_records": [
@@ -1510,6 +1532,50 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "ac190c9c-ce80-4829-a735-eddfbe972055",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-23 round 1): (1) an incoming column with no non-null values is exempt and adopts the existing type (no conflict), as db-08 does for all-null batches. (2) Widening pairs: integer widths -> wider integer; integer or FLOAT with FLOAT/DOUBLE -> DOUBLE; DATE with TIMESTAMP -> TIMESTAMP; every other mismatch (unsigned/HUGEINT, DECIMAL, VARCHAR vs number, ...) throws a named conflict. Orchestrator (spec gaps): DataBall.cs is in scope so MergeOrAppend keeps casting config-typed columns (Must not change) and its conflict message names the merged session, not the temp Parquet path.",
+          "created_at": "2026-10-11T13:31:29Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "a3fe2a73-c905-462f-9dd6-e9c4818ad12e",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-23 review round 1): (1) a session column with no non-null values that is not config-typed widens to the incoming type (the mirror of the incoming all-null rule, consistent with db-08's InferredNullColumnType). (2) Only config-declared types and AddColumn<T> count as declared and always cast; types DataBall learned itself (InitializeRow/CommitRow capture, the CSV schema pass) widen by the normal rules, so no silent truncation. Learned types must not come back as declared after a save and reopen (ConfigForPersistence persists them today).",
+          "created_at": "2026-10-11T14:02:36Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "1d249951-fe26-47ab-9515-64772d1c8902",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decision 2026-10-11 (db-23 round 3): learned types never narrow. CSV staging coercion keeps using learned types except when the incoming column's type is wider than the learned type; then it is left as is and the merge widens it (2.7 into a CommitRow-learned INTEGER column gives DOUBLE 2.7). First-import typing of CSV columns is unchanged.",
+          "created_at": "2026-10-11T14:19:24Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "52140b3c-ff85-4b54-9dab-715b021e1eb6",
+          "kind": "",
+          "text": "**2026-10-11** — Gate 1 (2026-10-11): FAIL on (1) the empty-session-column rule applied to VARCHAR only, while the owner's choice reads 'an existing column with no non-null values (and not config-typed) widens to the incoming type', so it applies to any type; (2) a misplaced ImportParquet doc comment. Everything else confirmed by probes.",
+          "created_at": "2026-10-11T15:06:51Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1530,7 +1596,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 1,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
