@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -162,6 +163,91 @@ namespace squalor.DataBall.Import
         }
 
         internal static ExportType DetectImportFormat(string path) => DataBall.DetectFormat(path);
+
+        /// <summary>A CSV entry of an archive, extracted to <see cref="Path"/>.</summary>
+        internal sealed record ExtractedEntry(string Key, string Path, DateTime? Modified);
+
+        /// <summary>
+        /// Extracts every CSV entry of an archive into <paramref name="dir"/> and returns them sorted by entry key. A many-file open
+        /// stages each entry as its own source; the caller deletes <paramref name="dir"/>.
+        /// </summary>
+        /// <exception cref="DataBallException">The archive cannot be read or holds no CSV entry.</exception>
+        internal static IReadOnlyList<ExtractedEntry> ExtractCsvEntries(string path, string dir)
+        {
+            Exception? factoryError = null;
+            try
+            {
+                // ArchiveFactory.Open cannot identify xz; skip it for those extensions.
+                if (!IsXzArchivePath(path))
+                {
+                    try
+                    {
+                        var viaFactory = ExtractViaFactory(path, dir);
+                        if (viaFactory.Count > 0)
+                            return viaFactory;
+                    }
+                    catch (Exception ex) when (ex is not DataBallException)
+                    {
+                        factoryError = ex;
+                    }
+                }
+
+                var viaReader = ExtractViaReader(path, dir);
+                if (viaReader.Count > 0)
+                    return viaReader;
+            }
+            catch (Exception ex) when (ex is not DataBallException)
+            {
+                throw new DataBallException("Failed to import archive", ex);
+            }
+            if (factoryError is not null)
+                throw new DataBallException("Failed to import archive", factoryError);
+            throw new DataBallException("Archive contains no CSV files");
+        }
+
+        private static List<ExtractedEntry> ExtractViaFactory(string path, string dir)
+        {
+            using var archive = ArchiveFactory.OpenArchive(path);
+            var result = new List<ExtractedEntry>();
+            foreach (var entry in archive.Entries.Where(IsCsvEntry))
+            {
+                using var stream = entry.OpenEntryStream();
+                result.Add(Extract(dir, entry.Key!, stream, entry.LastModifiedTime));
+            }
+            return SortByKey(result);
+        }
+
+        private static List<ExtractedEntry> ExtractViaReader(string path, string dir)
+        {
+            using var stream = File.OpenRead(path);
+            using var reader = ReaderFactory.OpenReader(stream);
+            var result = new List<ExtractedEntry>();
+            while (reader.MoveToNextEntry())
+            {
+                if (!IsCsvEntry(reader.Entry))
+                    continue;
+                using var entryStream = reader.OpenEntryStream();
+                result.Add(Extract(dir, reader.Entry.Key!, entryStream, reader.Entry.LastModifiedTime));
+            }
+            return SortByKey(result);
+        }
+
+        private static bool IsCsvEntry(SharpCompress.Common.IEntry entry) =>
+            !entry.IsDirectory && entry.Key is not null && entry.Key.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+
+        private static List<ExtractedEntry> SortByKey(List<ExtractedEntry> entries) =>
+            entries.OrderBy(e => e.Key, StringComparer.OrdinalIgnoreCase).ThenBy(e => e.Key, StringComparer.Ordinal).ToList();
+
+        private static ExtractedEntry Extract(string dir, string key, Stream entryStream, DateTime? modified)
+        {
+            var dest = ZipSlipSafePath(dir, key);
+            var destDir = Path.GetDirectoryName(dest);
+            if (!string.IsNullOrEmpty(destDir))
+                Directory.CreateDirectory(destDir);
+            using (var file = File.Create(dest))
+                entryStream.CopyTo(file);
+            return new ExtractedEntry(key, dest, modified);
+        }
 
         private sealed record ArchiveEntrySource(string ArchivePath, string Type);
 

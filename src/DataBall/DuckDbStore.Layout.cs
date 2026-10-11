@@ -20,6 +20,9 @@ namespace squalor.DataBall
         private const string RowsTemp = "_rows";
         private const string UnsplitTemp = "_unsplit";
 
+        /// <summary>How many times this store split <c>"data"</c> into its layout; a test seam for the one-split rule of a many-file open.</summary>
+        internal int LayoutSplits { get; private set; }
+
         /// <summary>Layout bound to this store, or null for a single wide table.</summary>
         internal TableLayout? Layout { get; private set; }
 
@@ -112,6 +115,7 @@ namespace squalor.DataBall
 
             Layout = layout;
             LayoutConfig = config;
+            LayoutSplits++;
             return layout;
         }
 
@@ -162,6 +166,8 @@ namespace squalor.DataBall
                     var qSpine = QuoteIdent(plan.Next.Spine.Name);
                     foreach (var (key, value) in plan.Demote)
                         ExecuteParameterized($"UPDATE {qSpine} SET {QuoteIdent(key)} = $v", Param("v", value));
+                    foreach (var column in plan.FromSource)
+                        BackfillFromSource(qSpine, column, plan.Types[column]);
 
                     InsertStagingRows(staging, plan.Next, plan.Incoming);
 
@@ -224,6 +230,9 @@ namespace squalor.DataBall
                 if (demoted.TryGetValue(column, out var value))
                     ExecuteParameterized($"UPDATE {qData} SET {QuoteIdent(column)} = $v", Param("v", value));
             }
+
+            foreach (var column in plan.FromSource)
+                BackfillFromSource(qData, column, dataTypes[column]);
 
             var select = string.Join(", ", plan.Incoming.Select(c => $"CAST({QuoteIdent(c.Staging)} AS {dataTypes[c.Wide]}) AS {QuoteIdent(c.Wide)}"));
             Execute($"INSERT INTO {qData} BY NAME SELECT {select} FROM {QuoteIdent(staging)} ORDER BY rowid");
@@ -380,7 +389,8 @@ namespace squalor.DataBall
             IReadOnlyDictionary<string, string> Types,
             IReadOnlyList<(string Key, object? Value)> Demote,
             bool NeedsRematerialize,
-            IReadOnlyList<(string Column, string From, string To)> Widen);
+            IReadOnlyList<(string Column, string From, string To)> Widen,
+            IReadOnlyList<string> FromSource);
 
         /// <summary>
         /// Decides, without writing, how a staging table joins the layout: which staging columns
@@ -480,6 +490,22 @@ namespace squalor.DataBall
                     rematerialize = true;
             }
 
+            // A new column that is a per-source column of the source table is filled for the rows already stored, from their source.
+            // Only the spine holds _source_key, so any other table takes the re-split.
+            var fromSource = new List<string>();
+            if (current.WideColumns.Contains(Lineage.KeyColumn, StringComparer.OrdinalIgnoreCase))
+            {
+                var perSource = new HashSet<string>(SourceMetadataColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+                foreach (var c in incoming)
+                {
+                    if (!perSource.Contains(c.Wide) || current.WideColumns.Contains(c.Wide, StringComparer.OrdinalIgnoreCase))
+                        continue;
+                    fromSource.Add(c.Wide);
+                    if (!next.TableFor(c.Wide).Equals(next.Spine.Name, StringComparison.OrdinalIgnoreCase))
+                        rematerialize = true;
+                }
+            }
+
             // A dimension key hashes its value, and the hash changes unless the key widens to a wider integer
             // (hash(25) and hash(25.0) differ, and so do hash(DATE) and hash(TIMESTAMP)). Widening such a key
             // re-keys every row through the full re-split.
@@ -490,7 +516,7 @@ namespace squalor.DataBall
                     rematerialize = true;
             }
 
-            return new AppendPlan(next, wideChanged, incoming, types, demote, rematerialize, widen);
+            return new AppendPlan(next, wideChanged, incoming, types, demote, rematerialize, widen, fromSource);
         }
 
         /// <summary>Creates new spine/group tables and adds new spine/group columns. Dimensions never change here.</summary>

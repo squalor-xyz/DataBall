@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
@@ -118,15 +119,16 @@ internal static class SourceFile
 {
     /// <summary>
     /// Describes a file, or a hive directory: its <c>sha256</c> is the digest of the sorted
-    /// (relative path, file SHA-256) lines of its Parquet files and <c>bytes</c> their total size. Each file is read once.
+    /// (relative path, file SHA-256) lines of its Parquet files (<see cref="HiveFiles"/>, or <paramref name="hiveFiles"/> when the
+    /// caller already listed them) and <c>bytes</c> their total size. Each file is read once.
     /// </summary>
-    internal static SourceRecord Describe(string path, string type)
+    internal static SourceRecord Describe(string path, string type, IReadOnlyList<string>? hiveFiles = null)
     {
         var full = System.IO.Path.TrimEndingDirectorySeparator(System.IO.Path.GetFullPath(path));
         if (!Directory.Exists(full))
             return Hash(full, full, type, new FileInfo(full).LastWriteTimeUtc);
 
-        var files = Directory.EnumerateFiles(full, "*.parquet", SearchOption.AllDirectories)
+        var files = (hiveFiles ?? HiveFiles.List(full))
             .Select(f => (Relative: System.IO.Path.GetRelativePath(full, f).Replace('\\', '/'), File: f))
             .OrderBy(f => f.Relative, StringComparer.Ordinal)
             .ToList();
@@ -163,4 +165,33 @@ internal static class SourceFile
         var hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
         return new SourceRecord(recordedPath, hash, type, bytes, modifiedUtc);
     }
+}
+
+/// <summary>
+/// The Parquet files of a hive directory: every <c>.parquet</c> file at any depth except stray files, which are bookkeeping,
+/// not data. A stray file is one with any path segment below the hive root that starts with <c>.</c> or <c>_</c>: its name
+/// (<c>_SUCCESS</c>, <c>_tmp.parquet</c>) or a directory on the way to it (Spark's <c>_temporary/0/part.parquet</c>).
+/// The view, the copied source, its hash and its size all use this one list.
+/// </summary>
+internal static class HiveFiles
+{
+    /// <summary>
+    /// True when a path segment of <paramref name="file"/> below <paramref name="root"/> starts with <c>.</c> or <c>_</c>.
+    /// The root's own name does not count: a hive directory may be named <c>_data</c>.
+    /// </summary>
+    internal static bool IsStray(string root, string file) =>
+        Path.GetRelativePath(root, file)
+            .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+            .Any(segment => segment.StartsWith('.') || segment.StartsWith('_'));
+
+    /// <summary>True for a Parquet file under <paramref name="root"/> that is not a stray file.</summary>
+    internal static bool IsDataFile(string root, string file) =>
+        file.EndsWith(".parquet", StringComparison.OrdinalIgnoreCase) && !IsStray(root, file);
+
+    /// <summary>The hive's data files, full paths, sorted by ordinal path.</summary>
+    internal static List<string> List(string directory) =>
+        Directory.EnumerateFiles(directory, "*.parquet", SearchOption.AllDirectories)
+            .Where(f => IsDataFile(directory, f))
+            .OrderBy(f => f, StringComparer.Ordinal)
+            .ToList();
 }

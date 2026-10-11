@@ -603,7 +603,7 @@
       "id": "db-11",
       "title": "DataBall must open many files into one session",
       "short_title": "DataBall must open many files into one session",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-07",
@@ -809,7 +809,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
