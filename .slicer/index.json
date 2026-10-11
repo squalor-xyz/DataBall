@@ -1747,7 +1747,19 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "e69d8ae5-c54b-458c-b83b-14a836357363",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-26 spec review): (1) under explicit requireConstant, a wide CSV append with a differing metadata value is demoted to a column with the old value backfilled, like layout; a value varying within one file still throws. (2) The whole-table re-cast of existing columns when config types grow is dropped; wide behaves like layout and the db-23 merge rule applies. Together these remove the documented wide/layout CSV differences. Implementer Sonnet 5.5 high.",
+          "created_at": "2026-10-11T15:37:22Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
