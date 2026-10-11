@@ -124,7 +124,10 @@ namespace squalor.DataBall
         /// <see cref="AppendByRematerializing"/>. Atomic; in-memory layout and metadata are
         /// restored when the transaction rolls back.
         /// </summary>
-        internal void AppendStagingIntoLayout(string staging)
+        internal void AppendStagingIntoLayout(
+            string staging,
+            string incomingName = "the appended rows",
+            IReadOnlyDictionary<string, Type>? configTypes = null)
         {
             ThrowIfDisposed();
             ValidateName(staging, "Table");
@@ -132,7 +135,7 @@ namespace squalor.DataBall
             var config = LayoutConfig ?? throw new DataBallException("No table layout config is bound");
 
             var stagingCols = GetColumnsOf(staging);
-            var plan = PlanAppend(current, config, staging, stagingCols);
+            var plan = PlanAppend(current, config, staging, stagingCols, incomingName, configTypes);
 
             try
             {
@@ -147,11 +150,14 @@ namespace squalor.DataBall
                     foreach (var (key, _) in plan.Demote)
                         RemoveMetadata(key);
 
-                    if (plan.WideChanged)
-                    {
+                    // A widened column is altered in place, so the view is dropped and rebuilt around it.
+                    var reshape = plan.WideChanged || plan.Widen.Count > 0;
+                    if (reshape)
                         Execute("DROP VIEW \"data\"");
+                    if (plan.WideChanged)
                         GrowLayoutSchema(current, plan.Next, plan.Types);
-                    }
+                    foreach (var (column, _, target) in plan.Widen)
+                        Execute($"ALTER TABLE {QuoteIdent(current.TableFor(column))} ALTER COLUMN {QuoteIdent(column)} SET DATA TYPE {target}");
 
                     var qSpine = QuoteIdent(plan.Next.Spine.Name);
                     foreach (var (key, value) in plan.Demote)
@@ -159,7 +165,7 @@ namespace squalor.DataBall
 
                     InsertStagingRows(staging, plan.Next, plan.Incoming);
 
-                    if (plan.WideChanged)
+                    if (reshape)
                         CreateDataView(plan.Next);
                 });
             }
@@ -197,6 +203,12 @@ namespace squalor.DataBall
             var dataTypes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, type) in GetColumnsOf("data"))
                 dataTypes[name] = type;
+
+            foreach (var (column, _, target) in plan.Widen)
+            {
+                Execute($"ALTER TABLE {qData} ALTER COLUMN {QuoteIdent(column)} SET DATA TYPE {target}");
+                dataTypes[column] = target;
+            }
 
             foreach (var key in plan.Demote.Select(d => d.Key))
                 RemoveMetadata(key);
@@ -367,18 +379,22 @@ namespace squalor.DataBall
             IReadOnlyList<IncomingColumn> Incoming,
             IReadOnlyDictionary<string, string> Types,
             IReadOnlyList<(string Key, object? Value)> Demote,
-            bool NeedsRematerialize);
+            bool NeedsRematerialize,
+            IReadOnlyList<(string Column, string From, string To)> Widen);
 
         /// <summary>
         /// Decides, without writing, how a staging table joins the layout: which staging columns
         /// are metadata (equal → ignored; conflicting → demoted to a column of the table the config
-        /// assigns it to, or ignored under <c>metadataPolicy: first</c>), which wide columns are new, and the grown layout.
+        /// assigns it to, or ignored under <c>metadataPolicy: first</c>), which wide columns are new, which
+        /// existing columns widen, and the grown layout. A type conflict throws here, before any change.
         /// </summary>
         private AppendPlan PlanAppend(
             TableLayout current,
             Config config,
             string staging,
-            IReadOnlyList<(string Name, string DuckDbType)> stagingCols)
+            IReadOnlyList<(string Name, string DuckDbType)> stagingCols,
+            string incomingName,
+            IReadOnlyDictionary<string, Type>? configTypes)
         {
             var qStaging = QuoteIdent(staging);
             var policyFirst = string.Equals(config.MetadataPolicy, "first", StringComparison.OrdinalIgnoreCase);
@@ -412,6 +428,7 @@ namespace squalor.DataBall
             var incoming = new List<IncomingColumn>();
             var newWide = current.WideColumns.ToList();
             var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var mergeCandidates = new List<(string Name, string DuckDbType)>();
             foreach (var (name, type) in stagingCols)
             {
                 if (ignore.Contains(name))
@@ -423,7 +440,17 @@ namespace squalor.DataBall
                     newWide.Add(wide);
                 incoming.Add(new IncomingColumn(name, wide));
                 types[wide] = type;
+                mergeCandidates.Add((wide, type));
             }
+
+            // Existing columns merge by name against their owning physical table's type.
+            var physicalColumns = current.PhysicalTables
+                .SelectMany(t => GetColumnsOf(t.Name))
+                .Where(c => current.WideColumns.Contains(c.Name, StringComparer.OrdinalIgnoreCase))
+                .ToList();
+            var widen = PlanColumnWidening(physicalColumns, mergeCandidates, staging, incomingName, configTypes, current.TableFor);
+            foreach (var (column, _, target) in widen)
+                types[column] = target;
 
             var next = TableLayout.Build(config, newWide);
             var wideChanged = !newWide.SequenceEqual(current.WideColumns, StringComparer.Ordinal);
@@ -453,7 +480,17 @@ namespace squalor.DataBall
                     rematerialize = true;
             }
 
-            return new AppendPlan(next, wideChanged, incoming, types, demote, rematerialize);
+            // A dimension key hashes its value, and the hash changes unless the key widens to a wider integer
+            // (hash(25) and hash(25.0) differ, and so do hash(DATE) and hash(TIMESTAMP)). Widening such a key
+            // re-keys every row through the full re-split.
+            foreach (var (column, _, to) in widen)
+            {
+                var rekeys = IntegerRank(NormalizeType(to)) == 0;
+                if (rekeys && current.Dimensions.Any(d => d.KeyColumns.Contains(column, StringComparer.OrdinalIgnoreCase)))
+                    rematerialize = true;
+            }
+
+            return new AppendPlan(next, wideChanged, incoming, types, demote, rematerialize, widen);
         }
 
         /// <summary>Creates new spine/group tables and adds new spine/group columns. Dimensions never change here.</summary>

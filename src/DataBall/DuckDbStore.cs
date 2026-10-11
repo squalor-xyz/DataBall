@@ -522,7 +522,11 @@ namespace squalor.DataBall
             Execute($"UPDATE {q} SET {k} = {k} + {shift}");
         }
 
-        internal void ImportNativeRows(string alias, bool append)
+        /// <summary>
+        /// Native <c>.ball</c> rows. <paramref name="configTypes"/> names the session's configured columns, which keep
+        /// their type on append (cast, never widened), as they do for CSV and Parquet.
+        /// </summary>
+        internal void ImportNativeRows(string alias, bool append, IReadOnlyDictionary<string, Type>? configTypes = null, string? incomingName = null)
         {
             var exists = ExecuteScalar($"SELECT count(*) FROM information_schema.tables WHERE table_catalog = {QuoteString(alias)} AND table_name = 'data'");
             if (Convert.ToInt64(exists, CultureInfo.InvariantCulture) == 0)
@@ -537,7 +541,7 @@ namespace squalor.DataBall
                 PromoteDateColumns("_staging");
                 NormalizeIncomingColumns("_staging", allowKey: true);
                 BringNativeSources(alias, "_staging");
-                MergeOrAppendFromTable("_staging", append);
+                MergeOrAppendFromTable("_staging", append, incomingName ?? "the appended rows", configTypes);
             }
             finally
             {
@@ -1173,7 +1177,11 @@ namespace squalor.DataBall
             ExecuteParameterized("DELETE FROM \"meta\" WHERE \"key\" = $key", Param("key", storedKey));
         }
 
-        internal void MergeOrAppendFromTable(string sourceTable, bool append)
+        internal void MergeOrAppendFromTable(
+            string sourceTable,
+            bool append,
+            string incomingName = "the appended rows",
+            IReadOnlyDictionary<string, Type>? configTypes = null)
         {
             ThrowIfDisposed();
             ValidateName(sourceTable, "Table");
@@ -1181,7 +1189,7 @@ namespace squalor.DataBall
 
             if (Layout is not null && append)
             {
-                AppendStagingIntoLayout(sourceTable);
+                AppendStagingIntoLayout(sourceTable, incomingName, configTypes);
                 return;
             }
 
@@ -1197,7 +1205,7 @@ namespace squalor.DataBall
 
             try
             {
-                InTransaction(() => AppendFromTable(sourceTable, qSrc));
+                InTransaction(() => AppendFromTable(sourceTable, qSrc, incomingName, configTypes));
             }
             catch
             {
@@ -1208,9 +1216,11 @@ namespace squalor.DataBall
             }
         }
 
-        private void AppendFromTable(string sourceTable, string qSrc)
+        private void AppendFromTable(string sourceTable, string qSrc, string incomingName, IReadOnlyDictionary<string, Type>? configTypes)
         {
             var sourceRowCount = RowCountOf(sourceTable);
+            // Every type merge is decided before the first change, so a conflict leaves the session as it was.
+            var widen = PlanColumnWidening(GetColumns(), GetColumnsOf(sourceTable), sourceTable, incomingName, configTypes, _ => "data");
             ApplyMetadataAgainstSource(sourceTable);
 
             var srcCols = GetColumnsOf(sourceTable);
@@ -1231,11 +1241,17 @@ namespace squalor.DataBall
                 return;
             }
 
+            // Widened columns take the wider type in place; their values insert without a cast.
+            var widened = new HashSet<string>(widen.Select(w => w.Column), StringComparer.OrdinalIgnoreCase);
+            foreach (var (column, _, target) in widen)
+                Execute($"ALTER TABLE \"data\" ALTER COLUMN {QuoteIdent(column)} SET DATA TYPE {target}");
+
             var selectParts = new List<string>(srcCols.Count);
             foreach (var (srcName, srcType) in srcCols)
             {
                 var q = QuoteIdent(srcName);
-                if (dstByName.TryGetValue(srcName, out var dst) &&
+                if (!widened.Contains(srcName) &&
+                    dstByName.TryGetValue(srcName, out var dst) &&
                     NormalizeType(dst.DuckDbType) != NormalizeType(srcType))
                 {
                     selectParts.Add($"CAST({q} AS {dst.DuckDbType}) AS {q}");
@@ -1250,6 +1266,101 @@ namespace squalor.DataBall
         }
 
         /// <summary>
+        /// The type a column holds after an incoming column of type <paramref name="incoming"/> is appended
+        /// into it: the existing type when nothing changes (equal types, or a value that casts into the
+        /// existing type), the wider of two integer types, DOUBLE for an integer or FLOAT meeting FLOAT or
+        /// DOUBLE, or TIMESTAMP for DATE meeting TIMESTAMP. Null for any other conflict.
+        /// </summary>
+        internal static string? MergedColumnType(string existing, string incoming)
+        {
+            var e = NormalizeType(existing);
+            var i = NormalizeType(incoming);
+            if (e == i)
+                return existing;
+            var existingRank = IntegerRank(e);
+            var incomingRank = IntegerRank(i);
+            if (existingRank > 0 && incomingRank > 0)
+                return incomingRank > existingRank ? i : existing;
+            if (e == "DOUBLE" && (incomingRank > 0 || i == "FLOAT"))
+                return existing;
+            if (i == "DOUBLE" && (existingRank > 0 || e == "FLOAT"))
+                return "DOUBLE";
+            if ((existingRank > 0 && i == "FLOAT") || (e == "FLOAT" && incomingRank > 0))
+                return "DOUBLE";
+            if (e == "DATE" && i == "TIMESTAMP")
+                return "TIMESTAMP";
+            if (e == "TIMESTAMP" && i == "DATE")
+                return existing;
+            return null;
+        }
+
+        private static int IntegerRank(string normalized) => normalized switch
+        {
+            "TINYINT" => 1,
+            "SMALLINT" => 2,
+            "INTEGER" => 3,
+            "BIGINT" => 4,
+            _ => 0,
+        };
+
+        /// <summary>
+        /// The widenings an append needs: each incoming column that matches an existing column by name
+        /// (case-insensitive) and merges into a wider type. An incoming column with no non-null value in
+        /// <paramref name="sourceTable"/> adopts the existing type. Throws for the first column whose type
+        /// cannot merge. Reads only. <c>_source_key</c> is lineage and is never merged.
+        /// </summary>
+        private List<(string Column, string From, string To)> PlanColumnWidening(
+            IReadOnlyList<(string Name, string DuckDbType)> existing,
+            IEnumerable<(string Name, string DuckDbType)> incoming,
+            string sourceTable,
+            string incomingName,
+            IReadOnlyDictionary<string, Type>? configTypes,
+            Func<string, string> ownerOf)
+        {
+            var widen = new List<(string Column, string From, string To)>();
+            foreach (var (name, incomingType) in incoming)
+            {
+                if (name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                var match = existing.FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (match.Name is null)
+                    continue;
+                // A configured (or AddColumn-declared) column keeps its type: the incoming values cast into it.
+                if (configTypes?.Keys.Any(k => k.Equals(match.Name, StringComparison.OrdinalIgnoreCase)) == true)
+                    continue;
+                if (NormalizeType(match.DuckDbType) == NormalizeType(incomingType))
+                    continue;
+                var merged = MergedColumnType(match.DuckDbType, incomingType);
+                // The incoming values cast into the existing type: nothing to widen.
+                if (merged is not null && NormalizeType(merged) == NormalizeType(match.DuckDbType))
+                    continue;
+                // No value to conflict with (the reader types an all-empty column VARCHAR): keep the existing type.
+                if (IsAllNull(sourceTable, name))
+                    continue;
+                if (merged is null)
+                {
+                    // An empty undeclared column (any type) has no value to conflict with: it adopts the incoming type.
+                    if (IsAllNull(ownerOf(match.Name), match.Name))
+                    {
+                        widen.Add((match.Name, match.DuckDbType, incomingType));
+                        continue;
+                    }
+                    throw new DataBallException(
+                        $"Cannot append {incomingName}: column '{match.Name}' has type {match.DuckDbType} in the session and {incomingType} in the incoming data");
+                }
+                widen.Add((match.Name, match.DuckDbType, merged));
+            }
+            return widen;
+        }
+
+        /// <summary>True when <paramref name="column"/> of <paramref name="table"/> holds no non-null value.</summary>
+        private bool IsAllNull(string table, string column)
+        {
+            var count = ExecuteScalar($"SELECT COUNT({QuoteIdent(column)}) FROM {QuoteIdent(table)}");
+            return Convert.ToInt64(count, CultureInfo.InvariantCulture) == 0;
+        }
+
+        /// <summary>
         /// Imports a CSV. <paramref name="prepareStaging"/> runs against the staging table after type
         /// coercion and before the merge (layout sessions apply the CSV schema there).
         /// </summary>
@@ -1258,9 +1369,11 @@ namespace squalor.DataBall
             bool append,
             IReadOnlyDictionary<string, Type>? expectedTypes = null,
             Action<string>? prepareStaging = null,
-            Func<long>? recordSource = null)
+            Func<long>? recordSource = null,
+            IReadOnlyDictionary<string, Type>? configTypes = null,
+            IReadOnlySet<string>? learnedNames = null)
         {
-            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes, prepareStaging, recordSource);
+            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes, prepareStaging, recordSource, null, configTypes, learnedNames);
         }
 
         internal void RenameColumnOf(string table, string from, string to)
@@ -1285,7 +1398,7 @@ namespace squalor.DataBall
         /// Rewrites <paramref name="table"/> casting the columns named in <paramref name="expectedTypes"/>.
         /// Works for the base table and for TEMP staging tables.
         /// </summary>
-        internal void CoerceColumnsOf(string table, IReadOnlyDictionary<string, Type>? expectedTypes)
+        internal void CoerceColumnsOf(string table, IReadOnlyDictionary<string, Type>? expectedTypes, IReadOnlySet<string>? learnedNames = null)
         {
             ThrowIfDisposed();
             ValidateName(table, "Table");
@@ -1307,7 +1420,7 @@ namespace squalor.DataBall
             var select = string.Join(", ", cols.Select(c =>
             {
                 var q = QuoteIdent(c.Name);
-                return byName.TryGetValue(c.Name, out var clr)
+                return byName.TryGetValue(c.Name, out var clr) && !WidensLearned(c.Name, clr, c.DuckDbType, learnedNames)
                     ? $"CAST({q} AS {ToDuckDbType(clr)}) AS {q}"
                     : q;
             }));
@@ -1318,18 +1431,48 @@ namespace squalor.DataBall
             });
         }
 
-        internal void ImportParquet(string path, bool append, Action<string>? prepareStaging = null, Func<long>? recordSource = null)
+        /// <summary>
+        /// True when a learned type is narrower than the incoming column type under the merge's widening order. A learned
+        /// type never narrows an incoming value: the column is left uncast and the merge widens it. Declared types never reach here.
+        /// </summary>
+        private static bool WidensLearned(string name, Type learned, string incomingType, IReadOnlySet<string>? learnedNames)
+        {
+            if (learnedNames is null || !learnedNames.Contains(name))
+                return false;
+            var learnedType = ToDuckDbType(learned);
+            var merged = MergedColumnType(learnedType, incomingType);
+            return merged is not null && NormalizeType(merged) != NormalizeType(learnedType);
+        }
+
+        /// <summary>
+        /// Imports Parquet (a file or a hive directory). Parquet is not coerced (its types are the source's);
+        /// <paramref name="configTypes"/> names the columns that keep their configured type, so an append
+        /// casts into them rather than widening them. <paramref name="incomingName"/> names the source in a conflict.
+        /// </summary>
+        internal void ImportParquet(
+            string path,
+            bool append,
+            Action<string>? prepareStaging = null,
+            Func<long>? recordSource = null,
+            IReadOnlyDictionary<string, Type>? configTypes = null,
+            string? incomingName = null)
         {
             ThrowIfConnectionBusy();
             if (Directory.Exists(path))
             {
-                ImportHiveParquet(path, append, prepareStaging, recordSource);
+                ImportHiveParquet(path, append, prepareStaging, recordSource, configTypes, incomingName);
                 return;
             }
-            ImportFromFunction(path, append, "read_parquet", "", prepareStaging: prepareStaging, recordSource: recordSource);
+            ImportFromFunction(path, append, "read_parquet", "", null, prepareStaging, recordSource, incomingName, configTypes);
         }
 
-        private void ImportHiveParquet(string directory, bool append, Action<string>? prepareStaging, Func<long>? recordSource)
+        private void ImportHiveParquet(
+            string directory,
+            bool append,
+            Action<string>? prepareStaging,
+            Func<long>? recordSource,
+            IReadOnlyDictionary<string, Type>? configTypes,
+            string? incomingName)
         {
             ThrowIfDisposed();
             var files = Directory.GetFiles(directory, "*.parquet", SearchOption.AllDirectories);
@@ -1347,7 +1490,7 @@ namespace squalor.DataBall
                 prepareStaging?.Invoke("_staging");
                 if (!TableExists("_staging"))
                     return;
-                MergeOrAppendFromTable("_staging", append);
+                MergeOrAppendFromTable("_staging", append, incomingName ?? $"'{directory}'", configTypes);
             }
             finally
             {
@@ -1505,7 +1648,10 @@ namespace squalor.DataBall
             string extraArgs,
             IReadOnlyDictionary<string, Type>? expectedTypes = null,
             Action<string>? prepareStaging = null,
-            Func<long>? recordSource = null)
+            Func<long>? recordSource = null,
+            string? incomingName = null,
+            IReadOnlyDictionary<string, Type>? configTypes = null,
+            IReadOnlySet<string>? learnedNames = null)
         {
             ThrowIfDisposed();
             if (string.IsNullOrWhiteSpace(path))
@@ -1518,12 +1664,14 @@ namespace squalor.DataBall
                 if (recordSource is not null)
                     AttachSourceKey("_staging", recordSource);
                 PromoteDateColumns("_staging");
-                CoerceColumnsOf("_staging", expectedTypes);
+                // Learned types drop out of the cast only when this import merges into a live session.
+                var merging = append && (Layout is not null || (DataTableExists() && RowCount() > 0));
+                CoerceColumnsOf("_staging", expectedTypes, merging ? learnedNames : null);
                 prepareStaging?.Invoke("_staging");
                 // Extracting metadata may have consumed every staging column (and the table with it).
                 if (!TableExists("_staging"))
                     return;
-                MergeOrAppendFromTable("_staging", append);
+                MergeOrAppendFromTable("_staging", append, incomingName ?? $"'{path}'", configTypes ?? expectedTypes);
             }
             finally
             {

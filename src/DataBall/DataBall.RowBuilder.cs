@@ -175,6 +175,7 @@ namespace squalor.DataBall
                 if (!_expectedColumnTypes.ContainsKey(kv.Key))
                 {
                     _expectedColumnTypes[kv.Key] = clrType;
+                    _learnedColumnNames.Add(kv.Key);
                     added.Add(kv.Key);
                 }
                 existing.Add(kv.Key);
@@ -204,7 +205,7 @@ namespace squalor.DataBall
                 foreach (var name in added)
                 {
                     if (!stored.Contains(name))
-                        _expectedColumnTypes.Remove(name);
+                        RemoveExpectedType(name);
                 }
             }
             catch (Exception ex)

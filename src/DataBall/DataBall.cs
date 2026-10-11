@@ -23,6 +23,9 @@ namespace squalor.DataBall
         private readonly ILogger _logger;
         private readonly DuckDbStore _store;
         private readonly Dictionary<string, Type> _expectedColumnTypes;
+        // Expected types DataBall learned itself (InitializeRow/CommitRow capture, the CSV schema pass). They widen on append
+        // and are not persisted as declared; the rest of _expectedColumnTypes is declared (config or AddColumn<T>).
+        private readonly HashSet<string> _learnedColumnNames;
         private readonly List<Relationship> _relationships;
         private Config _config;
         private bool _disposed;
@@ -52,6 +55,7 @@ namespace squalor.DataBall
             _logger = logger ?? NullLogger.Instance;
             _store = new DuckDbStore(ValidateDatabasePath(databasePath), _logger, readOnly, engine, temporary);
             _expectedColumnTypes = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            _learnedColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             _relationships = new List<Relationship>();
             try
             {
@@ -196,6 +200,7 @@ namespace squalor.DataBall
             var list = values as IReadOnlyList<T> ?? values.ToList();
             OnWideData(() => _store.AddColumn(name, list));
             _expectedColumnTypes[name] = typeof(T);
+            _learnedColumnNames.Remove(name);
             RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
 
@@ -214,6 +219,7 @@ namespace squalor.DataBall
             var list = values as IReadOnlyList<string?> ?? values.ToList();
             OnWideData(() => _store.AddColumn(name, list));
             _expectedColumnTypes[name] = typeof(string);
+            _learnedColumnNames.Remove(name);
             RememberAddedColumn(name, list.Count == 0 ? null : list[list.Count - 1]);
         }
 
@@ -228,7 +234,7 @@ namespace squalor.DataBall
             Lineage.ThrowIfReservedColumn(name);
             ThrowIfDeclaredKey(name);
             OnWideData(() => _store.RemoveColumn(name));
-            _expectedColumnTypes.Remove(name);
+            RemoveExpectedType(name);
         }
 
         /// <summary>
@@ -319,7 +325,7 @@ namespace squalor.DataBall
                     // Not the resolving export: the key travels, and the other session's sources follow it below.
                     other.Store.ExportParquetKeepingSourceKey(path);
                     var otherSources = other.Store.ReadSources();
-                    RunImport(append, () => _store.ImportParquet(path, append, t => _store.RemapStagingSources(t, otherSources)));
+                    RunImport(append, () => _store.ImportParquet(path, append, t => _store.RemapStagingSources(t, otherSources), configTypes: DeclaredMergeTypes(), incomingName: "the merged session"));
                 }
                 finally
                 {
@@ -381,6 +387,7 @@ namespace squalor.DataBall
                 else
                 {
                     var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
+                    var learnedSnap = new HashSet<string>(_learnedColumnNames, StringComparer.OrdinalIgnoreCase);
                     try
                     {
                         _store.InTransaction(() =>
@@ -396,6 +403,8 @@ namespace squalor.DataBall
                         _expectedColumnTypes.Clear();
                         foreach (var pair in expectedSnap)
                             _expectedColumnTypes[pair.Key] = pair.Value;
+                        _learnedColumnNames.Clear();
+                        _learnedColumnNames.UnionWith(learnedSnap);
                         throw;
                     }
                 }
@@ -743,7 +752,7 @@ namespace squalor.DataBall
                 {
                     _store.SetMetadata(name, rows[0]["v"]);
                     _store.RemoveColumn(name);
-                    _expectedColumnTypes.Remove(name);
+                    RemoveExpectedType(name);
                 }
             }
         }
@@ -845,13 +854,13 @@ namespace squalor.DataBall
             long RecordSource() => _store.AddSource(record);
             if (HasLayoutConfig)
             {
-                _store.ImportParquet(path, append, t => ExtractConfiguredMetadata(t, append && _store.Layout is not null), RecordSource);
+                _store.ImportParquet(path, append, t => ExtractConfiguredMetadata(t, append && _store.Layout is not null), RecordSource, configTypes: DeclaredMergeTypes());
                 return;
             }
             var reconciled = append && _store.DataTableExists() && _store.RowCount() > 0
                 ? new HashSet<string>(_store.SnapshotMetadata().Keys, StringComparer.OrdinalIgnoreCase)
                 : null;
-            _store.ImportParquet(path, append, recordSource: RecordSource);
+            _store.ImportParquet(path, append, recordSource: RecordSource, configTypes: DeclaredMergeTypes());
             ExtractConfiguredMetadata("data", false, reconciled);
         }
 
@@ -864,14 +873,16 @@ namespace squalor.DataBall
         {
             var record = source ?? SourceFile.Describe(path, nameof(BuiltInPath.CsvImport));
             long RecordSource() => _store.AddSource(record);
+            // A merge into a live session: learned types then never narrow the incoming values (see ApplyCsvSchema).
+            var merging = append && (_store.Layout is not null || (_store.DataTableExists() && _store.RowCount() > 0));
             if (HasLayoutConfig)
             {
-                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null), RecordSource);
+                _store.ImportCsv(path, append, _expectedColumnTypes, t => ApplyCsvSchema(t, layoutAppend: append && _store.Layout is not null, merging: merging), RecordSource, DeclaredMergeTypes(), _learnedColumnNames);
                 return;
             }
 
-            _store.ImportCsv(path, append, _expectedColumnTypes, recordSource: RecordSource);
-            ApplyCsvSchema();
+            _store.ImportCsv(path, append, _expectedColumnTypes, recordSource: RecordSource, configTypes: DeclaredMergeTypes(), learnedNames: _learnedColumnNames);
+            ApplyCsvSchema(merging: merging);
         }
 
         /// <summary>
@@ -880,7 +891,7 @@ namespace squalor.DataBall
         /// (staging rows joining a live layout) fields already in metadata are left in place for
         /// the append reconciliation, and no column is dropped here.
         /// </summary>
-        internal void ApplyCsvSchema(string table = "data", bool layoutAppend = false)
+        internal void ApplyCsvSchema(string table = "data", bool layoutAppend = false, bool merging = false)
         {
             if (!_store.TableExists(table))
                 return;
@@ -897,7 +908,14 @@ namespace squalor.DataBall
             foreach (var col in parsed)
             {
                 if (col.ClrType is not null)
+                {
+                    var declared = IsDeclaredName(col.Name);
                     _expectedColumnTypes[col.Name] = col.ClrType;
+                    if (declared)
+                        _learnedColumnNames.Remove(col.Name);
+                    else
+                        _learnedColumnNames.Add(col.Name);
+                }
                 var match = tableCols.FirstOrDefault(c => c.Name.Equals(col.Raw, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
                     match = tableCols.FirstOrDefault(c => c.Name.Equals(col.Name, StringComparison.OrdinalIgnoreCase));
@@ -907,14 +925,61 @@ namespace squalor.DataBall
                     _store.RenameColumnOf(table, match.Name, col.Name);
             }
 
-            _store.CoerceColumnsOf(table, _expectedColumnTypes);
+            _store.CoerceColumnsOf(table, _expectedColumnTypes, merging ? _learnedColumnNames : null);
             ExtractConfiguredMetadata(table, layoutAppend);
+        }
+
+        /// <summary>Expected types the session declares (config or AddColumn&lt;T&gt;); learned types are left out.</summary>
+        private Dictionary<string, Type> DeclaredExpectedTypes()
+        {
+            var declared = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in _expectedColumnTypes)
+            {
+                if (!_learnedColumnNames.Contains(pair.Key))
+                    declared[pair.Key] = pair.Value;
+            }
+            return declared;
+        }
+
+        /// <summary>
+        /// Types that keep their declared type on append (cast, never widened): the declared expected types plus the
+        /// config Parameters types. Learned types are not in it.
+        /// </summary>
+        internal Dictionary<string, Type> DeclaredMergeTypes()
+        {
+            var declared = DeclaredExpectedTypes();
+            if (_config.Parameters is not null)
+            {
+                foreach (var pair in _config.Parameters)
+                {
+                    if (!declared.ContainsKey(pair.Key) && !string.IsNullOrWhiteSpace(pair.Value?.Type))
+                        declared[pair.Key] = Config.ParseColumnType(pair.Value.Type);
+                }
+            }
+            return declared;
+        }
+
+        /// <summary>True when a column name carries a declared type: an expected type that is not learned, or a typed config parameter.</summary>
+        private bool IsDeclaredName(string name)
+        {
+            if (_expectedColumnTypes.ContainsKey(name) && !_learnedColumnNames.Contains(name))
+                return true;
+            return _config.Parameters is not null
+                && _config.Parameters.TryGetValue(name, out var spec)
+                && !string.IsNullOrWhiteSpace(spec?.Type);
+        }
+
+        /// <summary>Removes a column's expected type together with its learned mark.</summary>
+        private void RemoveExpectedType(string name)
+        {
+            _expectedColumnTypes.Remove(name);
+            _learnedColumnNames.Remove(name);
         }
 
         private Config ConfigForPersistence()
         {
             var persisted = _config.Clone();
-            foreach (var pair in Config.ToColumnTypeNames(_expectedColumnTypes))
+            foreach (var pair in Config.ToColumnTypeNames(DeclaredExpectedTypes()))
                 persisted.Columns[pair.Key] = pair.Value;
             return persisted;
         }
@@ -929,7 +994,10 @@ namespace squalor.DataBall
                     _store.SetMetadata(key, DuckDbStore.Unwrap(value));
             }
             foreach (var col in config.Columns)
+            {
                 _expectedColumnTypes[col.Key] = Config.ParseColumnType(col.Value);
+                _learnedColumnNames.Remove(col.Key);
+            }
             if (config.Relationships.Count > 0)
             {
                 _relationships.Clear();
@@ -981,7 +1049,7 @@ namespace squalor.DataBall
                             _store.ExcludeFromView(match.Name);
                         else
                             _store.RemoveColumnOf(table, match.Name);
-                        _expectedColumnTypes.Remove(match.Name);
+                        RemoveExpectedType(match.Name);
                     }
                     continue;
                 }
@@ -995,7 +1063,7 @@ namespace squalor.DataBall
                             _store.ExcludeFromView(match.Name);
                         else
                             _store.RemoveColumnOf(table, match.Name);
-                        _expectedColumnTypes.Remove(match.Name);
+                        RemoveExpectedType(match.Name);
                     }
                     continue;
                 }
@@ -1100,7 +1168,8 @@ namespace squalor.DataBall
             Dictionary<string, Type> ExpectedTypes,
             List<Relationship> Relationships,
             TableLayout? Layout,
-            Config? LayoutConfig);
+            Config? LayoutConfig,
+            HashSet<string> LearnedNames);
 
         private SessionSnapshot TakeSnapshot()
         {
@@ -1109,7 +1178,8 @@ namespace squalor.DataBall
                 new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase),
                 new List<Relationship>(_relationships),
                 _store.Layout,
-                _store.LayoutConfig);
+                _store.LayoutConfig,
+                new HashSet<string>(_learnedColumnNames, StringComparer.OrdinalIgnoreCase));
         }
 
         /// <summary>Restores the in-memory mirrors after the store rolled back.</summary>
@@ -1119,6 +1189,8 @@ namespace squalor.DataBall
             _expectedColumnTypes.Clear();
             foreach (var pair in snapshot.ExpectedTypes)
                 _expectedColumnTypes[pair.Key] = pair.Value;
+            _learnedColumnNames.Clear();
+            _learnedColumnNames.UnionWith(snapshot.LearnedNames);
             _relationships.Clear();
             _relationships.AddRange(snapshot.Relationships);
             try
