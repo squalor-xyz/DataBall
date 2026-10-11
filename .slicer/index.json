@@ -778,6 +778,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "c2adfbf2-cb9a-429c-9cb0-494efa8f72b8",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — Owner decisions, db-11 spec review (2026-10-11): (1) a directory named as an input whose files (any depth) are all *.parquet stays one hive source (copied in when there is more than one source); a mixed directory expands to files, each .parquet its own source. (2) During recursive expansion every file is its own source; an only-Parquet subdirectory is not a hive source. (3) An archive, explicit or expanded, contributes each CSV entry as its own source (<archive>!<entry>), staged with the rest before the single merge and split; order by archive path, then entry key. (4) A native .ball or snapshot pointer in a many-input open, explicit or expanded, throws clearly until db-25; a single-input open is unchanged. (5) Per-source metadata columns on source are joined by ResolveSourceSql for exports and for Query/filters on data; the stored data is unchanged. (6) Mixed levels: the lowest level wins. A field varying within any source is a row column for all rows (NULL where a source lacks it); a field present in only some sources and constant per source is a source column, NULL for the others. (7) The three levels apply within one many-input Open only; ImportAsync append keeps today's demotion to a row column (unify later).",
+          "created_at": "2026-10-11T21:05:45Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -903,6 +914,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-10 relay (2026-10-10): to restrict folder-loaded types, record an origin kind (HomeFolder/LocalFolder/Registered) set in LoadFolders and RegisterFileType (a path alone can't tell them apart). A type file with the same id and a different version coexists with the old one, so an upgraded type left next to the old file is ambiguous. Decide whether one invalid file in ~/.databall/types should fail every Open in the process (LoadFolders throws and retries per call). db-10 makes unknown top-level keys in a type file invalid.",
           "created_at": "2026-10-10T23:13:12Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "7bdcbc47-0702-4be6-9bbb-294e3bcdea78",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — From the db-11 relay (architect, 2026-10-11): per-source transforms should attach to the many-file staging loop (DataBall.OpenMany.cs, StageSourcesAsync). Single CSV and handler opens still use OpenOneAsync, so either stage them too (see the db-24 note) or patch both paths.",
+          "created_at": "2026-10-11T22:04:59Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1685,6 +1707,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "bbf50c2e-b0fb-4180-8add-3d8131f762a2",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — From the db-11 relay (architect, 2026-10-11): (a) Open has two pipelines below the one entry: OpenOneAsync (pointer, native, Parquet view, single CSV/handler) and OpenManyAsync (staged). Shrink OpenOneAsync to pointer, native and Parquet view, and stage every other single source, so the bad-file policy and the Skipped report attach to one staging loop. (b) Metadata reconciliation now has three loops: ExtractConfiguredMetadata/ApplyMetadataAgainstSource (wide append), the PlanAppend loop (layout append) and ReconcileSourceMetadata (many-file open). Owner decision 7 keeps append demotion separate from the three levels for now; unify into one planner.",
+          "created_at": "2026-10-11T22:04:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "06657ad6-d7ec-4213-bca5-23c03472d0f2",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — From the db-11 relay (architect, 2026-10-11), for the metadata-planner unification: (a) Bounce still lifts a fully constant row column to Metadata even when it is also a per-source column on source; skip such fields, as ExtractConfiguredMetadata does after db-11. (b) The append backfill from source (BackfillFromSource) CASTs the source column type into the incoming row column type; decide the column type with DecideColumnMerge(sourceType, incomingType) and throw a named conflict instead of a wrapped DuckDB conversion error.",
+          "created_at": "2026-10-11T22:26:23Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1734,6 +1778,17 @@
           "kind": "",
           "text": "**2026-10-11** — From db-18 relay (2026-10-11): decide whether a snapshot pointer (<Name>.latest) is accepted as a many-file source, and whether the source row records the pointer or the generation file.",
           "created_at": "2026-10-11T13:31:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "02bde656-0b7b-41cc-873f-d61db24225e9",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — From the db-11 relay (owner, 2026-10-11): a many-file session keeps per-source metadata columns on the source table, but RemapStagingSources (MergeOrAppend) and BringNativeSources (native import) copy only the built-in source columns, so those columns are dropped when such a session is merged or imported elsewhere. db-25 replaces both with one SQL remap that carries every source column. Pitfall: DuckDB fails a commit when an ALTER of source follows a DELETE or UPDATE of it in the same transaction (ResetSources deletes on a replace).",
+          "created_at": "2026-10-11T21:41:49Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
