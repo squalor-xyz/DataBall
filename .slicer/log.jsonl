@@ -222,3 +222,10 @@
 {"when": "2026-10-11T00:02:13Z", "item": "db-11", "action": "set", "from": "", "to": "", "note": "size L→M; depends_on db-07,db-09,db-10→db-07,db-09,db-10,db-22,db-23; group -→Many-file open; effort 3→2"}
 {"when": "2026-10-11T00:02:13Z", "item": "db-11", "action": "note", "from": "", "to": "", "note": "Split 2026-10-10 (owner): db-11 is now the many-input core; ", "by": "Jon R"}
 {"when": "2026-10-11T00:02:13Z", "item": "db-17", "action": "set", "from": "", "to": "", "note": "depends_on db-03,db-06,db-07,db-09,db-12,db-13,db-14,db-15,db-16,db-18→db-03,db-06,db-07,db-09,db-12,db-13,db-14,db-15,db-16,db-18,db-24,db-25"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-22", "action": "promote", "from": "", "to": "", "note": ""}
+{"when": "2026-10-11T03:05:29Z", "item": "db-22", "action": "note", "from": "", "to": "", "note": "Owner decisions 2026-10-10 (db-22 interview): (1) normalized", "by": "Jon R"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-11", "action": "note", "from": "", "to": "", "note": "From db-22 interview (owner, 2026-10-10): lineage is normali", "by": "Jon R"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-24", "action": "note", "from": "", "to": "", "note": "From db-22 interview (owner, 2026-10-10): OpenReport.Sources", "by": "Jon R"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-25", "action": "note", "from": "", "to": "", "note": "From db-22 interview (owner, 2026-10-10): db-22 makes .ball ", "by": "Jon R"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-15", "action": "note", "from": "", "to": "", "note": "From db-22 interview (owner, 2026-10-10): CSV/Parquet/archiv", "by": "Jon R"}
+{"when": "2026-10-11T03:05:29Z", "item": "db-16", "action": "note", "from": "", "to": "", "note": "From db-22 interview (owner, 2026-10-10): db-22 adds public ", "by": "Jon R"}

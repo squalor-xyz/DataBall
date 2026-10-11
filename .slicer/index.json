@@ -722,6 +722,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "735e5f9e-7bb0-4f4a-8711-5846ddae95dd",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): lineage is normalized. Rows carry _source_key and a built-in source table holds path/sha256/type/bytes/modified/added. Per-source metadata that varies across sources therefore becomes columns of the source table, not of data; the three-level liftConstant rule references source. OpenReport.Sources reuses db.Sources.",
+          "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -928,6 +939,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "ddd5f2b3-9fbd-433d-aa09-ac19f6be1c7f",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): CSV/Parquet/archive/hive exports resolve _source_key into _source_file and _source_type through a join on source. Export profiles and splits must keep that join, and a split by source should use the resolved columns.",
+          "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1055,6 +1077,17 @@
           "kind": "",
           "text": "**2026-10-10** — From db-10 gate (2026-10-10): DataBall.csproj grants InternalsVisibleTo to the shipped DataBall.Handlers package for LabHandlers.RegisterDefaults' idempotence (internal RegisterHandlerIfMissing, atomic under HandlerGate). Fold it into the registry API (e.g. a public RegisterHandler overload or option that skips an already-registered type) or pin Handlers to an exact DataBall version, so the two packages cannot skew at runtime (MissingMethodException if a newer DataBall renames the internal method).",
           "created_at": "2026-10-10T23:30:48Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "e4a582ef-4da3-4de3-9851-cb73018a9b3a",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): db-22 adds public IReadOnlyList<SourceInfo> Sources; fold it into the read API.",
+          "created_at": "2026-10-11T03:05:29Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1380,7 +1413,19 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "695dd00a-f4a8-491a-a951-4705db2ab339",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-10 (db-22 interview): (1) normalized lineage: an always-present source table (source_key BIGINT 1..n in import order, path, sha256, type, bytes, modified_utc, added_utc) and one _source_key per row in wide and layout sessions; data shows the key, not path/hash/type; (2) full SHA-256 at open; (3) capture rows NULL key; pre-db-22 .ball files have no source table; (4) CSV/Parquet/archive/hive exports resolve the key to _source_file and _source_type; .ball keeps the normalized tables; (5) db.Sources (SourceInfo) read API; (6) names as listed, source and _source* reserved; (7) Claude-only relay, Sonnet 5.5 high implementer, Haiku 5.5 high subagent for test and export churn, Opus medium reviewer, architect and gate; owner signs off the spec before the relay.",
+          "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "M",
@@ -1440,7 +1485,19 @@
       "depends_on": [
         "db-11"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "5d926c20-c637-43a4-9335-e67b8cb0207e",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): OpenReport.Sources reuses db.Sources (SourceInfo); only Skipped and Ignored are new.",
+          "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "S",
@@ -1471,7 +1528,19 @@
       "depends_on": [
         "db-11"
       ],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "cbf11776-8ed7-454f-a03b-5a498e957e47",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): db-22 makes .ball import bring the source file's source rows with remapped keys (NULL keys when the .ball has no source table). db-25 decides the many-file policy on top of that, for example whether to also record the .ball itself as a source.",
+          "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "S",
