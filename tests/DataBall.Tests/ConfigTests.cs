@@ -142,6 +142,84 @@ namespace squalor.DataBall.Tests
         }
 
         [Theory]
+        [InlineData("source")]
+        [InlineData("Source")]
+        [InlineData("_source")]
+        [InlineData("_source_key")]
+        [InlineData("_SOURCE_file")]
+        public void Config_ReservedSourceNames_Rejected(string name)
+        {
+            var config = new Config { Tables = new() { [name] = new TableSpec { Kind = "measurements", Columns = new() { "value" } } } };
+            var merge = Assert.Throws<DataBallException>(() => Config.Merge(Config.CreateDefaults(), config));
+            Assert.Equal($"Reserved table name: {name}", merge.Message);
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "reserved.json");
+                File.WriteAllText(path, config.ToJson());
+                var load = Assert.Throws<DataBallException>(() => Config.LoadConfig(path));
+                Assert.Contains("Reserved table name: " + name, load.GetBaseException().Message);
+                var open = Assert.Throws<DataBallException>(() => new DataBall(path));
+                Assert.Contains("Reserved table name: " + name, open.GetBaseException().Message);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Theory]
+        [InlineData("columns", "_source_key")]
+        [InlineData("columns", "_Source_other")]
+        [InlineData("key", "_source_key")]
+        [InlineData("key", "_SOURCE_file")]
+        public void Config_TablesNamingSourceColumns_Rejected(string list, string column)
+        {
+            var spec = new TableSpec { Kind = "dimension", Columns = new() { "value" } };
+            if (list == "columns")
+                spec.Columns.Add(column);
+            else
+            {
+                spec.Columns.Clear();
+                spec.Key.Add(column);
+            }
+            var config = new Config { Tables = new() { ["t"] = spec } };
+            var merge = Assert.Throws<DataBallException>(() => Config.Merge(Config.CreateDefaults(), config));
+            Assert.Equal($"Reserved column name in tables.t.{list}: {column}", merge.Message);
+            var dir = TempDir();
+            try
+            {
+                var path = Path.Combine(dir, "reserved.json");
+                File.WriteAllText(path, config.ToJson());
+                Assert.Contains($"Reserved column name in tables.t.{list}: {column}", Assert.Throws<DataBallException>(() => Config.LoadConfig(path)).GetBaseException().Message);
+                Assert.Throws<DataBallException>(() => new DataBall(path));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        [Fact]
+        public void Config_TablesWithOtherUnderscoreColumns_Allowed()
+        {
+            var config = new Config { Tables = new() { ["t"] = new TableSpec { Kind = "dimension", Columns = new() { "_row_note", "origin_source_file" }, Key = new() { "origin_source_file" } } } };
+            var merged = Config.Merge(Config.CreateDefaults(), config);
+            Assert.True(merged.Tables.ContainsKey("t"));
+        }
+
+        [Theory]
+        [InlineData("sources")]
+        [InlineData("my_source")]
+        [InlineData("src")]
+        public void Config_SimilarToSourceNames_Allowed(string name)
+        {
+            var config = new Config { Tables = new() { [name] = new TableSpec { Kind = "measurements", Columns = new() { "value" } } } };
+            var merged = Config.Merge(Config.CreateDefaults(), config);
+            Assert.True(merged.Tables.ContainsKey(name));
+        }
+
+        [Theory]
         [InlineData("_databall")]
         [InlineData("meta")]
         public void Config_ReservedTableNames_Rejected(string name)

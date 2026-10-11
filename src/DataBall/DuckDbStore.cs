@@ -116,7 +116,7 @@ namespace squalor.DataBall
             return _isViewBacked;
         }
 
-        internal void AttachParquetView(string path)
+        internal void AttachParquetView(string path, long sourceKey)
         {
             ThrowIfConnectionBusy();
             var full = Path.GetFullPath(path).Replace('\\', '/');
@@ -124,11 +124,18 @@ namespace squalor.DataBall
                 ? $"read_parquet({QuoteString(full.TrimEnd('/') + "/**/*.parquet")}, hive_partitioning = false)"
                 : $"read_parquet({QuoteString(full)})";
             var schema = Query($"DESCRIBE SELECT * FROM {source}");
+            var fileColumns = schema.Select(c => (string)c["column_name"]!).ToList();
             var projection = string.Join(", ", schema.Select(c =>
             {
-                var name = QuoteIdent((string)c["column_name"]!);
-                return IsDateType((string)c["column_type"]!) ? $"CAST({name} AS TIMESTAMP) AS {name}" : name;
-            }));
+                var raw = (string)c["column_name"]!;
+                // An earlier export's _source_file/_source_type arrive as origin_source_*; any other _source* name throws.
+                var renamed = Lineage.IncomingName(raw);
+                if (!renamed.Equals(raw, StringComparison.Ordinal) && fileColumns.Any(f => f.Equals(renamed, StringComparison.OrdinalIgnoreCase)))
+                    throw new DataBallException($"Column '{renamed}' already exists; it is where '{raw}' would go, because source lineage reserves that name");
+                var name = QuoteIdent(raw);
+                var alias = QuoteIdent(renamed);
+                return IsDateType((string)c["column_type"]!) ? $"CAST({name} AS TIMESTAMP) AS {alias}" : (renamed == raw ? name : $"{name} AS {alias}");
+            }).Append($"CAST({sourceKey.ToString(CultureInfo.InvariantCulture)} AS BIGINT) AS {QuoteIdent(Lineage.KeyColumn)}"));
             Execute($"CREATE VIEW \"data\" AS SELECT {projection} FROM {source}");
             _isViewBacked = true;
         }
@@ -318,6 +325,163 @@ namespace squalor.DataBall
                 Execute($"DETACH {QuoteIdent(alias)}");
         }
 
+        private const string SourceColumnList = "source_key, path, sha256, type, bytes, modified_utc, added_utc";
+
+        internal bool HasSourceTable() => TableExists(Lineage.Table);
+
+        /// <summary>Creates the <c>source</c> table on first need. Runs inside the caller's transaction.</summary>
+        internal void EnsureSourceTable()
+        {
+            Execute("""
+                CREATE TABLE IF NOT EXISTS "source" (
+                    source_key BIGINT, path VARCHAR, sha256 VARCHAR, type VARCHAR,
+                    bytes BIGINT, modified_utc TIMESTAMP, added_utc TIMESTAMP
+                )
+                """);
+        }
+
+        /// <summary>Highest <c>source_key</c> in use; 0 when there is no table or no row.</summary>
+        internal long MaxSourceKey()
+        {
+            if (!HasSourceTable())
+                return 0;
+            return Convert.ToInt64(ExecuteScalar("SELECT COALESCE(MAX(source_key), 0) FROM \"source\""), CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>Forgets every source (a replacing import starts the keys over). The table stays.</summary>
+        internal void ResetSources()
+        {
+            if (HasSourceTable())
+                Execute("DELETE FROM \"source\"");
+        }
+
+        /// <summary>Records <paramref name="record"/> under the next key and returns that key.</summary>
+        internal long AddSource(SourceRecord record)
+        {
+            ArgumentNullException.ThrowIfNull(record);
+            EnsureSourceTable();
+            var key = MaxSourceKey() + 1;
+            InsertSource(key, record.Path, record.Sha256, record.Type, record.Bytes, record.ModifiedUtc, DateTime.UtcNow);
+            return key;
+        }
+
+        private void InsertSource(long key, string path, string? sha256, string type, long bytes, DateTime? modifiedUtc, DateTime addedUtc)
+        {
+            ExecuteParameterized(
+                $"INSERT INTO \"source\" ({SourceColumnList}) VALUES ($key, $path, $sha, $type, $bytes, $modified, $added)",
+                Param("key", key), Param("path", path), Param("sha", sha256), Param("type", type),
+                Param("bytes", bytes), Param("modified", modifiedUtc), Param("added", addedUtc));
+        }
+
+        internal IReadOnlyList<SourceInfo> ReadSources()
+        {
+            ThrowIfDisposed();
+            if (!HasSourceTable())
+                return Array.Empty<SourceInfo>();
+            var rows = Query($"SELECT {SourceColumnList} FROM \"source\" ORDER BY source_key");
+            var result = new List<SourceInfo>(rows.Count);
+            foreach (var row in rows)
+            {
+                result.Add(new SourceInfo(
+                    Convert.ToInt64(row["source_key"], CultureInfo.InvariantCulture),
+                    (string)row["path"]!,
+                    row["sha256"] as string,
+                    (string)row["type"]!,
+                    Convert.ToInt64(row["bytes"], CultureInfo.InvariantCulture),
+                    row["modified_utc"] is DateTime modified ? DateTime.SpecifyKind(modified, DateTimeKind.Utc) : null,
+                    DateTime.SpecifyKind((DateTime)row["added_utc"]!, DateTimeKind.Utc)));
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Renames the lineage-looking columns of a staged file (<c>_source_file</c> and <c>_source_type</c> become
+        /// <c>origin_source_*</c>) and throws for any other <c>_source*</c> column. <paramref name="allowKey"/> lets a
+        /// native <c>.ball</c>'s own <c>_source_key</c> through.
+        /// </summary>
+        private void NormalizeIncomingColumns(string table, bool allowKey)
+        {
+            var columns = GetColumnsOf(table);
+            foreach (var (name, _) in columns)
+            {
+                if (!Lineage.IsReserved(name) || (allowKey && name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                var target = Lineage.IncomingName(name);
+                if (columns.Any(c => c.Name.Equals(target, StringComparison.OrdinalIgnoreCase)))
+                    throw new DataBallException($"Column '{target}' already exists; it is where '{name}' would go, because source lineage reserves that name");
+                Execute($"ALTER TABLE {QuoteIdent(table)} RENAME COLUMN {QuoteIdent(name)} TO {QuoteIdent(target)}");
+            }
+        }
+
+        /// <summary>
+        /// Gives every row of the TEMP staging table <paramref name="table"/> the key of the source that
+        /// <paramref name="recordSource"/> records. An input's <c>_source*</c> columns are renamed (<c>_source_file</c> and <c>_source_type</c> become <c>origin_source_*</c>) or rejected.
+        /// </summary>
+        private void AttachSourceKey(string table, Func<long> recordSource)
+        {
+            NormalizeIncomingColumns(table, allowKey: false);
+            var key = recordSource();
+            Execute($"ALTER TABLE {QuoteIdent(table)} ADD COLUMN {QuoteIdent(Lineage.KeyColumn)} BIGINT DEFAULT {key.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        /// <summary>
+        /// Brings the <paramref name="sources"/> of another session in under keys that follow this
+        /// session's, and moves the staged rows' <c>_source_key</c> by the same offset. All of the other
+        /// session's sources are copied, including ones no row references, whenever the staging table has
+        /// a <c>_source_key</c> column. Without sources behind the keys, the keys become NULL; a staging table
+        /// without the column is left alone.
+        /// </summary>
+        internal void RemapStagingSources(string table, IReadOnlyList<SourceInfo> sources)
+        {
+            var staged = GetColumnsOf(table).Any(c => c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase));
+            var q = QuoteIdent(table);
+            if (!staged)
+                return;
+            if (sources.Count == 0)
+            {
+                Execute($"UPDATE {q} SET {QuoteIdent(Lineage.KeyColumn)} = NULL");
+                return;
+            }
+            var offset = MaxSourceKey();
+            EnsureSourceTable();
+            foreach (var s in sources.OrderBy(s => s.Key))
+                InsertSource(s.Key + offset, s.Path, s.Sha256, s.Type, s.Bytes, s.ModifiedUtc, s.AddedUtc);
+            Execute($"UPDATE {q} SET {QuoteIdent(Lineage.KeyColumn)} = {QuoteIdent(Lineage.KeyColumn)} + {offset.ToString(CultureInfo.InvariantCulture)}");
+        }
+
+        /// <summary>
+        /// Native import: copies the attached file's <c>source</c> rows under new keys and moves the
+        /// staged rows' <c>_source_key</c> to match. A file with no <c>source</c> table gives NULL keys.
+        /// </summary>
+        private void BringNativeSources(string alias, string table)
+        {
+            var q = QuoteIdent(table);
+            var k = QuoteIdent(Lineage.KeyColumn);
+            var staged = GetColumnsOf(table).Any(c => c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase));
+            var hasSource = Convert.ToInt64(
+                ExecuteScalar($"SELECT count(*) FROM information_schema.tables WHERE table_catalog = {QuoteString(alias)} AND table_name = {QuoteString(Lineage.Table)}"),
+                CultureInfo.InvariantCulture) > 0;
+            if (!hasSource || !staged)
+            {
+                // No lineage in the file: every row gets a NULL key, and no source row comes along.
+                if (staged)
+                    Execute($"UPDATE {q} SET {k} = NULL");
+                else
+                    Execute($"ALTER TABLE {q} ADD COLUMN {k} BIGINT");
+                return;
+            }
+
+            var offset = MaxSourceKey();
+            EnsureSourceTable();
+            var shift = offset.ToString(CultureInfo.InvariantCulture);
+            Execute($"""
+                INSERT INTO "source" ({SourceColumnList})
+                SELECT source_key + {shift}, path, sha256, type, bytes, modified_utc, added_utc
+                FROM {QuoteIdent(alias)}."source" ORDER BY source_key
+                """);
+            Execute($"UPDATE {q} SET {k} = {k} + {shift}");
+        }
+
         internal void ImportNativeRows(string alias, bool append)
         {
             var exists = ExecuteScalar($"SELECT count(*) FROM information_schema.tables WHERE table_catalog = {QuoteString(alias)} AND table_name = 'data'");
@@ -331,6 +495,8 @@ namespace squalor.DataBall
             try
             {
                 PromoteDateColumns("_staging");
+                NormalizeIncomingColumns("_staging", allowKey: true);
+                BringNativeSources(alias, "_staging");
                 MergeOrAppendFromTable("_staging", append);
             }
             finally
@@ -792,7 +958,7 @@ namespace squalor.DataBall
             if (match.Name is null)
                 throw new DataBallException($"Column '{name}' does not exist");
 
-            if (cols.Count == 1)
+            if (IsLastDataColumn(cols, match.Name))
                 Execute("DROP TABLE \"data\"");
             else
                 Execute($"ALTER TABLE \"data\" DROP COLUMN {QuoteIdent(match.Name)}");
@@ -1051,9 +1217,10 @@ namespace squalor.DataBall
             string path,
             bool append,
             IReadOnlyDictionary<string, Type>? expectedTypes = null,
-            Action<string>? prepareStaging = null)
+            Action<string>? prepareStaging = null,
+            Func<long>? recordSource = null)
         {
-            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes, prepareStaging);
+            ImportFromFunction(path, append, "read_csv_auto", ", header=true", expectedTypes, prepareStaging, recordSource);
         }
 
         internal void RenameColumnOf(string table, string from, string to)
@@ -1111,18 +1278,18 @@ namespace squalor.DataBall
             });
         }
 
-        internal void ImportParquet(string path, bool append, Action<string>? prepareStaging = null)
+        internal void ImportParquet(string path, bool append, Action<string>? prepareStaging = null, Func<long>? recordSource = null)
         {
             ThrowIfConnectionBusy();
             if (Directory.Exists(path))
             {
-                ImportHiveParquet(path, append, prepareStaging);
+                ImportHiveParquet(path, append, prepareStaging, recordSource);
                 return;
             }
-            ImportFromFunction(path, append, "read_parquet", "", prepareStaging: prepareStaging);
+            ImportFromFunction(path, append, "read_parquet", "", prepareStaging: prepareStaging, recordSource: recordSource);
         }
 
-        private void ImportHiveParquet(string directory, bool append, Action<string>? prepareStaging)
+        private void ImportHiveParquet(string directory, bool append, Action<string>? prepareStaging, Func<long>? recordSource)
         {
             ThrowIfDisposed();
             var files = Directory.GetFiles(directory, "*.parquet", SearchOption.AllDirectories);
@@ -1134,6 +1301,8 @@ namespace squalor.DataBall
             Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM read_parquet({glob}, hive_partitioning = false)");
             try
             {
+                if (recordSource is not null)
+                    AttachSourceKey("_staging", recordSource);
                 PromoteDateColumns("_staging");
                 prepareStaging?.Invoke("_staging");
                 if (!TableExists("_staging"))
@@ -1156,6 +1325,48 @@ namespace squalor.DataBall
             ExportTo(path, "FORMAT PARQUET", select);
         }
 
+        /// <summary>
+        /// Internal hand-off between sessions: writes <c>"data"</c> as it is, <c>_source_key</c> included, with
+        /// no <c>source</c> join. The receiving session brings the other session's sources itself.
+        /// </summary>
+        internal void ExportParquetKeepingSourceKey(string path)
+        {
+            ExportTo(path, "FORMAT PARQUET", null, resolveSource: false);
+        }
+
+        /// <summary>
+        /// Exported files stand alone: rows that carry <c>_source_key</c> leave it behind and write
+        /// <c>_source_file</c> and <c>_source_type</c> from the <c>source</c> table instead (empty for a
+        /// NULL key). Without a <c>source</c> table (a session that never read a file) the key is still left
+        /// behind and both columns are NULL. A select that does not carry the key is written as it is.
+        /// </summary>
+        private string ResolveSourceSql(string sql, DuckDBParameter[] parameters)
+        {
+            var names = new List<string>();
+            using (var probe = CreateCommand($"SELECT * FROM ({sql}) AS q LIMIT 0", parameters))
+            using (var reader = probe.ExecuteReader())
+            {
+                for (var i = 0; i < reader.FieldCount; i++)
+                    names.Add(reader.GetName(i));
+            }
+            var key = names.FirstOrDefault(n => n.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase));
+            if (key is null)
+                return sql;
+            var file = QuoteIdent(Lineage.FileColumn);
+            var type = QuoteIdent(Lineage.TypeColumn);
+            if (!HasSourceTable())
+            {
+                return $"""
+                    SELECT q.* EXCLUDE ({QuoteIdent(key)}), CAST(NULL AS VARCHAR) AS {file}, CAST(NULL AS VARCHAR) AS {type}
+                    FROM ({sql}) AS q
+                    """;
+            }
+            return $"""
+                SELECT q.* EXCLUDE ({QuoteIdent(key)}), s."path" AS {file}, s."type" AS {type}
+                FROM ({sql}) AS q LEFT JOIN "source" AS s ON q.{QuoteIdent(key)} = s."source_key"
+                """;
+        }
+
         internal IReadOnlyList<string> ResolvePartitionColumns(IReadOnlyList<string> partitionColumns)
         {
             ThrowIfDisposed();
@@ -1172,6 +1383,8 @@ namespace squalor.DataBall
                 var match = cols.FirstOrDefault(c => c.Name.Equals(col, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
                     throw new DataBallException($"Partition column '{col}' does not exist");
+                if (match.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                    throw new DataBallException($"Partition column '{col}' is not exported; the output carries {Lineage.FileColumn} and {Lineage.TypeColumn} instead");
                 resolved.Add(match.Name);
             }
             return resolved;
@@ -1188,7 +1401,8 @@ namespace squalor.DataBall
             var qDir = QuotePath(directory);
             var by = string.Join(", ", resolved.Select(QuoteIdent));
             // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
-            Execute($"COPY (SELECT * FROM \"data\") TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
+            var rows = ResolveSourceSql("SELECT * FROM \"data\"", []);
+            Execute($"COPY ({rows}) TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
         }
 
         private static void ClearHiveTarget(string directory)
@@ -1250,7 +1464,8 @@ namespace squalor.DataBall
             string function,
             string extraArgs,
             IReadOnlyDictionary<string, Type>? expectedTypes = null,
-            Action<string>? prepareStaging = null)
+            Action<string>? prepareStaging = null,
+            Func<long>? recordSource = null)
         {
             ThrowIfDisposed();
             if (string.IsNullOrWhiteSpace(path))
@@ -1259,6 +1474,9 @@ namespace squalor.DataBall
             Execute($"CREATE OR REPLACE TEMP TABLE \"_staging\" AS SELECT * FROM {function}({qpath}{extraArgs})");
             try
             {
+                // The source is recorded once the file has parsed, so an unreadable input leaves no row behind.
+                if (recordSource is not null)
+                    AttachSourceKey("_staging", recordSource);
                 PromoteDateColumns("_staging");
                 CoerceColumnsOf("_staging", expectedTypes);
                 prepareStaging?.Invoke("_staging");
@@ -1273,7 +1491,7 @@ namespace squalor.DataBall
             }
         }
 
-        private void ExportTo(string path, string copyOptions, ParameterizedSql? select = null)
+        private void ExportTo(string path, string copyOptions, ParameterizedSql? select = null, bool resolveSource = true)
         {
             ThrowIfDisposed();
             if (!DataTableExists())
@@ -1284,9 +1502,11 @@ namespace squalor.DataBall
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
             // Subquery form so "data" may be a base table or the layout view.
-            var source = select is null ? "(SELECT * FROM \"data\")" : "(" + select.Value.Sql + ")";
-            var sql = $"COPY {source} TO {QuotePath(path)} ({copyOptions})";
             var parameters = select?.Parameters ?? [];
+            var rows = select is null ? "SELECT * FROM \"data\"" : select.Value.Sql;
+            if (resolveSource)
+                rows = ResolveSourceSql(rows, parameters);
+            var sql = $"COPY ({rows}) TO {QuotePath(path)} ({copyOptions})";
             if (parameters.Length > 0)
                 ExecuteParameterized(sql, parameters);
             else
@@ -1348,7 +1568,7 @@ namespace squalor.DataBall
             var cols = GetColumns();
             if (!cols.Any(c => c.Name.Equals(column, StringComparison.OrdinalIgnoreCase)))
                 return;
-            if (cols.Count == 1)
+            if (IsLastDataColumn(cols, column))
             {
                 DropDataRelation();
                 return;
@@ -1358,13 +1578,26 @@ namespace squalor.DataBall
             Execute($"CREATE OR REPLACE VIEW \"data\" AS SELECT * EXCLUDE ({QuoteIdent(column)}) FROM ({select})");
         }
 
+        /// <summary>
+        /// True when <paramref name="column"/> is the only column left that is data. A table that holds
+        /// nothing but <see cref="Lineage.KeyColumn"/> has no data: dropping the last data column drops the
+        /// table, as it did before rows carried a key.
+        /// </summary>
+        private static bool IsLastDataColumn(IReadOnlyList<(string Name, string DuckDbType)> cols, string column)
+        {
+            if (column.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                return cols.Count == 1;
+            return cols.All(c => c.Name.Equals(column, StringComparison.OrdinalIgnoreCase)
+                || c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase));
+        }
+
         private void DropColumnFromTable(string tableName, string columnName)
         {
             var cols = GetColumnsOf(tableName);
             var match = cols.FirstOrDefault(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase));
             if (match.Name is null)
                 return;
-            if (cols.Count == 1)
+            if (IsLastDataColumn(cols, match.Name))
                 Execute($"DROP TABLE {QuoteIdent(tableName)}");
             else
                 Execute($"ALTER TABLE {QuoteIdent(tableName)} DROP COLUMN {QuoteIdent(match.Name)}");

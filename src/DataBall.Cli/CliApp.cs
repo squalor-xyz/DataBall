@@ -242,7 +242,7 @@ internal static class CliApp
             stdout.WriteLine("Tables:");
             var tables = db.Query("""
                 SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name NOT IN ('meta', '_databall')
+                WHERE table_schema = 'main' AND table_type = 'BASE TABLE' AND table_name NOT IN ('meta', '_databall', 'source')
                 ORDER BY table_name
                 """);
             foreach (var table in tables)

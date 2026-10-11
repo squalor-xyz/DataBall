@@ -157,11 +157,20 @@ namespace squalor.DataBall
         {
             if (config.Tables is null)
                 return;
-            foreach (var name in config.Tables.Keys)
+            foreach (var (name, spec) in config.Tables)
             {
                 if (name.Equals("_databall", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals("meta", StringComparison.OrdinalIgnoreCase))
+                    || name.Equals("meta", StringComparison.OrdinalIgnoreCase)
+                    || name.Equals(Lineage.Table, StringComparison.OrdinalIgnoreCase)
+                    || Lineage.IsReserved(name))
                     throw new DataBallException($"Reserved table name: {name}");
+                if (spec is null)
+                    continue;
+                // _source_key lives on the spine on its own account; a table may not claim any lineage column.
+                foreach (var column in spec.Columns.Where(c => c is not null && Lineage.IsReserved(c)))
+                    throw new DataBallException($"Reserved column name in tables.{name}.columns: {column}");
+                foreach (var column in spec.Key.Where(c => c is not null && Lineage.IsReserved(c)))
+                    throw new DataBallException($"Reserved column name in tables.{name}.key: {column}");
             }
         }
 

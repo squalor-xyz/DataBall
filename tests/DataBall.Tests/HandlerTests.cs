@@ -258,7 +258,7 @@ namespace squalor.DataBall.Tests
                 using var expected = new DataBall(schema);
                 expected.AddRows(Enumerable.Range(0, 10001).Select(LayoutRow).ToList());
                 Assert.Equal(new[] { "BASE TABLE", "BASE TABLE" }, batchKinds);
-                Assert.Equal(expected.Query("SELECT * FROM data ORDER BY Id").Select(row => row.ToArray()), actual.Query("SELECT * FROM data ORDER BY Id").Select(row => row.ToArray()));
+                Assert.Equal(expected.Query("SELECT * FROM data ORDER BY Id").Select(row => row.ToArray()), actual.Query("SELECT * EXCLUDE (_source_key) FROM data ORDER BY Id").Select(row => row.ToArray()));
                 Assert.Equal(expected.Query("SELECT * FROM dimension ORDER BY Key").Select(row => row.ToArray()), actual.Query("SELECT * FROM dimension ORDER BY Key").Select(row => row.ToArray()));
             }
             finally

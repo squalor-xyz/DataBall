@@ -733,6 +733,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "c26aee94-2df1-4d39-ba0d-f08d3334b597",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 relay (2026-10-11): (1) db-22 remaps source rows in two places with a fixed column list (RemapStagingSources for MergeOrAppend, BringNativeSources for .ball import); per-source metadata columns on source would be dropped. Replace both with one SQL remap (INSERT INTO source SELECT * REPLACE (source_key + offset AS source_key) ...), with the merge hand-off carrying the other session's source table. (2) ImportFromFunction stages, keys (AttachSourceKey) and merges in one call; stage-all-then-split-once needs stage+key separated from the merge. (3) A hive directory is one source whose sha256 hashes its sorted per-file hashes; type records the detected BuiltInPath (a Parquet copy shows ParquetView).",
+          "created_at": "2026-10-11T04:54:39Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -945,6 +956,17 @@
           "kind": "",
           "text": "**2026-10-11** — From db-22 interview (owner, 2026-10-10): CSV/Parquet/archive/hive exports resolve _source_key into _source_file and _source_type through a join on source. Export profiles and splits must keep that join, and a split by source should use the resolved columns.",
           "created_at": "2026-10-11T03:05:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "be86acbc-bc3c-48d4-ba18-398fc4575365",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 relay (2026-10-11): ResolveSourceSql replaces data columns named _source_file/_source_type (host writes of _source* are now rejected; imports rename them to origin_*) and skips lineage when a projection omits _source_key. Export profiles inherit both rules.",
+          "created_at": "2026-10-11T04:54:40Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1410,7 +1432,7 @@
       "id": "db-22",
       "title": "DataBall must record source lineage for every file it opens",
       "short_title": "DataBall must record source lineage for every file it opens",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [],
       "note_records": [
@@ -1420,6 +1442,17 @@
           "text": "**2026-10-11** — Owner decisions 2026-10-10 (db-22 interview): (1) normalized lineage: an always-present source table (source_key BIGINT 1..n in import order, path, sha256, type, bytes, modified_utc, added_utc) and one _source_key per row in wide and layout sessions; data shows the key, not path/hash/type; (2) full SHA-256 at open; (3) capture rows NULL key; pre-db-22 .ball files have no source table; (4) CSV/Parquet/archive/hive exports resolve the key to _source_file and _source_type; .ball keeps the normalized tables; (5) db.Sources (SourceInfo) read API; (6) names as listed, source and _source* reserved; (7) Claude-only relay, Sonnet 5.5 high implementer, Haiku 5.5 high subagent for test and export churn, Opus medium reviewer, architect and gate; owner signs off the spec before the relay.",
           "created_at": "2026-10-11T03:05:29Z",
           "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "5eb8b713-162f-43b5-8922-27d17ebe1bf1",
+          "kind": "",
+          "text": "**2026-10-11** — Owner decisions 2026-10-11 (db-22 review round 1): (1) _source* names are rejected by every public write (AddRow, AddRows, InitializeRow initial values, ModifyField, AddColumn, RemoveColumn) and by tables claims in config; internal paths unaffected. (2) The source table stays lazy (created on first import); exports, db.Sources and the CLI handle its absence, and a session with the key column but no source table exports NULL lineage columns, never the raw key. (3) A hive directory's sha256 is the SHA-256 over its sorted (relative path, file SHA-256) list. (4) Bounce/Squish DISTINCT ignores _source_key and collapses identical rows across files, keeping the lowest key. (5) On import, incoming _source_file/_source_type columns are renamed to origin_source_file/origin_source_type; any other incoming _source* column throws. (6) SourceInfo becomes a sealed class with get/init properties and an internal constructor. Also acknowledged: the BaseTables test helper excludes the built-in source table.",
+          "created_at": "2026-10-11T04:54:39Z",
+          "attempt": 1,
           "by": "Jon R",
           "verified_by": "",
           "verified_at": "",
@@ -1444,7 +1477,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -1454,7 +1487,19 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [],
-      "note_records": [],
+      "note_records": [
+        {
+          "id": "1897e23e-669f-45d3-83ec-2b0cf22ac5c2",
+          "kind": "",
+          "text": "**2026-10-11** — From db-22 relay (2026-10-11), pre-existing on 7c17c59: a wide CSV append of a unit-header file (Gain(dB)) into a session that already has Gain throws 'Duplicate canonical column' because the wide schema is applied after the merge. Merge by canonical name.",
+          "created_at": "2026-10-11T04:54:39Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
       "claim": null,
       "fields": {
         "size": "S",

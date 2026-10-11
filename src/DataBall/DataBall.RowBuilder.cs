@@ -29,6 +29,7 @@ namespace squalor.DataBall
                 {
                     if (string.IsNullOrWhiteSpace(pair.Key))
                         throw new DataBallException("Field name is required.");
+                    Lineage.ThrowIfReservedColumn(pair.Key);
                     prepared[pair.Key] = DuckDbStore.Unwrap(pair.Value);
                 }
             }
@@ -76,6 +77,7 @@ namespace squalor.DataBall
                 throw new DataBallException("No pending row. Call InitializeRow before ModifyField.");
             if (string.IsNullOrWhiteSpace(field))
                 throw new DataBallException("Field name is required.");
+            Lineage.ThrowIfReservedColumn(field);
             _pendingRow[field] = DuckDbStore.Unwrap(value);
             _modifiedFields.Add(field);
         }
@@ -217,13 +219,20 @@ namespace squalor.DataBall
                 return new Dictionary<string, object?>(_lastCommittedRow, StringComparer.OrdinalIgnoreCase);
             if (!_store.DataTableExists() || _store.RowCount() == 0)
                 return null;
+            Dictionary<string, object?>? row;
             if (_store.Layout is not null)
             {
                 var last = _store.Query(_store.Layout.BuildLastRowSelect());
-                return last.Count == 0 ? null : last[0];
+                row = last.Count == 0 ? null : last[0];
             }
-            var rows = _store.Query($"SELECT * FROM {DuckDbStore.QuoteIdent("data")}");
-            return rows.Count == 0 ? null : rows[rows.Count - 1];
+            else
+            {
+                var rows = _store.Query($"SELECT * FROM {DuckDbStore.QuoteIdent("data")}");
+                row = rows.Count == 0 ? null : rows[rows.Count - 1];
+            }
+            // A row built by hand came from no file: it does not inherit the last row's source.
+            row?.Remove(Lineage.KeyColumn);
+            return row;
         }
 
         private void RememberRow(IReadOnlyDictionary<string, object?> row)

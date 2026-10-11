@@ -117,7 +117,7 @@ flowchart TD
     E --> F["Optional: write hive parquet<br/><small>path + partition columns</small>"]
 ```
 
-Partition columns and declared table `key` columns are never moved out. Row order is not kept.
+Partition columns, declared table `key` columns and `_source_key` (see [section 12](#12-source-lineage)) are never moved out. Row order is not kept.
 
 ## 8. Multi-table layout
 
@@ -211,13 +211,52 @@ flowchart LR
 
 Native `ImportAsync` attaches the source read-only, merges the schema config subset, stages its wide `data`, routes rows through the existing merge/append path, and loads metadata with config metadata taking precedence. All changes commit together or roll back together. Detach runs after commit or rollback because DuckDB prohibits it while the transaction has outstanding reads.
 
-Config history appends only when merged config changes; the highest version is current. `_databall` and `meta` are reserved table names. DuckDB's default storage version is retained; no older-engine reader floor is claimed. The same-path in-process gate also applies to read-only opens. Cross-process snapshot publication is outside this change.
+Config history appends only when merged config changes; the highest version is current. `_databall`, `meta` and `source`, and any name starting with `_source`, are reserved table names. A `.ball` also holds the `source` table and `_source_key` column once a file has been imported ([section 12](#12-source-lineage)). DuckDB's default storage version is retained; no older-engine reader floor is claimed. The same-path in-process gate also applies to read-only opens. Cross-process snapshot publication is outside this change.
 
 Native saves stamp the latest `_databall` row with the running engine's `version()`, the destination's actual `duckdb_databases()` storage tag, and `written_at` (time of that save). The engine and storage versions are read after the database copy and before detach. Saving a writable session to its own file stamps that row before checkpointing. Config history grows only when config changes, including a read-only overlay saved to a copy. A read-only session cannot save to its own path (it throws); save to another path, or open with `writable: true`.
 
 `Open` uses the full stored config; an overlay merges on top and must keep the same table layout (table order does not matter). Stored `meta` values are authoritative on reopen; only overlay metadata overrides them, in memory for a read-only session. Native `ImportAsync` merges only columns, relationships, tables, and config metadata. The receiving session keeps its CSV settings, metadata fields, metadata policy, and other settings.
 
 Dimension-growth re-splits materialize the ordered view once, rename that table to `data`, and use `data` directly as split input. The `_cast` staging table is still a full wide TEMP copy held in memory. Dropped tables are retained until commit, so dropping the source early does not lower the peak inside the transaction. This removes the extra `_unsplit` and `_wide` copies; the whole-session rewrite still runs in one transaction.
+
+## 12. Source lineage
+
+Every file a session opens is recorded in the built-in `source` table, and every row of `data` carries the key of the file it came from. Source: `SourceInfo.cs`, `DuckDbStore.cs` (`AddSource`, `AttachSourceKey`, `ResolveSourceSql`), `DataBall.cs` (`Sources`, `RunImport`).
+
+```mermaid
+erDiagram
+    source ||--o{ data : "source_key = _source_key"
+    source {
+        key source_key
+        col path
+        col sha256
+        col type
+        col bytes
+        col modified_utc
+        col added_utc
+    }
+    data {
+        col id
+        col Gain
+        key _source_key
+    }
+```
+
+```mermaid
+flowchart TD
+    A["Input file<br/><small>CSV, Parquet, archive entry, handler file</small>"] --> B["Describe<br/><small>full path, SHA-256, bytes, modified time</small>"]
+    B --> C["Parse into staging"]
+    C --> D["Add a source row<br/><small>next source_key</small>"]
+    D --> E["Staging gets _source_key"]
+    E --> F["Merge into data<br/><small>one transaction with the import</small>"]
+    F --> G["Export joins source<br/><small>_source_file, _source_type</small>"]
+```
+
+`Open` and `ImportAsync` hash and describe the file before the first write (a hive directory hashes the sorted list of its files' relative paths and hashes); the static `ImportManager` imports and later archive entries do it inside the import's transaction. The `source` row is added once the file has parsed, in the import's own transaction, so a failed import leaves no source behind. A replacing import starts the table over (`RunImport`); an append keeps the earlier keys. In a layout session `_source_key` is an ordinary spine column that survives dimension growth and the unsplit and re-split of `AddColumn` and `Bounce`; `source` is a separate table beside the layout. An external Parquet view carries the key as a constant in its select list (`CAST(1 AS BIGINT) AS _source_key`), which keeps projection and filter pushdown.
+
+`MergeOrAppend` hands the other session over as Parquet without resolving the key, then adds that session's `source` rows after this session's keys and moves the staged `_source_key` values by the same offset. Native `.ball` import does the same from the attached file; a file with no `source` table brings NULL keys. Rows written without a file (`AddRow`, `AddRows`, the row builder) have a NULL key.
+
+Exports wrap the selected rows, including an `ApplyFilter` select, in a `LEFT JOIN` on `source` and write `_source_file` and `_source_type` instead of `_source_key`, so the file stands alone; a NULL key gives empty values. The `source` table is created by the first import, so a session can have the key column without it (a capture-only `.ball` imported into a fresh session): the export then leaves the key out and writes both columns as NULL. `Bounce` ignores the key when it removes duplicates and keeps the lowest one. An incoming file column named `_source_file` or `_source_type` is renamed `origin_source_*`; any other `_source*` column throws, and so does `_source_key`, except in a native `.ball`, whose keys are remapped, and host writes may not name one either (`Lineage.ThrowIfReservedColumn`). An input that already has an `origin_source_file` or `origin_source_type` column and also brings `_source_file` or `_source_type` fails rather than overwrite it. `SaveAsync` copies the database as it is and keeps `source` and `_source_key`.
 
 ## Columnar and streaming reads
 

@@ -29,6 +29,7 @@ public class CliLayoutTests
             Assert.Equal(0, info.Exit);
             Assert.Contains("Rows: 3", info.StdOut);
             Assert.Contains("Tables:", info.StdOut);
+            Assert.DoesNotContain("source (", info.StdOut);
             Assert.Contains("setup (2 rows)", info.StdOut);
             Assert.Contains("rows (3 rows)", info.StdOut);
             Assert.Contains("m (3 rows)", info.StdOut);
