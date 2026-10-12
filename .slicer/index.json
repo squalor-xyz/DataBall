@@ -1913,6 +1913,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "bc43279a-f233-4664-b9d4-6276380ad7e7",
+          "kind": "",
+          "text": "**2026-10-12** — **2026-10-12** — From the db-24 relay (owner, 2026-10-12): Open resolves the effective config (handler overlays) over every entry before staging, so a file that Skip later skips still shapes the session config through its handler's overlay. Documented in db-24; when staging becomes one path, resolve overlays from the surviving sources (or restage without a skipped handler's overlay).",
+          "created_at": "2026-10-12T15:42:37Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,

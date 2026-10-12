@@ -278,3 +278,4 @@
 {"when": "2026-10-11T23:19:30Z", "item": "db-16", "action": "set", "from": "", "to": "", "note": "depends_on db-08,db-11→db-08,db-11,db-27"}
 {"when": "2026-10-11T23:19:30Z", "item": "db-13", "action": "set", "from": "", "to": "", "note": "depends_on db-11→db-11,db-27"}
 {"when": "2026-10-12T15:06:50Z", "item": "db-24", "action": "note", "from": "", "to": "", "note": "**2026-10-12** — Owner decisions, db-24 spec review (2026-10", "by": "Jon R"}
+{"when": "2026-10-12T15:42:37Z", "item": "db-27", "action": "note", "from": "", "to": "", "note": "**2026-10-12** — From the db-24 relay (owner, 2026-10-12): O", "by": "Jon R"}
