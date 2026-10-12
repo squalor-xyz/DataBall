@@ -1,6 +1,16 @@
 // SPDX-License-Identifier: Apache-2.0
 namespace squalor.DataBall
 {
+    /// <summary>What a many-file open does with a file it cannot read or stage.</summary>
+    public enum BadFilePolicy
+    {
+        /// <summary>The open throws, naming the file. No session is left.</summary>
+        Abort = 0,
+
+        /// <summary>The file is left out and listed in <see cref="OpenReport.Skipped"/>; the other files land.</summary>
+        Skip = 1,
+    }
+
     /// <summary>Options for <see cref="DataBall.Open(System.Collections.Generic.IReadOnlyList{string}, OpenOptions?)"/>.</summary>
     public sealed class OpenOptions
     {
@@ -18,5 +28,8 @@ namespace squalor.DataBall
 
         /// <summary>Optional machine-local engine settings, never persisted in config.</summary>
         public EngineOptions? Engine { get; init; }
+
+        /// <summary>What happens to a file that cannot be read or staged. <see cref="BadFilePolicy.Abort"/> by default.</summary>
+        public BadFilePolicy OnBadFile { get; init; } = BadFilePolicy.Abort;
     }
 }

@@ -25,6 +25,16 @@ namespace squalor.DataBall
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         private static readonly HashSet<string> OpenFiles = new(FilePathComparer);
 
+        /// <summary>Test hook: called with the path a store reserves in the open-file gate.</summary>
+        internal static Action<string>? ExclusivePathReservedForTests;
+
+        /// <summary>Test hook: true while <paramref name="path"/> is reserved in the open-file gate.</summary>
+        internal static bool HoldsExclusivePathForTests(string path)
+        {
+            lock (FileGate)
+                return OpenFiles.Contains(path);
+        }
+
         private readonly DuckDBConnection _connection;
         private readonly ILogger _logger;
         private readonly Dictionary<string, object?> _metadata = new(StringComparer.OrdinalIgnoreCase);
@@ -64,6 +74,7 @@ namespace squalor.DataBall
                     if (!OpenFiles.Add(_exclusivePath))
                         throw new DataBallException($"Database file is already open: {_exclusivePath}");
                 }
+                ExclusivePathReservedForTests?.Invoke(_exclusivePath);
             }
 
             DuckDBConnection? connection = null;

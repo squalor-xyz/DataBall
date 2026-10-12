@@ -8,31 +8,56 @@ namespace squalor.DataBall.Cli;
 internal static class CliApp
 {
     internal static Task<int> ImportAsync(
-        string input,
+        string[] inputs,
         string output,
         bool append,
         string? configPath,
+        bool recursive,
+        bool skipBad,
         TextWriter stderr,
         bool verbose = false,
         EngineOptions? engine = null)
     {
         return RunAsync(stderr, verbose, async () =>
         {
-            using var db = new DataBall(configPath, engine: ResolveEngine(engine, append && File.Exists(output) ? new[] { input, output } : new[] { input }));
-            if (append && File.Exists(output))
+            // One plain input imports as it always has. Several inputs, a glob, --recursive or --skip-bad open them together.
+            if (inputs.Length == 1 && !recursive && !skipBad && !HasWildcard(inputs[0]))
             {
-                await db.ImportAsync(output);
-                await db.ImportAsync(input, new ImportOptions { Append = true });
-            }
-            else
-            {
-                await db.ImportAsync(input);
+                var input = inputs[0];
+                using var db = new DataBall(configPath, engine: ResolveEngine(engine, append && File.Exists(output) ? new[] { input, output } : new[] { input }));
+                if (append && File.Exists(output))
+                {
+                    await db.ImportAsync(output);
+                    await db.ImportAsync(input, new ImportOptions { Append = true });
+                }
+                else
+                {
+                    await db.ImportAsync(input);
+                }
+
+                await db.ExportAsync(output, CliFormat.DetectExportType(output));
+                return 0;
             }
 
-            await db.ExportAsync(output, CliFormat.DetectExportType(output));
+            if (append)
+                throw new DataBallException("--append takes one plain input: several inputs, a glob, --recursive or --skip-bad open together, and appending them arrives with db-16");
+            var options = new OpenOptions
+            {
+                SchemaPath = configPath,
+                Recursive = recursive,
+                OnBadFile = skipBad ? BadFilePolicy.Skip : BadFilePolicy.Abort,
+                Engine = engine,
+            };
+            using var opened = await DataBall.OpenAsync(inputs, options);
+            // A native .ball or snapshot opens with no report: it skipped nothing.
+            foreach (var skip in opened.OpenReport?.Skipped ?? Array.Empty<SkippedFile>())
+                stderr.WriteLine($"Skipped {skip.Path}: {skip.Message}");
+            await opened.ExportAsync(output, CliFormat.DetectExportType(output));
             return 0;
         });
     }
+
+    private static bool HasWildcard(string input) => input.AsSpan().IndexOfAny('*', '?') >= 0;
 
     internal static Task<int> ExportAsync(
         string input,
@@ -164,7 +189,13 @@ internal static class CliApp
         {
             stderr.WriteLine(ex.Message);
             if (ex.InnerException is not null)
-                stderr.WriteLine(verbose ? ex.InnerException.ToString() : ex.InnerException.Message);
+            {
+                // The inner message is printed unless the message already carries it: a wrapped DataBall error names its cause in full.
+                if (verbose)
+                    stderr.WriteLine(ex.InnerException.ToString());
+                else if (!ex.Message.Contains(ex.InnerException.Message, StringComparison.Ordinal))
+                    stderr.WriteLine(ex.InnerException.Message);
+            }
             return 1;
         }
         catch (OperationCanceledException)
