@@ -1,0 +1,42 @@
+{
+  "id": "db-27",
+  "title": "DataBall opens must stage through one path and reconcile metadata in one planner",
+  "lead": [
+    "`OpenOneAsync` keeps only the snapshot-pointer, native `.ball` and single Parquet-view routes. Every other single source (CSV, copied Parquet, layout-config Parquet, parsing handler) stages through `StageSourcesAsync` and merges through `MergeStagedSources`, exactly as a many-file open does. One internal metadata planner decides each configured metadata field's level for the many-file merge (`ReconcileSourceMetadata`), the wide append (`ExtractConfiguredMetadata` and `DuckDbStore.ApplyMetadataAgainstSource`) and the layout append (the `PlanAppend` demotion loop); append semantics are unchanged. `Bounce` skips per-source columns. `BackfillFromSource` decides the column type with `DecideColumnMerge` and throws a named conflict. A skipped source's handler overlay no longer shapes the config.",
+    "Owner decisions (2026-10-12, spec review): (D1) one planner, append rule kept: an append whose constant differs from stored Metadata still demotes the field to a row column with the old value backfilled; appends do not join the three levels. (D2) After staging, if a skipped source's handler overlay changed the effective config, resolve the config again from the surviving sources and restage them once, so the session equals opening the survivors alone; no restage when the skipped sources contributed no overlay change. (D3) A single handler file is staged like any other source: rows go to staging in batches, then one merge transaction; the last parsed row is still remembered for `InitializeRow`; `AfterHandlerBatchForTests` fires per staged batch. (D4) A single-file open that fails under `Abort` throws the many-file wording `Cannot open '<path>': …`; tests asserting the old raw messages are updated."
+  ],
+  "depends_note": null,
+  "findings_note": "db-11 relay (architect, 2026-10-11)",
+  "size": "M",
+  "flags": [],
+  "trees_note": "databall",
+  "trees_plural": false,
+  "boundary": "**Not in this slice:** native .ball sources in many-file opens (db-25); structured cast errors (db-12); appends joining the three metadata levels (D1); per-source columns travelling through MergeOrAppend or native import.",
+  "sections": [
+    {
+      "heading": "Why",
+      "body": "Created from the db-11 architect findings and the db-24 relay. Open has two pipelines below the one entry and metadata is decided in three loops, so policies (bad-file, db-24), strict casts (db-12) and transforms (db-13) would each have to be attached twice. One staging loop and one planner give them one place. Bounce and the source backfill are the two known inconsistencies left by db-11.\n\n**Model note (owner, 2026-10-12):** Claude-only relay, full (size M). Implementer: **Sonnet 5.5, high**; precise file-scoped fix rounds: **Haiku 5.5, xhigh**. Reviewer and architect: Opus 5.5, medium. Gate: Sonnet 5.5, medium. The run ends landed (merged to main, not pushed)."
+    },
+    {
+      "heading": "Files",
+      "body": "- `src/DataBall/DataBall.Open.cs`: `OpenOneAsync` shrinks to pointer, native and Parquet view; `ResolveOpenConfig` can resolve from a subset of routes.\n- `src/DataBall/DataBall.OpenMany.cs`: the single-source route through staging, D4 wording, the D2 restage, last-row memory for a handler source, `ReconcileSourceMetadata` on the planner.\n- New internal planner (e.g. `src/DataBall/MetadataPlanner.cs`): per-field decision (Metadata, source column, row column, demote, leave) from profiles, policy and stored state; the callers execute the decision.\n- `src/DataBall/DataBall.cs`: `ExtractConfiguredMetadata` on the planner; `ExtractConstantsToMetadataSql` (Bounce) skips per-source columns of `source`.\n- `src/DataBall/DuckDbStore.cs`: `ApplyMetadataAgainstSource` on the planner; `BackfillFromSource` / `AppendFromTable` type decision.\n- `src/DataBall/DuckDbStore.Layout.cs`: `PlanAppend` demotion on the planner; layout backfill type decision.\n- Tests under `tests/DataBall.Tests/` (`MultiFileOpenTests`, `HandlerTests`, metadata, append and lineage tests).\n- `README.md` and `docs/how-it-works.md` (§5 metadata, §14 opening many files, the handler-drain paragraph in \"Columnar and streaming reads\", §9 if the append wording changes)."
+    },
+    {
+      "heading": "Failing tests",
+      "body": "1. `Open_SingleCsv_StagesLikeMany`: a single CSV opened alone gives the same columns, types, Metadata, `source` row and `OpenReport` as before and as the staged route; also with a config `tables` layout (split once).\n2. `Open_SingleHandler_Staged_RemembersLastRow`: a single handler file is staged and merged in one transaction (a failure mid-parse leaves no session), `AfterHandlerBatchForTests` fires per staged batch, and a later `InitializeRow` copies the last parsed row.\n3. `Open_SingleFile_Abort_NamesSource`: a single CSV that does not parse throws `Cannot open '<path>': …` under `Abort`; no session, the open-file gate is clear.\n4. `Open_SkippedHandlerOverlay_DoesNotShapeConfig`: under `Skip`, a file whose handler overlay adds a typed column or metadata field fails parsing; the session's config, schema and Metadata equal opening the surviving files alone.\n5. `Bounce_SkipsPerSourceColumn`: after a many-file open makes a per-source column and an append makes it a constant row column, `Bounce` leaves it out of Metadata.\n6. `Append_BackfillFromSource_TypeConflict_Throws`: a per-source column whose `source` type and incoming type cannot merge throws a named conflict (both types, the column, the source) and leaves the session as it was. `Append_BackfillFromSource_Widens`: mergeable types give the merged type, values intact.\n7. `MetadataPlanner_*`: decision tests for liftConstant, requireConstant, first and bounce across the open, wide-append and layout-append call sites (constant, varying, all-null, stored-equal, stored-differing, session column, per-source column, layout key, handler field)."
+    },
+    {
+      "heading": "Implement",
+      "body": "1. Spec review against the code; stop on any gap.\n2. `slicer start db-27 --render --strict`. Write tests 1–7 and watch each fail for the stated reason.\n3. Implement; README and `docs/how-it-works.md` in the same change; mutation-check every new test; full Release suite; format.\n\nMust not change: pointer, native and single Parquet-view opens keep the attached view and its pushdown; append demotion behavior (D1); merge-conflict wording; a failed open leaves no session, temporary store, extraction folder or gate reservation; `OpenReport` for single opens (apart from D4 wording). Existing tests stay green unchanged except message assertions covered by D4 and the per-batch-transaction tests covered by D3."
+    },
+    {
+      "heading": "Check",
+      "body": "- `dotnet build DataBall.sln -c Release`\n- `dotnet test DataBall.sln -c Release`\n- `dotnet format DataBall.sln --verify-no-changes`\n- `slicer check`"
+    },
+    {
+      "heading": "Git",
+      "body": "Branch `db-27` in `.worktrees/db-27`. The orchestrator commits and merges after the gate passes."
+    }
+  ],
+  "notes": []
+}

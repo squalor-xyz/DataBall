@@ -51,7 +51,7 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 18 | [db-24](slices/db-24.md) | DataBall many-file opens must have a bad-file policy and an open report | S | 1 | databall | db-11 split (owner, 2026-10-10) | done |
 | 19 | [db-25](slices/db-25.md) | DataBall many-file opens must accept native .ball sources | S | 2 | databall | db-11 split (owner, 2026-10-10) | — |
 | 20 | [db-26](slices/db-26.md) | DataBall wide CSV appends must apply the CSV schema before merging | M | 2 | databall | db-22 relay (pre-existing on 7c17c59), owner 2026-10-11 | done |
-| 21 | db-27 | One staging path, one metadata planner | M | - | databall | db-11 relay (architect, 2026-10-11) · discovered from db-11 | — |
+| 21 | [db-27](slices/db-27.md) | One staging path, one metadata planner | M | - | databall | db-11 relay (architect, 2026-10-11) · discovered from db-11 | — |
 
 ---
 

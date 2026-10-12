@@ -1898,7 +1898,7 @@
       "title": "DataBall opens must stage through one path and reconcile metadata in one planner",
       "short_title": "One staging path, one metadata planner",
       "status": "open",
-      "has_slice": false,
+      "has_slice": true,
       "depends_on": [
         "db-24"
       ],
