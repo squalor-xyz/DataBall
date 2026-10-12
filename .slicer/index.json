@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 27,
+  "next_id": 28,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -884,7 +884,8 @@
       "status": "open",
       "has_slice": true,
       "depends_on": [
-        "db-11"
+        "db-11",
+        "db-27"
       ],
       "note_records": [
         {
@@ -1070,7 +1071,8 @@
       "has_slice": true,
       "depends_on": [
         "db-08",
-        "db-11"
+        "db-11",
+        "db-27"
       ],
       "note_records": [
         {
@@ -1729,6 +1731,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "4c098612-35b5-4ce2-924f-ce48bb382b78",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — Owner (2026-10-11): the db-11 architect notes on this item (single-path shrink, metadata-loop unification, Bounce, backfill cast) moved to db-27; they are not db-24 scope. Added to db-24: a recursive glob skips files under stray directories (any path segment below the glob's directory starting with '.' or '_'), matching directory expansion; today globs are not stray-filtered, so '**'-style recursive '*.parquet' picks up _temporary/ files that directory expansion skips.",
+          "created_at": "2026-10-11T23:19:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "28ad38b2-d812-4ebd-99f5-1311742b674f",
+          "kind": "",
+          "text": "**2026-10-12** — **2026-10-12** — Owner decisions, db-24 spec review (2026-10-11): relay lite (Haiku 5.5 high implementer, Opus medium reviewer, Sonnet medium gate), landed. (1) Skip covers per-source failures before the merge: unreadable file, detection None/Ambiguous on a named file, CSV/Parquet parse error, handler throw, unreadable archive, within-file requireConstant. Cross-source merge conflicts (type conflict between files) still abort, naming both sources. (2) A bad archive entry skips only that entry (<archive>!<entry> in Skipped); an unreadable archive is skipped whole. (3) A named file that detects as no format is Skipped under Skip and throws under Abort; expanded files that detect as none stay in Ignored. (4) Skipped row/column/value are nullable and filled only from a structured exception (db-12's DataBallCastException); no parsing of DuckDB message text. (5) CLI import with one input and no --recursive/--skip-bad keeps today's path exactly; several inputs, a glob, --recursive or --skip-bad go through Open(inputs, OpenOptions). (6) CLI --append with more than one input or --recursive fails with a clear message until db-16. OpenReport.Sources stays OpenedSource(SourceInfo, Rows) from db-11, superseding the db-22 note.",
+          "created_at": "2026-10-12T15:06:50Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1867,6 +1891,49 @@
         "urgency": 2,
         "effort": 2,
         "attempts": 1
+      }
+    },
+    {
+      "id": "db-27",
+      "title": "DataBall opens must stage through one path and reconcile metadata in one planner",
+      "short_title": "One staging path, one metadata planner",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [
+        "db-24"
+      ],
+      "note_records": [
+        {
+          "id": "8d0a7292-e857-47d5-ac43-2d9ced4e6f79",
+          "kind": "",
+          "text": "**2026-10-11** — **2026-10-11** — Created from the db-11 relay (owner, 2026-10-11), taking over these notes from db-24. (1) Open has two pipelines below the one entry: OpenOneAsync (pointer, native, Parquet view, single CSV/handler) and OpenManyAsync (staged). Shrink OpenOneAsync to pointer, native and Parquet view, and stage every other single source, so policies and transforms attach to one staging loop (DataBall.OpenMany.cs StageSourcesAsync). (2) Metadata reconciliation has three loops: ExtractConfiguredMetadata/ApplyMetadataAgainstSource (wide append), the PlanAppend loop (layout append) and ReconcileSourceMetadata (many-file open). Unify them into one planner (db-11 decision 7 kept append demotion separate; this item decides whether appends join the three levels). (3) Bounce still lifts a fully constant row column to Metadata even when it is also a per-source column on source; skip such fields, as ExtractConfiguredMetadata does. (4) The append backfill from source (BackfillFromSource) CASTs the source column type into the incoming row column type; decide the type with DecideColumnMerge(sourceType, incomingType) and throw a named conflict.",
+          "created_at": "2026-10-11T23:19:30Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "M",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-11 relay (architect, 2026-10-11)",
+        "discovered_from": "db-11",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "Many-file open",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": null,
+        "attempts": 0
       }
     }
   ],
