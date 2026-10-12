@@ -1693,7 +1693,7 @@
       "id": "db-24",
       "title": "DataBall many-file opens must have a bad-file policy and an open report",
       "short_title": "DataBall many-file opens must have a bad-file policy and an open report",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-11"
@@ -1773,7 +1773,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 1,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {

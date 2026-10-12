@@ -258,7 +258,7 @@ namespace squalor.DataBall
         /// A directory whose files are all Parquet is one hive source; any other directory opens its files, those of its subdirectories
         /// too with <see cref="OpenOptions.Recursive"/>. The files are sorted by full path (ordinal), duplicates removed, and each is detected as
         /// by <see cref="Detect"/>: a file from a directory or glob that is no known format is listed in <see cref="OpenReport.Ignored"/>, a file
-        /// named by the caller that is no known format fails the open. Every file becomes a source (see <see cref="Sources"/>); the rows of all
+        /// named by the caller that is no known format fails the open, or is skipped under <see cref="BadFilePolicy.Skip"/>. Every file becomes a source (see <see cref="Sources"/>); the rows of all
         /// of them are staged first, then merged and split once, with column types merged as for an append.
         /// </summary>
         /// <remarks>
@@ -285,16 +285,46 @@ namespace squalor.DataBall
             CancellationToken cancellationToken = default)
         {
             options ??= new OpenOptions();
-            var plan = OpenInputs.Plan(inputs, options.Recursive);
+            var plan = OpenInputs.Plan(inputs, options.Recursive, options.OnBadFile);
+            // A native .ball or snapshot opens only as the sole input, under either policy: any other entry, or any file that was skipped, refuses it.
+            // Ignored files (strays, unrecognized expansions) are not inputs, so they do not.
+            var native = plan.Entries.FirstOrDefault(e => e.Kind != OpenKind.Detected);
+            if (native is not null && (plan.Entries.Count > 1 || plan.Skipped.Count > 0))
+                throw NativeWithOtherInputs(native);
             // One source opens as a single path does. An archive is always staged: its CSV entries are sources of their own.
             if (plan.Entries.Count == 1 && !IsArchive(plan.Entries[0]))
             {
-                var db = await OpenOneAsync(plan.Entries[0], plan.Bytes, options, cancellationToken).ConfigureAwait(false);
+                var db = await OpenSoleAsync(plan, options, cancellationToken).ConfigureAwait(false);
                 if (db.OpenReport is null && plan.Entries[0].Kind == OpenKind.Detected)
-                    db.OpenReport = db.ReportSources(plan.Ignored);
+                    db.OpenReport = db.ReportSources(plan.Ignored, null, plan.Skipped);
                 return db;
             }
             return await OpenManyAsync(plan, options, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>The refusal of a native .ball or snapshot pointer that is not the sole input.</summary>
+        private static DataBallException NativeWithOtherInputs(OpenEntry entry) => entry.Kind == OpenKind.Pointer
+            ? new DataBallException($"'{entry.Path}' is a snapshot pointer; a snapshot cannot be opened together with other inputs yet, open it on its own")
+            : new DataBallException($"'{entry.Path}' is a native .ball; native sources cannot be opened together with other inputs yet, open it on its own");
+
+        /// <summary>
+        /// Opens the one entry of a plan. Under <see cref="BadFilePolicy.Skip"/> a failure names every file the open could not open, with its cause,
+        /// as a many-file open does when every input is bad; under <see cref="BadFilePolicy.Abort"/> the failure is what a single-path open always threw.
+        /// </summary>
+        private static async Task<DataBall> OpenSoleAsync(OpenPlan plan, OpenOptions options, CancellationToken cancellationToken)
+        {
+            var entry = plan.Entries[0];
+            try
+            {
+                return await OpenOneAsync(entry, plan.Bytes, options, cancellationToken).ConfigureAwait(false);
+            }
+            catch (DataBallException ex) when (options.OnBadFile == BadFilePolicy.Skip)
+            {
+                var message = plan.Skipped.Count == 0
+                    ? $"Cannot open '{entry.Path}': {FailureMessage(ex)}"
+                    : $"No file to open: every input was skipped as bad: {OpenInputs.Every(plan.Skipped.Select(s => s.Path).Append(entry.Path))}: {FailureMessage(ex)}";
+                throw new DataBallException(message, ex);
+            }
         }
 
         private static bool IsArchive(OpenEntry entry) =>
@@ -306,7 +336,7 @@ namespace squalor.DataBall
         public OpenReport? OpenReport { get; private set; }
 
         /// <summary>The sources the session holds, with the rows each contributed.</summary>
-        private OpenReport ReportSources(IReadOnlyList<string> ignored, IReadOnlyDictionary<long, long>? rowsByKey = null)
+        private OpenReport ReportSources(IReadOnlyList<string> ignored, IReadOnlyDictionary<long, long>? rowsByKey, IReadOnlyList<SkippedFile> skipped)
         {
             var sources = _store.ReadSources();
             if (rowsByKey is null)
@@ -329,7 +359,8 @@ namespace squalor.DataBall
             }
             return new OpenReport(
                 sources.Select(s => new OpenedSource(s, rowsByKey.TryGetValue(s.Key, out var n) ? n : 0)).ToList(),
-                ignored.ToList());
+                ignored.ToList(),
+                skipped.ToList());
         }
 
         /// <summary>Opens a sole entry exactly as a single-path open always did.</summary>

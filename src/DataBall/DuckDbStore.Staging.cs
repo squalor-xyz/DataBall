@@ -82,8 +82,22 @@ namespace squalor.DataBall
             AppendRowsTo(table, StagingKind, rows, RowColumnOrder(rows), expectedTypes);
         }
 
+        /// <summary>True when a staging table's column holds no value at all (the reader types such a column VARCHAR, which merges with anything).</summary>
+        internal bool StagedColumnIsAllNull(string table, string column)
+        {
+            ThrowIfDisposed();
+            return IsAllNull(table, column);
+        }
+
         /// <summary>Rows in a staging table.</summary>
         internal long StagedRowCount(string table) => RowCountOf(table);
+
+        /// <summary>Drops a staging table a source did not finish, or one a skipped source left behind. Best effort, as for any staging table.</summary>
+        internal void DropStaged(string table)
+        {
+            ThrowIfDisposed();
+            DropTemp(table);
+        }
 
         /// <summary>Drops <paramref name="column"/> from a staging table. The source-key column keeps the table alive.</summary>
         internal void DropStagedColumn(string table, string column)
@@ -132,7 +146,7 @@ namespace squalor.DataBall
         private List<(string Name, string DuckDbType)> PlanStagedSchema(IReadOnlyList<StagedSource> staged, IReadOnlyDictionary<string, Type>? configTypes)
         {
             var order = new List<string>();
-            var state = new Dictionary<string, (string Type, List<string> Contributors)>(StringComparer.OrdinalIgnoreCase);
+            var state = new Dictionary<string, (string Type, List<string> Contributors, string FirstPath)>(StringComparer.OrdinalIgnoreCase);
             foreach (var s in staged)
             {
                 foreach (var (name, type) in GetColumnsOf(s.Table))
@@ -142,7 +156,7 @@ namespace squalor.DataBall
                     if (!state.TryGetValue(name, out var current))
                     {
                         order.Add(name);
-                        state[name] = (type, new List<string> { s.Table });
+                        state[name] = (type, new List<string> { s.Table }, s.Record.Path);
                         continue;
                     }
                     if (configTypes?.Keys.Any(k => k.Equals(name, StringComparison.OrdinalIgnoreCase)) == true)
@@ -157,10 +171,10 @@ namespace squalor.DataBall
                     if (decision.Kind == ColumnMerge.Conflict)
                     {
                         throw new DataBallException(
-                            $"Cannot merge '{s.Record.Path}': column '{name}' has type {current.Type} in the sources before it and {type} in this one");
+                            $"Cannot merge '{s.Record.Path}': column '{name}' has type {current.Type} in the sources before it (first seen in '{current.FirstPath}') and {type} in this one");
                     }
                     current.Contributors.Add(s.Table);
-                    state[name] = (decision.Type, current.Contributors);
+                    state[name] = (decision.Type, current.Contributors, current.FirstPath);
                 }
             }
             return order.Select(n => (n, state[n].Type)).ToList();

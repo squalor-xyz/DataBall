@@ -182,7 +182,10 @@ internal static class HiveFiles
     internal static bool IsStray(string root, string file) =>
         Path.GetRelativePath(root, file)
             .Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
-            .Any(segment => segment.StartsWith('.') || segment.StartsWith('_'));
+            .Any(IsStrayName);
+
+    /// <summary>True for a path segment (a name or a directory's name) that makes its file stray.</summary>
+    internal static bool IsStrayName(string segment) => segment.StartsWith('.') || segment.StartsWith('_');
 
     /// <summary>True for a Parquet file under <paramref name="root"/> that is not a stray file.</summary>
     internal static bool IsDataFile(string root, string file) =>

@@ -59,9 +59,10 @@ public static class CommandFactory
 
     private static Command CreateImportCommand(TextWriter stderr, Option<bool> verboseOption)
     {
-        var inputArg = new Argument<string>("input")
+        var inputArg = new Argument<string[]>("input")
         {
-            Description = "Source file",
+            Description = "Source file, directory or glob; several may be given",
+            Arity = ArgumentArity.OneOrMore,
         };
         var outputOption = new Option<string>("--output", "-o")
         {
@@ -70,20 +71,30 @@ public static class CommandFactory
         };
         var appendOption = new Option<bool>("--append")
         {
-            Description = "Append to an existing output file",
+            Description = "Append to an existing output file (one input only)",
         };
         var configOption = new Option<string?>("--config", "-c")
         {
             Description = "Path to configuration JSON",
         };
+        var recursiveOption = new Option<bool>("--recursive")
+        {
+            Description = "Include subdirectories of a directory or glob input",
+        };
+        var skipBadOption = new Option<bool>("--skip-bad")
+        {
+            Description = "Skip a file that cannot be read or staged, reporting it on stderr, instead of failing",
+        };
 
         var engine = new EngineArguments();
-        var command = new Command("import", "Import a file into an output DataBall")
+        var command = new Command("import", "Import files into an output DataBall")
         {
             inputArg,
             outputOption,
             appendOption,
             configOption,
+            recursiveOption,
+            skipBadOption,
         };
         engine.AddTo(command);
         command.SetAction(async (parseResult, _) =>
@@ -92,6 +103,8 @@ public static class CommandFactory
                 parseResult.GetValue(outputOption)!,
                 parseResult.GetValue(appendOption),
                 parseResult.GetValue(configOption),
+                parseResult.GetValue(recursiveOption),
+                parseResult.GetValue(skipBadOption),
                 stderr,
                 parseResult.GetValue(verboseOption),
                 engine.Read(parseResult)));
