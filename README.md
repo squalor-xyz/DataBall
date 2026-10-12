@@ -369,6 +369,7 @@ SharpCompress **0.50.4**. `.tar.xz` import works; `.tar.xz` export does not (XZ 
 ## Diagrams
 
 [`docs/how-it-works.md`](docs/how-it-works.md): Mermaid diagrams of the session lifecycle, where the data lives (memory, `.duckdb`, `.ball`), atomic import, header → schema, row builder, Bounce, multi-table layout, and the `.ball` format.
+Rendered copies with the diagrams drawn: [`docs/how-it-works.pdf`](docs/how-it-works.pdf) and [`docs/how-it-works.html`](docs/how-it-works.html).
 
 ## Historical docs
 
