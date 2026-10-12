@@ -10,7 +10,8 @@ DataBall is the session engine of the squalor semiconductor suite: an Apache-2.0
 - `src/DataBall.Handlers/`: `IFormatHandler` implementations for lab dialects.
 - `src/DataBall.Cli/`: the `databall` tool (System.CommandLine).
 - `tests/DataBall.Tests/`, `tests/DataBall.Cli.Tests/`: xUnit. `tests/DataBall.TrialProbe/` is a console probe used by the db-05 trial.
-- `docs/`: `how-it-works.md` (architecture), `ball-v3-trial.md` (db-05 decision record), `conflux-spec.md` (design input being folded in; not shipped API), `archive/` (historical).
+- `docs/`: `how-it-works.md` (architecture; `how-it-works.html` and `.pdf` are committed renders of it), `ball-v3-trial.md` (db-05 decision record), `conflux-spec.md` (design input being folded in; not shipped API), `archive/` (historical).
+- `scripts/`: `render-docs.sh` renders the committed docs (see Docs below).
 - `.slicer/`: roadmap and slice tracking. Managed only through the `slicer` CLI.
 
 ## Build, test, format
@@ -46,6 +47,15 @@ Rebuild after every source edit; `--no-build` runs whatever was built last. The 
 - Prefer the BCL and in-repo code. Ask the owner before adding any package; current dependencies are DuckDB.NET.Data.Full (pinned 1.5.5), Microsoft.Extensions.Logging.Abstractions, SharpCompress and System.CommandLine.
 - README and `docs/how-it-works.md` change in the same commit as the behavior they describe.
 
+## Docs
+
+`docs/how-it-works.md` is the source. `docs/how-it-works.html` and `docs/how-it-works.pdf` are generated from it and committed, so they can be read without a Mermaid renderer.
+
+- The `.md` changes in the same commit as the behavior it describes (rule above). Its diagrams use plain-language labels with the type or method name in `<small>` text, one idea per diagram, and name the source file they come from.
+- The renders are refreshed on their own, through a queued roadmap item, not inside a feature slice. They may lag the `.md` between refreshes. Never edit them by hand.
+- To refresh: check the `.md` against `src/` (names, flow order, diagrams), fix the drift, run `./scripts/render-docs.sh`, check that every Mermaid block drew (the HTML has one `<svg` per diagram) and that the PDF has no clipped diagrams, then commit the `.md`, `.html` and `.pdf` together.
+- `render-docs.sh` needs `quire` on PATH with the `squalor` profile configured. Add another doc by adding its name to `DOCS` in the script.
+
 ## Tests
 
 - Test-first for slices: write the slice's named tests, watch each fail for the stated reason, then implement.
@@ -70,6 +80,7 @@ What this repo adds:
 - **Size S** slices run a lite relay without the architect; M and L run the full relay.
 - **Models:** the owner picks the vendor, model and effort for each role.
 - **Agents** never commit; the orchestrator commits and merges after the gate passes and the owner agrees. Findings that belong to other slices are filed with `slicer note <id>` by the orchestrator, not by reviewers.
+- **Doc drift:** when the architect (or any reviewer) finds that `docs/how-it-works.md` or its renders deviate from the code, it reports this as a finding. The orchestrator queues the refresh in slicer (a note on the open how-it-works refresh item from `slicer find how-it-works`, or `slicer add` when there is none). The slice fixes the `.md` only where its own change caused the drift, and never regenerates the renders.
 
 ## Git
 

@@ -171,8 +171,10 @@ Every write path (import, `AddRows`, `CommitRow`, merge) funnels through one rou
 
 ```mermaid
 flowchart TD
-    A["Incoming rows<br/><small>staged in a temp table</small>"] --> B["Reconcile metadata<br/><small>a value that now varies becomes a column</small>"]
-    B --> C["Add new columns<br/><small>spine / measurement groups</small>"]
+    A["Incoming rows<br/><small>staged in a temp table</small>"] --> P{"Grows a dimension?<br/><small>PlanAppend</small>"}
+    P -- yes --> R["Unsplit, append, re-split<br/><small>AppendByRematerializing</small>"]
+    P -- no --> B["Reconcile metadata<br/><small>a value that now varies becomes a column</small>"]
+    B --> C["Add or widen columns<br/><small>spine / measurement groups</small>"]
     C --> D["Cast to stored types"]
     D --> E["Dimensions: reuse row with same hash key"]
     E --> F["Spine, then measurement groups"]
@@ -206,6 +208,7 @@ flowchart LR
         data["data: table, layout or Parquet view"]
         cfg["_databall: versioned config JSON<br/>ball_format = 3, engine / storage versions, last-save timestamp"]
         tbl["physical layout tables"]
+        src["source: one row per imported file"]
     end
 ```
 
@@ -279,7 +282,7 @@ A publish takes these steps, and nothing is written before the guards (open row 
 4. Replace `<Name>.latest` atomically: write a uniquely named temporary file (two UTF-8 lines, `DATABALL-SNAPSHOT 1` and the generation file name), then move it over the pointer.
 5. Prune generations beyond `Keep`, never the one the pointer names. A delete that fails (a Windows reader holding the file) is skipped and retried at the next publish. If the pointer cannot be read, nothing is deleted.
 
-The capture connection is single, so writes wait during the copy of step 2. A pending `InitializeRow` row is not in the database, so a snapshot holds committed data only.
+The capture connection is single, so writes wait during the copy of step 3. A pending `InitializeRow` row is not in the database, so a snapshot holds committed data only.
 
 `ReadSnapshotGeneration(pointerPath)` reads only the pointer and returns the generation number (null when the file is missing; it throws for a file that is not a pointer), so a reader can poll cheaply, reopen only when the number is newer than `OpenedSnapshot.Generation`, and dispose the old session before reopening the same generation in one process. One writer should publish a given `Name`, and any `<Name>.<n>.ball` in the directory counts as a generation. The pointer is UTF-8 without a byte-order mark.
 
@@ -297,8 +300,10 @@ flowchart TD
     D --> E{"One source<br/>(not an archive)?"}
     E -- yes --> F["Open as a single path<br/><small>view, native, snapshot, handler</small>"]
     E -- no --> G["Stage every source<br/><small>table _stg_n, key n, CSV schema; a failed source throws or is Skipped</small>"]
-    G --> H["Reconcile metadata<br/><small>Metadata, source column, row column</small>"]
-    H --> I["One transaction: build data and source,<br/>one split"]
+    G --> H
+    subgraph tx["One transaction (RunImport)"]
+        H["Reconcile metadata<br/><small>Metadata, source column, row column</small>"] --> I["Build data and source,<br/>one split"]
+    end
 ```
 
 Expansion is deterministic. A directory named as an input is walked once, and only as deep as needed: the top level is listed first, and the tree below it is walked only with `Recursive` or when the top level has no non-stray non-Parquet file. If it holds files and every non-stray file at any depth is `.parquet` it is one hive source, and the list of those files (`HiveFiles.List`, carried on the entry) is what the view, the staging, `SourceFile.Describe` (hash and bytes) and `ImportHiveParquet` all use; otherwise its files are the candidates (the top level only, or all depths with `Recursive`). Stray files are left out of that test (`IsStray(root, file)`): any path segment below the hive root that starts with `.` or `_`, so `.DS_Store`, `_SUCCESS` or `_temporary/0/part.parquet` in a hive directory changes nothing. When the directory expands to files they are not candidates but go to `OpenReport.Ignored`, unless the caller also named them. The hive's list is fixed when it opens: the view's `read_parquet` names those files, so files added later are not seen, including by a `.ball` saved with `SaveOptions.Link`. An only-Parquet subdirectory met while expanding is not a hive source. A pattern's last segment is matched with `FileSystemName.MatchesSimpleExpression` (case-insensitive) against the files of its directory; a `*` or `?` in an earlier segment throws. Candidates are keyed and sorted by full path (ordinal), a file named by the caller replacing the same path expanded from a directory; an entry that another hive entry already reads is dropped, so no file is read twice (`IsReadByAHiveSource`): a file in that hive's list, or a nested hive directory whose files all are. A named stray file the hive leaves out stays an entry of its own. `Classify` reads each one: a snapshot pointer, a native `.ball`, or `Detect`'s report. A report of `None` ignores an expanded file and throws for a named one. The plan carries the summed bytes, so `EngineOptions.ResolveStore(long)` sizes the store over all of them without a second walk; `ResolveStore(IEnumerable<string>)` wraps `UnauthorizedAccessException` and `IOException` in `DataBallException`.
