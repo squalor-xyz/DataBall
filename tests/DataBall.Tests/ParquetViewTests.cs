@@ -220,7 +220,8 @@ public class ParquetViewTests
         }
         File.Delete(f.Source);
         var ex = Assert.Throws<DataBallException>(() => DataBall.Open(linked));
-        Assert.Contains(f.Source, ex.Message);
+        // Linked paths are stored with '/' separators, so DuckDB names that form on Windows.
+        Assert.Contains(f.Source.Replace('\\', '/'), ex.Message);
     }
 
     [Fact]
