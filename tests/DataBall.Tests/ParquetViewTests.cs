@@ -38,7 +38,7 @@ public class ParquetViewTests
         using var f = new ParquetFixture();
         var config = f.Config();
         File.WriteAllText(config, "{\"columns\":{\"Id\":\"string\"},\"metadataFields\":[]}");
-        using var db = DataBall.Open(f.Source, config);
+        using var db = DataBall.Open(f.Source, new OpenOptions { SchemaPath = config });
         using var imported = new DataBall(config);
         await imported.ImportAsync(f.Source);
         AssertView(db);
@@ -113,7 +113,7 @@ public class ParquetViewTests
                 using (var other = new DataBall())
                 {
                     other.AddRow(new Dictionary<string, object?> { ["Id"] = 3 });
-                    db.MergeOrAppend(other, true);
+                    await db.ImportAsync(other, new ImportOptions { Append = true });
                 }
                 expectedIds = new[] { 1, 2, 3 };
                 break;
@@ -172,7 +172,7 @@ public class ParquetViewTests
     {
         using var f = new ParquetFixture();
         using (var wide = DataBall.Open(f.Source)) AssertView(wide);
-        using var db = DataBall.Open(f.Source, f.Config(layout: true));
+        using var db = DataBall.Open(f.Source, new OpenOptions { SchemaPath = f.Config(layout: true) });
         Assert.Equal(1L, Convert.ToInt64(db.Query("SELECT count(*) AS n FROM duckdb_tables() WHERE table_name = 'sites'")[0]["n"]));
         db.AddRow(new Dictionary<string, object?> { ["Id"] = 3, ["Site"] = "B", ["Room"] = "lab" });
         Assert.Equal("lab", db.Query("SELECT Room FROM data WHERE Id = 3")[0]["Room"]);
@@ -241,7 +241,7 @@ public class ParquetViewTests
     {
         using var f = new ParquetFixture();
         var config = f.Config(metadata: true);
-        using (var db = DataBall.Open(f.Source, config))
+        using (var db = DataBall.Open(f.Source, new OpenOptions { SchemaPath = config }))
         {
             Assert.Equal("007", db.Metadata["Site"]);
             db.SetMetadata("Operator", "Ada");
@@ -251,7 +251,7 @@ public class ParquetViewTests
         }
         using (var writer = new DataBall())
             writer.Query($"COPY (SELECT 1 AS Id, '007' AS Site UNION ALL SELECT 2, 'B') TO {DuckDbStore.QuoteString(f.Source)} (FORMAT PARQUET)");
-        using var varying = DataBall.Open(f.Source, config);
+        using var varying = DataBall.Open(f.Source, new OpenOptions { SchemaPath = config });
         Assert.Equal(2L, varying.Count(new SessionFilter()));
         Assert.Contains(varying.Store.GetColumns(), c => c.Name == "Site");
         Assert.False(varying.Metadata.ContainsKey("Site"));
@@ -326,7 +326,7 @@ public class ParquetViewTests
         File.WriteAllText(config, """{"metadataPolicy":"requireConstant"}""");
         var source = f.MetadataSource(kind);
         var ex = kind == "view"
-            ? Assert.Throws<DataBallException>(() => DataBall.Open(source, config))
+            ? Assert.Throws<DataBallException>(() => DataBall.Open(source, new OpenOptions { SchemaPath = config }))
             : await ImportStrict();
         Assert.Contains("Metadata field 'Lot' is not constant", ex.Message);
 
@@ -384,7 +384,7 @@ public class ParquetViewTests
         {
             using var other = new DataBall();
             other.AddRow(new Dictionary<string, object?> { ["Id"] = 3 });
-            db.MergeOrAppend(other, append: false);
+            await db.ImportAsync(other, new ImportOptions { Append = false });
         }
         AssertTable(db);
         Assert.Equal(new[] { 3 }, Ids(db));
@@ -427,7 +427,7 @@ public class ParquetViewTests
         var path = f.PathFor("linked.ball");
         using (var source = DataBall.Open(f.Source))
             await source.SaveAsync(path, new SaveOptions { Link = true });
-        using var db = DataBall.Open(path, writable: true);
+        using var db = DataBall.Open(path, new OpenOptions { Writable = true });
         Assert.Throws<DataBallException>(() => db.AddRow(new Dictionary<string, object?> { ["Id"] = "invalid" }));
         AssertView(db);
         db.AddRow(new Dictionary<string, object?> { ["Id"] = 3 });
@@ -442,7 +442,7 @@ public class ParquetViewTests
         var path = f.PathFor("linked.ball");
         using (var source = DataBall.Open(f.Source))
             await source.SaveAsync(path, new SaveOptions { Link = true });
-        using (var db = DataBall.Open(path, writable: true))
+        using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
         {
             await db.SaveAsync(path);
             AssertTable(db);
@@ -459,7 +459,7 @@ public class ParquetViewTests
     {
         using var f = new ParquetFixture();
         var temp = f.PathFor("temp");
-        using var db = DataBall.Open(f.Hive, engine: new EngineOptions { InMemoryMaxBytes = 1, TempDirectory = temp });
+        using var db = DataBall.Open(f.Hive, new OpenOptions { Engine = new EngineOptions { InMemoryMaxBytes = 1, TempDirectory = temp } });
         Assert.Equal(temp, Path.GetDirectoryName(db.StorePath));
         AssertView(db);
         Assert.Equal(new[] { 1, 2 }, Ids(db));
@@ -469,7 +469,7 @@ public class ParquetViewTests
     public void Open_HiveDir_WithTables_CopiesIn()
     {
         using var f = new ParquetFixture();
-        using var db = DataBall.Open(f.Hive, f.Config(layout: true));
+        using var db = DataBall.Open(f.Hive, new OpenOptions { SchemaPath = f.Config(layout: true) });
         Assert.Equal(1L, Convert.ToInt64(db.Query("SELECT count(*) AS n FROM duckdb_tables() WHERE table_name = 'sites'")[0]["n"]));
         Directory.Delete(f.Hive, true);
         Assert.Equal(new[] { 1, 2 }, Ids(db));

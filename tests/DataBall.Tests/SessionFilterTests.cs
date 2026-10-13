@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using squalor.DataBall.Export;
 using Xunit;
 
 namespace squalor.DataBall.Tests
@@ -201,13 +200,13 @@ namespace squalor.DataBall.Tests
                     ]
                 });
                 var filtered = Path.Combine(dir, "filtered.csv");
-                await db.ExportAsync(filtered, ExportType.Csv);
+                await db.ExportAsync(filtered, new ExportOptions { Format = ExportType.Csv });
                 using (var opened = DataBall.Open(filtered))
                     Assert.Equal("Alice", Assert.Single(opened.Query("SELECT Name FROM data"))["Name"]);
 
                 db.ApplyFilter(null);
                 var all = Path.Combine(dir, "all.csv");
-                await db.ExportAsync(all, ExportType.Csv);
+                await db.ExportAsync(all, new ExportOptions { Format = ExportType.Csv });
                 using var restored = DataBall.Open(all);
                 Assert.Equal(3, restored.Query("SELECT Name FROM data").Count);
             }
@@ -340,7 +339,7 @@ namespace squalor.DataBall.Tests
                 var expected = db.Filter(filter).Count;
                 db.ApplyFilter(filter);
                 var csv = Path.Combine(dir, "filtered.csv");
-                await db.ExportAsync(csv, ExportType.Csv);
+                await db.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                 using var opened = DataBall.Open(csv);
                 Assert.Equal(expected, opened.Query("SELECT * FROM data").Count);
                 Assert.Equal(1, expected);

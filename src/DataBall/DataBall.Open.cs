@@ -128,12 +128,12 @@ namespace squalor.DataBall
                 try
                 {
                     var format = DetectFormat(path);
-                    var name = format == Export.ExportType.Csv ? "CSV" : format.ToString();
+                    var name = format == PathFormat.Csv ? "CSV" : format.ToString();
                     builtIn = format switch
                     {
-                        Export.ExportType.Parquet => BuiltInPath.ParquetView,
-                        Export.ExportType.Csv => BuiltInPath.CsvImport,
-                        Export.ExportType.Ball => BuiltInPath.BallImport,
+                        PathFormat.Parquet => BuiltInPath.ParquetView,
+                        PathFormat.Csv => BuiltInPath.CsvImport,
+                        PathFormat.Ball => BuiltInPath.BallImport,
                         _ => BuiltInPath.ArchiveImport
                     };
                     fallbackReason = $"Known {name} extension";
@@ -228,28 +228,27 @@ namespace squalor.DataBall
         /// Escapes the ambient synchronization context (Avalonia UI thread).
         /// </summary>
         /// <param name="path">File, hive Parquet directory, directory of files, or glob to open.</param>
-        /// <param name="schemaPath">Optional overlay config JSON (merged onto the stored config for native files; tables must match the stored layout).</param>
-        /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
-        /// <param name="writable">Allow changes to a native .ball session. A snapshot pointer cannot be opened writable.</param>
+        /// <param name="options">Optional schema overlay, writable, recursion and engine settings.</param>
         /// <exception cref="DataBallException">Missing path/file, unknown format, or import failure.</exception>
-        public static DataBall Open(string path, string? schemaPath = null, bool writable = false, EngineOptions? engine = null)
+        public static DataBall Open(string path, OpenOptions? options = null)
         {
-            return Task.Run(() => OpenAsync(path, schemaPath, writable, engine)).GetAwaiter().GetResult();
+            return Task.Run(() => OpenAsync(path, options)).GetAwaiter().GetResult();
         }
 
         /// <summary>
-        /// Async counterpart of <see cref="Open(string, string?, bool, EngineOptions?)"/>. Prefer this from UI hosts.
+        /// Async counterpart of <see cref="Open(string, OpenOptions?)"/>. Prefer this from UI hosts.
         /// </summary>
+        /// <param name="path">File, hive Parquet directory, directory of files, or glob to open.</param>
+        /// <param name="options">Optional schema overlay, writable, recursion and engine settings.</param>
+        /// <param name="cancellationToken">Cancels the open; a cancelled token throws <see cref="OperationCanceledException"/> before anything is opened.</param>
         public static async Task<DataBall> OpenAsync(
             string path,
-            string? schemaPath = null,
-            bool writable = false,
-            EngineOptions? engine = null,
+            OpenOptions? options = null,
             CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
-            return await OpenAsync(new[] { path }, new OpenOptions { SchemaPath = schemaPath, Writable = writable, Engine = engine }, cancellationToken).ConfigureAwait(false);
+            return await OpenAsync(new[] { path }, options, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -279,11 +278,15 @@ namespace squalor.DataBall
         /// <summary>
         /// Async counterpart of <see cref="Open(IReadOnlyList{string}, OpenOptions?)"/>. Prefer this from UI hosts.
         /// </summary>
+        /// <param name="inputs">Paths, directories and globs to open.</param>
+        /// <param name="options">Optional schema overlay, writable, recursion and engine settings.</param>
+        /// <param name="cancellationToken">Cancels the open; a cancelled token throws <see cref="OperationCanceledException"/>.</param>
         public static async Task<DataBall> OpenAsync(
             IReadOnlyList<string> inputs,
             OpenOptions? options = null,
             CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             options ??= new OpenOptions();
             var plan = OpenInputs.Plan(inputs, options.Recursive, options.OnBadFile);
             // A native .ball or snapshot opens only as the sole input, under either policy: any other entry, or any file that was skipped, refuses it.

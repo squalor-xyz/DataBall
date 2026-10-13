@@ -2,7 +2,7 @@
 namespace squalor.DataBall
 {
     /// <summary>
-    /// Options for <see cref="DataBall.ImportAsync"/>.
+    /// Options for <see cref="DataBall.ImportAsync(string, ImportOptions?, System.Threading.CancellationToken)"/>, its list form and <see cref="DataBall.ImportAsync(DataBall, ImportOptions?)"/>.
     /// </summary>
     public sealed class ImportOptions
     {

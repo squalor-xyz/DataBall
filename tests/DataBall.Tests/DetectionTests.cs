@@ -143,7 +143,7 @@ public class DetectionTests : DetectionFixture
         using (var db = new DataBall())
         {
             db.AddColumn("Id", new long[] { 42 });
-            await db.ExportAsync(path, Export.ExportType.Ball);
+            await db.SaveAsync(path);
         }
         DataBall.RegisterHandler(ScoredHandler.Create("trap", 1, 0, 99, throws: true));
         Assert.Equal("Generic", Detect(path).Outcome.ToString());

@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 32,
+  "next_id": 33,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -997,6 +997,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "6dde2085-7dac-4d7a-bc2c-848960faad6b",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review (2026-10-13): MergeOrAppend is removed; Join's spec text should say it hands data over like ImportAsync(DataBall other, ImportOptions) (src/DataBall/DataBall.cs).",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1062,6 +1073,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "fe5e819a-9a49-48b7-bcbb-1bb5526a7feb",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review (2026-10-13): db-16 landed first. ExportOptions exists in namespace squalor.DataBall (src/DataBall/ExportOptions.cs) with required ExportType Format and PartitionBy (Parquet hive output, honours ApplyFilter); ExportType moved to squalor.DataBall; ExportAsync(string path, ExportOptions) writes one file (or a hive dir with PartitionBy). Reconcile: Profile vs the required Format (dropping required is non-breaking), Split/hive vs PartitionBy, a file path vs an output directory, and src/DataBall/Export/ location. Bounce/Squish(partitionedParquetPath, cols) is still a second hive writer: Bounce keeps partition columns out of constant extraction, so Bounce() + ExportAsync(PartitionBy) is not equivalent; keep that when routing Squish through the db-15 writer.",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "3a011c2d-fc6f-49da-9e83-098360d3e7a8",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review round 2 (2026-10-13): DuckDbStore.ExportPartitionedParquet repeats ExportTo's select/parameter handling and skips its DataTableExists guard ('No data to export'); when db-15 replaces this writer, route it through ExportTo (after ClearHiveTarget) with PARTITION_BY options. Generic nullability inside generic arguments and tuple element names are still not captured by the PublicApi generator.",
+          "created_at": "2026-10-13T15:17:45Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1089,7 +1122,7 @@
       "id": "db-16",
       "title": "DataBall API must have one clear way in and out",
       "short_title": "DataBall API must have one clear way in and out",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-08",
@@ -1239,6 +1272,39 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "9d9eca85-9edb-4864-a2fe-e4e28cdd4aff",
+          "kind": "",
+          "text": "**2026-10-13** — Owner decisions 2026-10-13 (after Phase 1): (1) ExportToPartitionedParquet is replaced by ExportOptions.PartitionBy (IReadOnlyList<string>?, Parquet only) on ExportAsync; its two tests port with unchanged expectations. (2) DetectFormat becomes internal and returns an internal PathFormat; the README migration table lists it as removed. (3) Sync Open takes no CancellationToken; ImportAsync(inputs) treats each entry as one file or hive directory (no glob/directory expansion).",
+          "created_at": "2026-10-13T14:19:48Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "f74e4feb-3def-463b-9ce6-cd072ba140ca",
+          "kind": "",
+          "text": "**2026-10-13** — Owner decisions 2026-10-13 (review round 1): ExportOptions.PartitionBy (and empty PartitionBy) applies ApplyFilter like the other formats; drop the 'arrives with db-16' promise from the CLI --append error and README (multi-input append filed separately); move ExportType to namespace squalor.DataBall; OnWideData always runs in InTransaction; PublicApi generator records required, base types/interfaces and operators, fixes the by-ref Nullable '??' bug, and also covers squalor.DataBall.Handlers.",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "725e9887-35f1-4404-98c9-45547e4ea912",
+          "kind": "",
+          "text": "**2026-10-13** — Verified outcome (2026-10-13): one way in (Open/OpenAsync with OpenOptions; ImportAsync path/list/session) and one way out (SaveAsync; ExportAsync with ExportOptions{Format, PartitionBy}). Removed Roll, Save, ExportToArchive, MergeOrAppend, ExportAsync(path, ExportType), ExportType.Ball, DetectFormat (internal) and the public ImportManager/ExportManager statics; ExportType moved to squalor.DataBall; the constructor refuses an existing databasePath. Rollback: CommitRow and wide Bounce use TakeSnapshot/RestoreSnapshot, wide EnsureColumn and OnWideData run in the write transaction, the pending row is restored; the Bounce expected-types copy and ForgetUnstoredColumnTypes are deleted. PublicApi.txt + PublicApi.Handlers.txt approved by the owner. Gate VERDICT: PASS; 992 library + 56 CLI tests, format clean. Relay: Sonnet high lead, three parallel Haiku xhigh workers (test ports x2, CLI/docs), Haiku xhigh rollback phase and scoped fix round; Opus medium reviewer and architect (2 rounds each, no blockers); Sonnet medium gate.",
+          "created_at": "2026-10-13T15:29:28Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1259,7 +1325,7 @@
         "importance": 3,
         "urgency": 2,
         "effort": 2,
-        "attempts": 0
+        "attempts": 1
       }
     },
     {
@@ -1851,6 +1917,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "fca0b872-80ca-4cd1-ae0a-8fffe9f2d2f8",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review (2026-10-13): ImportAsync(IReadOnlyList<string> inputs) with several .ball entries is a second multi-.ball route (sequential ImportFromBallCore with append, one RunImport). db-25's config-merge policy should cover it or refuse it.",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -2020,6 +2097,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "44609d8c-4644-477e-b738-538652bdc4c3",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review (2026-10-13): the committed how-it-works.html still names ImportManager/ExportManager/MergeOrAppend/writable: (9 mentions); the .md is current. Also check §4 says CommitRow and wide Bounce restore through the same TakeSnapshot/RestoreSnapshot as RunImport, and that the list form of ImportAsync and ExportOptions.PartitionBy are described where relevant.",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -2139,6 +2227,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "f678f05b-1b55-4f70-bff4-29256ce8238d",
+          "kind": "",
+          "text": "**2026-10-13** — Carried from db-16 close (2026-10-13), not done in db-16: (a) db-10: FileProbe public ctor does IO (consider a factory); DetectionReport.Winner can expose internal JsonFileType; IFormatHandler.Overlay returns a mutable shared Config; FileTypeInfo namespace squalor.DataBall.FileTypes clashes with the DataBall.FileTypes property; CLI import goes through ImportAsync, not Open, so it skips handler detection. (b) db-08: Query can run DML outside the write guard; ReadColumns/ReadRowsAsync run synchronously; ColumnData.ToDoubleArray. (c) db-09: whether SaveOptions.Link governs an in-place save and whether link paths may be relative; under requireConstant a wide Parquet append demotes while the same CSV append throws. (d) db-18: PublishSnapshotAsync is a separate writer; ImportAsync/CLI don't follow a .latest pointer. (e) db-07: explicit databasePath ignores EngineOptions.Store = File. (f) error messages still say 'writable: true' (DataBall.cs, DuckDbStore.cs, DataBall.Open.cs; pinned by SnapshotTests/BallNativeTests): reword to OpenOptions.Writable. (g) the try/InTransaction/catch/RestoreSnapshot block appears 4 times and AddRow/AddRows take no snapshot, so the store keeps its own Layout/metadata restore: a private RunWrite helper, route AddRow/AddRows through it, delete the store-side restores. (h) new DataBall(databasePath) refuses an existing 0-byte file (e.g. Path.GetTempFileName).",
+          "created_at": "2026-10-13T15:06:09Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -2150,6 +2249,47 @@
         ],
         "trees_literal": false,
         "findings": "db-16 scope cut (owner, 2026-10-13)",
+        "discovered_from": "db-16",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": null,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-32",
+      "title": "DataBall CLI import --append must take several inputs",
+      "short_title": "CLI multi-input append",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "65f7dfa2-4900-4a71-9d9b-ebf8f455a5c6",
+          "kind": "",
+          "text": "**2026-10-13** — From db-16 review (2026-10-13): the CLI rejected several inputs/glob/--recursive/--skip-bad with --append, promising db-16; db-16 dropped the promise. ImportAsync(inputs) does no expansion (owner decision), and routing plain inputs through ImportAsync while non-append uses Open would split detection (handlers vs extension). Decide whether append goes through the Open staging path (StageSourcesAsync) and how --skip-bad applies.",
+          "created_at": "2026-10-13T15:06:16Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-16 review (2026-10-13)",
         "discovered_from": "db-16",
         "cites": [],
         "key": "",

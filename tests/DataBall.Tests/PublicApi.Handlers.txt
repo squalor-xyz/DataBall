@@ -1,0 +1,23 @@
+squalor.DataBall.Handlers.CustomCsvHandler : sealed class : squalor.DataBall.IFormatHandler
+squalor.DataBall.Handlers.CustomCsvHandler..ctor()
+squalor.DataBall.Handlers.CustomCsvHandler.CanHandle(String path, Stream sniff) : Boolean
+squalor.DataBall.Handlers.CustomCsvHandler.DelegatesToGenericImport : Boolean { get }
+squalor.DataBall.Handlers.CustomCsvHandler.Parse(String path, Config schema, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.Handlers.CustomCsvHandler.Score(FileProbe probe) : DetectionScore
+squalor.DataBall.Handlers.LabHandlers : static class
+squalor.DataBall.Handlers.LabHandlers.static RegisterDefaults() : Void
+squalor.DataBall.Handlers.ProductionHandler : sealed class : squalor.DataBall.IFormatHandler
+squalor.DataBall.Handlers.ProductionHandler..ctor()
+squalor.DataBall.Handlers.ProductionHandler.CanHandle(String path, Stream sniff) : Boolean
+squalor.DataBall.Handlers.ProductionHandler.Parse(String path, Config schema, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.Handlers.ProductionHandler.Score(FileProbe probe) : DetectionScore
+squalor.DataBall.Handlers.StdfHandler : sealed class : squalor.DataBall.IFormatHandler
+squalor.DataBall.Handlers.StdfHandler..ctor()
+squalor.DataBall.Handlers.StdfHandler.CanHandle(String path, Stream sniff) : Boolean
+squalor.DataBall.Handlers.StdfHandler.Parse(String path, Config schema, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.Handlers.StdfHandler.Score(FileProbe probe) : DetectionScore
+squalor.DataBall.Handlers.TouchstoneHandler : sealed class : squalor.DataBall.IFormatHandler
+squalor.DataBall.Handlers.TouchstoneHandler..ctor()
+squalor.DataBall.Handlers.TouchstoneHandler.CanHandle(String path, Stream sniff) : Boolean
+squalor.DataBall.Handlers.TouchstoneHandler.Parse(String path, Config schema, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.Handlers.TouchstoneHandler.Score(FileProbe probe) : DetectionScore

@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -32,15 +33,18 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Initializes a new instance of the <see cref="DataBall"/> class, optionally loading configuration.
-        /// Pass <paramref name="databasePath"/> by name for a file-backed session
+        /// Pass <paramref name="databasePath"/> by name for a new file-backed session
         /// (<c>new DataBall(databasePath: "session.duckdb")</c>). The first string is always config JSON.
+        /// The constructor creates new sessions only: a <paramref name="databasePath"/> that already exists is refused;
+        /// open it with <c>Open(path, new OpenOptions { Writable = true })</c>.
         /// </summary>
         /// <param name="configPath">The path to the configuration JSON file, if any.</param>
         /// <param name="logger">Optional logger. Defaults to a no-op logger.</param>
         /// <param name="engine">Optional machine-local engine settings, never persisted in config.</param>
-        /// <param name="databasePath">Optional DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
+        /// <param name="databasePath">Optional new DuckDB file. Null or empty is <c>:memory:</c>. Filename <c>catalog.duckdb</c> is rejected.</param>
+        /// <exception cref="DataBallException"><paramref name="databasePath"/> already exists, or the configuration cannot be loaded.</exception>
         public DataBall(string? configPath = null, ILogger? logger = null, string? databasePath = null, EngineOptions? engine = null)
-            : this(string.IsNullOrEmpty(configPath) ? null : Config.LoadConfig(configPath), logger, databasePath, readOnly: false, native: false, engine,
+            : this(string.IsNullOrEmpty(configPath) ? null : Config.LoadConfig(configPath), logger, ThrowIfExisting(databasePath), readOnly: false, native: false, engine,
                 temporary: string.IsNullOrEmpty(databasePath) && engine?.ResolveStore(Array.Empty<string>()) == StoreMode.File)
         {
         }
@@ -99,6 +103,20 @@ namespace squalor.DataBall
         }
 
         internal string? StorePath => _store.StorePath;
+
+        /// <summary>The constructor creates new sessions only; an existing file is opened with <see cref="Open(string, OpenOptions?)"/>.</summary>
+        private static string? ThrowIfExisting(string? databasePath)
+        {
+            if (!string.IsNullOrEmpty(databasePath)
+                && !databasePath.Equals(":memory:", StringComparison.OrdinalIgnoreCase)
+                && File.Exists(databasePath))
+            {
+                throw new DataBallException(
+                    $"'{databasePath}' already exists; the constructor creates new sessions only. "
+                    + "Open it with Open(path, new OpenOptions { Writable = true })");
+            }
+            return databasePath;
+        }
 
         private static string? ValidateDatabasePath(string? databasePath)
         {
@@ -297,27 +315,30 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Merges or appends another DataBall, handling schema differences.
+        /// Imports the rows of another session, handling schema differences. The other session is only read; its sources follow its rows.
         /// </summary>
-        /// <param name="other">The DataBall to merge or append.</param>
-        /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
-        public void MergeOrAppend(DataBall other, bool append)
+        /// <param name="other">The session to import.</param>
+        /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c> (replace existing data).</param>
+        /// <returns>A completed task after the import finishes.</returns>
+        /// <exception cref="DataBallException">Thrown when this session is read-only or the import fails.</exception>
+        public Task ImportAsync(DataBall other, ImportOptions? options = null)
         {
             ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfPendingRow();
             ArgumentNullException.ThrowIfNull(other);
             ObjectDisposedException.ThrowIf(other._disposed, other);
+            var append = options?.Append ?? false;
 
-            _logger.LogDebug("Merging or appending DataBall");
+            _logger.LogDebug("Importing another DataBall, append={Append}", append);
             try
             {
                 if (!other.Store.DataTableExists())
                 {
                     if (!append || !_store.DataTableExists() || _store.RowCount() == 0)
                         RunImport(append: false, () => _store.DropDataRelation());
-                    _logger.LogDebug("Merge/append completed");
-                    return;
+                    _logger.LogDebug("Import of DataBall completed");
+                    return Task.CompletedTask;
                 }
 
                 var dir = Path.Combine(Path.GetTempPath(), "databall-merge-" + Guid.NewGuid().ToString("N"));
@@ -335,11 +356,12 @@ namespace squalor.DataBall
                     if (Directory.Exists(dir))
                         Directory.Delete(dir, true);
                 }
-                _logger.LogDebug("Merge/append completed");
+                _logger.LogDebug("Import of DataBall completed");
+                return Task.CompletedTask;
             }
             catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
             {
-                _logger.LogError(ex, "Merge/append failed");
+                _logger.LogError(ex, "Import of DataBall failed");
                 throw new DataBallException("Failed to merge or append DataBall", ex);
             }
         }
@@ -389,8 +411,7 @@ namespace squalor.DataBall
                 }
                 else
                 {
-                    var expectedSnap = new Dictionary<string, Type>(_expectedColumnTypes, StringComparer.OrdinalIgnoreCase);
-                    var learnedSnap = new HashSet<string>(_learnedColumnNames, StringComparer.OrdinalIgnoreCase);
+                    var snapshot = TakeSnapshot();
                     try
                     {
                         _store.InTransaction(() =>
@@ -402,12 +423,7 @@ namespace squalor.DataBall
                     }
                     catch
                     {
-                        _store.ReloadMetadata();
-                        _expectedColumnTypes.Clear();
-                        foreach (var pair in expectedSnap)
-                            _expectedColumnTypes[pair.Key] = pair.Value;
-                        _learnedColumnNames.Clear();
-                        _learnedColumnNames.UnionWith(learnedSnap);
+                        RestoreSnapshot(snapshot);
                         throw;
                     }
                 }
@@ -444,67 +460,99 @@ namespace squalor.DataBall
         /// <summary>
         /// Imports data from a file, detecting the format by extension.
         /// Column types come from config or <c>AddColumn</c>. Untyped CSV integers stay DuckDB BIGINT / <c>long</c>.
+        /// Equivalent to <see cref="ImportAsync(IReadOnlyList{string}, ImportOptions?, CancellationToken)"/> with one input.
         /// </summary>
         /// <param name="path">The path of the file to import.</param>
         /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c>.</param>
+        /// <param name="cancellationToken">Cancels the import; the session is left as it was.</param>
         /// <returns>A completed task after the import finishes.</returns>
         /// <exception cref="DataBallException">Thrown when the path is missing, the format is unknown, or import fails.</exception>
-        public Task ImportAsync(string path, ImportOptions? options = null) => ImportCoreAsync(path, options, null);
+        public Task ImportAsync(string path, ImportOptions? options = null, CancellationToken cancellationToken = default) =>
+            ImportCoreAsync(new[] { path }, options, cancellationToken);
 
         /// <summary>
-        /// <see cref="ImportAsync"/> with the <c>type</c> the <c>source</c> table records. <see cref="Open(string, string?, bool, EngineOptions?)"/> passes
-        /// the winning handler's name or the built-in path of its detection report; the public call derives it from the format.
+        /// Imports every file of <paramref name="inputs"/> into the session in one transaction, each detected by extension as for a single
+        /// path. With <see cref="ImportOptions.Append"/> the rows are added to the session's; without it the first input replaces them
+        /// and the others are added to it. If any input is missing, of an unknown format or fails to import, none of them lands.
+        /// An input is one file or one hive Parquet directory; directories of files and globs are expanded by <c>Open</c> only.
         /// </summary>
-        internal Task ImportCoreAsync(string path, ImportOptions? options, string? sourceType)
+        /// <param name="inputs">The files to import, in the order they are added.</param>
+        /// <param name="options">Optional import settings. <see cref="ImportOptions.Append"/> defaults to <c>false</c>.</param>
+        /// <param name="cancellationToken">Cancels the import; the session is left as it was.</param>
+        /// <returns>A completed task after the import finishes.</returns>
+        /// <exception cref="DataBallException">Thrown when there is no input, an input is missing or of an unknown format, or the import fails.</exception>
+        public Task ImportAsync(IReadOnlyList<string> inputs, ImportOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (inputs is null || inputs.Count == 0)
+                throw new DataBallException("No input to import");
+            return ImportCoreAsync(inputs, options, cancellationToken);
+        }
+
+        /// <summary>The body of both path forms of <see cref="ImportAsync(IReadOnlyList{string}, ImportOptions?, CancellationToken)"/>.</summary>
+        internal Task ImportCoreAsync(IReadOnlyList<string> paths, ImportOptions? options, CancellationToken cancellationToken)
         {
             ThrowIfReadOnly();
             ThrowIfDisposed();
             ThrowIfPendingRow();
-            if (string.IsNullOrWhiteSpace(path))
-                throw new DataBallException("Path is required");
+            cancellationToken.ThrowIfCancellationRequested();
 
-            var format = DetectFormat(path);
-            if (!File.Exists(path) && !Directory.Exists(path))
-                throw new DataBallException($"File not found: {path}");
+            // Every input is checked before the first write.
+            var inputs = new List<(string Path, PathFormat Format)>(paths.Count);
+            foreach (var path in paths)
+            {
+                if (string.IsNullOrWhiteSpace(path))
+                    throw new DataBallException("Path is required");
+                var format = DetectFormat(path);
+                if (!File.Exists(path) && !Directory.Exists(path))
+                    throw new DataBallException($"File not found: {path}");
+                inputs.Add((path, format));
+            }
 
             options ??= new ImportOptions();
             var append = options.Append;
-            _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, append);
             try
             {
                 // Hashing can fail on an unreadable file; it runs before the first write.
-                var source = format switch
+                var sources = inputs.Select(input => input.Format switch
                 {
-                    ExportType.Csv => SourceFile.Describe(path, sourceType ?? nameof(BuiltInPath.CsvImport)),
-                    ExportType.Parquet => SourceFile.Describe(path, sourceType ?? nameof(BuiltInPath.ParquetView)),
+                    PathFormat.Csv => SourceFile.Describe(input.Path, nameof(BuiltInPath.CsvImport)),
+                    PathFormat.Parquet => SourceFile.Describe(input.Path, nameof(BuiltInPath.ParquetView)),
                     _ => null
-                };
+                }).ToList();
 
                 void Import()
                 {
-                    switch (format)
+                    for (var i = 0; i < inputs.Count; i++)
                     {
-                        case ExportType.Csv:
-                            ImportCsvWithSchema(path, append, source);
-                            break;
-                        case ExportType.Parquet:
-                            ImportParquetWithMetadata(path, append, source);
-                            break;
-                        case ExportType.Archive:
-                            ImportManager.ImportFromArchiveCore(this, path, append, sourceType);
-                            break;
-                        case ExportType.Ball:
-                            ImportManager.ImportFromBallCore(this, path, append);
-                            break;
-                        default:
-                            throw new DataBallException($"Unknown import format for '{path}'");
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var (path, format) = inputs[i];
+                        // Only the first input may replace; the others are added to it.
+                        var appendThis = i == 0 ? append : true;
+                        _logger.LogInformation("Importing {Path} as {Format}, append={Append}", path, format, appendThis);
+                        switch (format)
+                        {
+                            case PathFormat.Csv:
+                                ImportCsvWithSchema(path, appendThis, sources[i]);
+                                break;
+                            case PathFormat.Parquet:
+                                ImportParquetWithMetadata(path, appendThis, sources[i]);
+                                break;
+                            case PathFormat.Archive:
+                                ImportManager.ImportFromArchiveCore(this, path, appendThis);
+                                break;
+                            case PathFormat.Ball:
+                                ImportManager.ImportFromBallCore(this, path, appendThis);
+                                break;
+                            default:
+                                throw new DataBallException($"Unknown import format for '{path}'");
+                        }
                     }
                 }
 
                 RunImport(append, Import);
                 return Task.CompletedTask;
             }
-            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
+            catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException and not OperationCanceledException)
             {
                 _logger.LogError(ex, "Import failed");
                 throw new DataBallException("Failed to import", ex);
@@ -512,21 +560,34 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Exports data in the specified format.
+        /// Exports the session's rows as one file in the format <see cref="ExportOptions.Format"/> names. A native <c>.ball</c> is written
+        /// with <see cref="SaveAsync"/>.
         /// </summary>
         /// <param name="path">The destination path.</param>
-        /// <param name="type">The export format.</param>
+        /// <param name="options">The export settings; <see cref="ExportOptions.Format"/> is required, <see cref="ExportOptions.PartitionBy"/> writes hive-partitioned Parquet.</param>
         /// <returns>A completed task after the export finishes.</returns>
         /// <exception cref="DataBallException">Thrown when export fails.</exception>
-        public Task ExportAsync(string path, ExportType type)
+        public Task ExportAsync(string path, ExportOptions options)
         {
-            if (type == ExportType.Ball)
-                return SaveCore(path, link: false);
             ThrowIfDisposed();
+            ArgumentNullException.ThrowIfNull(options);
             ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
 
+            var type = options.Format;
+            var partitionBy = options.PartitionBy;
+            if (partitionBy is not null && type != ExportType.Parquet)
+                throw new DataBallException($"ExportOptions.PartitionBy is valid only with ExportType.Parquet, not {type}");
+            // A projection without a partition column would fail inside DuckDB after the target folder was cleared; refuse it first.
+            if (partitionBy is { Count: > 0 } && _currentFilter?.Columns is { } projection)
+            {
+                foreach (var column in partitionBy)
+                {
+                    if (!projection.Any(p => p.Equals(column, StringComparison.OrdinalIgnoreCase)))
+                        throw new DataBallException($"Partition column '{column}' is not in the filtered columns");
+                }
+            }
             _logger.LogInformation("Exporting to {Path} as {Type}", path, type);
             try
             {
@@ -535,8 +596,14 @@ namespace squalor.DataBall
                     case ExportType.Csv:
                         _store.ExportCsv(path, FilteredSelectOrNull());
                         break;
-                    case ExportType.Parquet:
+                    case ExportType.Parquet when partitionBy is null:
                         _store.ExportParquet(path, FilteredSelectOrNull());
+                        break;
+                    case ExportType.Parquet when partitionBy.Count == 0:
+                        _store.ExportParquet(Path.Combine(path, "data.parquet"), FilteredSelectOrNull());
+                        break;
+                    case ExportType.Parquet:
+                        _store.ExportPartitionedParquet(path, partitionBy, FilteredSelectOrNull());
                         break;
                     case ExportType.Archive:
                         ExportManager.ExportToArchive(this, path);
@@ -567,7 +634,7 @@ namespace squalor.DataBall
         /// <c>&lt;Name&gt;.&lt;n&gt;.ball</c> in <see cref="SnapshotOptions.Directory"/>, then the pointer
         /// <c>&lt;Name&gt;.latest</c> is replaced atomically to name it, then older generations beyond
         /// <see cref="SnapshotOptions.Keep"/> are pruned when they can be deleted. Readers call
-        /// <see cref="Open(string, string?, bool, EngineOptions?)"/> on the pointer.
+        /// <see cref="Open(string, OpenOptions?)"/> on the pointer.
         /// </summary>
         /// <remarks>
         /// The snapshot holds committed data only: a pending row is not in it. Capture writes pause while the data is
@@ -644,13 +711,15 @@ namespace squalor.DataBall
             }
         }
 
+        private const string BallFormatName = "Ball";
+
         private Task SaveCore(string path, bool link)
         {
             ThrowIfDisposed();
             ThrowIfPendingRow();
             if (string.IsNullOrWhiteSpace(path))
                 throw new DataBallException("Path is required");
-            _logger.LogInformation("Exporting to {Path} as {Type}", path, ExportType.Ball);
+            _logger.LogInformation("Exporting to {Path} as {Type}", path, BallFormatName);
             try
             {
                 _store.ThrowIfConnectionBusy();
@@ -662,42 +731,8 @@ namespace squalor.DataBall
             catch (Exception ex) when (ex is not DataBallException and not ObjectDisposedException)
             {
                 _logger.LogError(ex, "Export failed");
-                throw new DataBallException($"Failed to export to {ExportType.Ball}", ex);
+                throw new DataBallException($"Failed to export to {BallFormatName}", ex);
             }
-        }
-
-        /// <summary>
-        /// Exports data in the specified format.
-        /// </summary>
-        /// <param name="type">The export format.</param>
-        /// <param name="path">The destination path.</param>
-        /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
-        public void Roll(ExportType type, string path)
-        {
-            ThrowIfDisposed();
-            ExportAsync(path, type).GetAwaiter().GetResult();
-        }
-
-        /// <summary>
-        /// Exports the data to an archive (ZIP, TAR.GZ, or TAR.XZ).
-        /// </summary>
-        /// <param name="path">The path to save the archive.</param>
-        /// <exception cref="DataBallException">Thrown when the export operation fails.</exception>
-        public void ExportToArchive(string path)
-        {
-            ThrowIfDisposed();
-            ExportAsync(path, ExportType.Archive).GetAwaiter().GetResult();
-        }
-
-        /// <summary>
-        /// Saves the whole session to the specified path as a native DuckDB .ball file.
-        /// </summary>
-        /// <param name="path">The path to save the .ball file.</param>
-        /// <exception cref="DataBallException">Thrown when the save operation fails.</exception>
-        public void Save(string path)
-        {
-            ThrowIfDisposed();
-            SaveAsync(path).GetAwaiter().GetResult();
         }
 
         /// <summary>
@@ -829,13 +864,13 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Detects import/export format from a path. Directories are Parquet (hive).
+        /// Detects the import format of a path. Directories are Parquet (hive).
         /// Compound suffixes (<c>.tar.gz</c>, <c>.tar.xz</c>) are matched before short ones.
         /// </summary>
-        public static ExportType DetectFormat(string path)
+        internal static PathFormat DetectFormat(string path)
         {
             if (Directory.Exists(path))
-                return ExportType.Parquet;
+                return PathFormat.Parquet;
 
             var fileName = Path.GetFileName(path);
             if (string.IsNullOrEmpty(fileName))
@@ -844,13 +879,13 @@ namespace squalor.DataBall
             if (EndsWithSuffix(fileName, ".tar.gz") || EndsWithSuffix(fileName, ".tgz")
                 || EndsWithSuffix(fileName, ".tar.xz") || EndsWithSuffix(fileName, ".txz")
                 || EndsWithSuffix(fileName, ".tar") || EndsWithSuffix(fileName, ".zip"))
-                return ExportType.Archive;
+                return PathFormat.Archive;
             if (EndsWithSuffix(fileName, ".ball"))
-                return ExportType.Ball;
+                return PathFormat.Ball;
             if (EndsWithSuffix(fileName, ".csv"))
-                return ExportType.Csv;
+                return PathFormat.Csv;
             if (EndsWithSuffix(fileName, ".parquet"))
-                return ExportType.Parquet;
+                return PathFormat.Parquet;
             throw new DataBallException($"Unknown import format for '{path}'");
         }
 
@@ -1226,7 +1261,7 @@ namespace squalor.DataBall
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Could not restore session state after a failed import");
+                _logger.LogError(ex, "Could not restore session state after a failed write");
             }
         }
 
@@ -1244,7 +1279,7 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Runs a wide-table operation. On a layout session it runs inside one transaction: the
+        /// Runs a wide-table operation inside one transaction. On a layout session the
         /// layout is materialized back into one wide <c>"data"</c> table (row-key order), the
         /// operation runs unchanged, and the result is re-split (or nothing remains when it
         /// dropped <c>"data"</c>). The row key <c>_row</c> is regenerated. On failure the store
@@ -1254,11 +1289,7 @@ namespace squalor.DataBall
         {
             if (!HasLayoutConfig)
             {
-                if (!_store.IsViewBacked)
-                {
-                    wideOperation();
-                    return;
-                }
+                // One transaction whether or not "data" is a view: a failure leaves no half-created table behind.
                 _store.InTransaction(() =>
                 {
                     _store.MaterializeView();

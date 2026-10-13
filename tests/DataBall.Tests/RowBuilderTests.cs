@@ -259,7 +259,7 @@ namespace squalor.DataBall.Tests
                     db.ModifyField("Name", "Bob");
                 }
 
-                using var reopened = new DataBall(databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true });
                 var names = reopened.Query("SELECT Name FROM data").Select(r => r["Name"]?.ToString()).ToArray();
                 Assert.Equal(new[] { "Alice" }, names);
             }

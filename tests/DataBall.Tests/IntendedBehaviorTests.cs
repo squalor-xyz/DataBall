@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
-using squalor.DataBall.Export;
 using squalor.DataBall.Import;
 using Xunit;
 
@@ -53,7 +52,7 @@ namespace squalor.DataBall.Tests
 
         // Config Age=int must stay INTEGER after CSV import, not DuckDB's inferred BIGINT.
         [Fact]
-        public void CsvImport_WithConfigAgeInt_ValuesAreInt32()
+        public async Task CsvImport_WithConfigAgeInt_ValuesAreInt32()
         {
             var dir = TempDir();
             try
@@ -64,7 +63,7 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
 
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -79,7 +78,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void CsvImport_WithConfigBoolFloatDateTime_ValuesAreExactClrTypes()
+        public async Task CsvImport_WithConfigBoolFloatDateTime_ValuesAreExactClrTypes()
         {
             var dir = TempDir();
             try
@@ -90,7 +89,7 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(csv, "Flag,Score,When\ntrue,1.25,2020-05-06 07:08:09\n");
 
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var row = Assert.Single(db.Query("SELECT Flag, Score, \"When\" FROM data"));
                 Assert.True(Assert.IsType<bool>(row["Flag"]));
                 Assert.Equal(1.25f, Assert.IsType<float>(row["Score"]));
@@ -130,7 +129,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ArchiveImport_ZipCsvWithConfigAgeInt_ValuesAreInt32()
+        public async Task ArchiveImport_ZipCsvWithConfigAgeInt_ValuesAreInt32()
         {
             var dir = TempDir();
             try
@@ -144,7 +143,7 @@ namespace squalor.DataBall.Tests
                     archive.CreateEntryFromFile(csv, "people.csv");
 
                 using var db = new DataBall(config);
-                ImportManager.ImportFromArchive(db, zip, append: false);
+                await db.ImportAsync(zip, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -159,7 +158,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromCsv_AppendFalse_ReplacesRows()
+        public async Task ImportFromCsv_AppendFalse_ReplacesRows()
         {
             var dir = TempDir();
             try
@@ -169,8 +168,8 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(first, "Name\nAlice\n");
                 File.WriteAllText(second, "Name\nBob\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, first, append: false);
-                ImportManager.ImportFromCsv(db, second, append: false);
+                await db.ImportAsync(first, new ImportOptions { Append = false });
+                await db.ImportAsync(second, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name FROM data");
                 var names = rows.Select(r => r["Name"]?.ToString()).ToArray();
                 Assert.Equal(new[] { "Bob" }, names);
@@ -182,7 +181,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromCsv_AppendTrue_Concatenates()
+        public async Task ImportFromCsv_AppendTrue_Concatenates()
         {
             var dir = TempDir();
             try
@@ -192,8 +191,8 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(first, "Name\nAlice\n");
                 File.WriteAllText(second, "Name\nBob\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, first, append: false);
-                ImportManager.ImportFromCsv(db, second, append: true);
+                await db.ImportAsync(first, new ImportOptions { Append = false });
+                await db.ImportAsync(second, new ImportOptions { Append = true });
                 var rows = db.Query("SELECT Name FROM data ORDER BY Name");
                 var names = rows.Select(r => r["Name"]?.ToString()).ToArray();
                 Assert.Equal(new[] { "Alice", "Bob" }, names);
@@ -205,7 +204,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void CsvImport_WithoutConfig_AgeValuesAreInt64()
+        public async Task CsvImport_WithoutConfig_AgeValuesAreInt64()
         {
             var dir = TempDir();
             try
@@ -213,7 +212,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "people.csv");
                 File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
@@ -247,7 +246,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void CsvImport_WithConfigAgeLong_SmallValuesStayInt64()
+        public async Task CsvImport_WithConfigAgeLong_SmallValuesStayInt64()
         {
             var dir = TempDir();
             try
@@ -257,7 +256,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "people.csv");
                 File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal(30L, Assert.IsType<long>(rows[0]["Age"]));
@@ -270,7 +269,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void CsvImport_PartialConfig_UntypedAgeStaysInt64()
+        public async Task CsvImport_PartialConfig_UntypedAgeStaysInt64()
         {
             var dir = TempDir();
             try
@@ -280,7 +279,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "people.csv");
                 File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall(config);
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT Name, Age FROM data ORDER BY Name");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -304,7 +303,7 @@ namespace squalor.DataBall.Tests
                 {
                     db.AddColumn("Name", new[] { "Alice" });
                     db.AddColumn<int>("Age", new[] { 30 });
-                    await db.ExportAsync(path, ExportType.Parquet);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
                 }
 
                 using var imported = new DataBall();
@@ -348,7 +347,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportCsv_HasHeaderAndDataRows()
+        public async Task ExportCsv_HasHeaderAndDataRows()
         {
             var dir = TempDir();
             try
@@ -357,7 +356,7 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall();
                 db.AddColumn("Name", new[] { "Alice", "Bob" });
                 db.AddColumn<int>("Age", new[] { 30, 25 });
-                db.Roll(ExportType.Csv, path);
+                await db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv });
 
                 var lines = File.ReadAllLines(path);
                 Assert.Equal("Name,Age", lines[0]);
@@ -372,7 +371,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportToArchive_ZipContainsDataCsvWithRows()
+        public async Task ExportToArchive_ZipContainsDataCsvWithRows()
         {
             var dir = TempDir();
             try
@@ -381,7 +380,7 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall();
                 db.AddColumn("Name", new[] { "Alice" });
                 db.AddColumn<int>("Age", new[] { 30 });
-                db.ExportToArchive(path);
+                await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
 
                 using var zip = ZipFile.OpenRead(path);
                 var entry = Assert.Single(zip.Entries, e => e.FullName.Replace('\\', '/') == "data.csv");
@@ -468,7 +467,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Roll_IsExport_NotRowCommit()
+        public async Task Roll_IsExport_NotRowCommit()
         {
             var dir = TempDir();
             try
@@ -478,7 +477,7 @@ namespace squalor.DataBall.Tests
                 db.InitializeRow();
                 db.ModifyField("Name", "Bob");
                 var path = Path.Combine(dir, "out.csv");
-                var ex = Assert.Throws<DataBallException>(() => db.Roll(ExportType.Csv, path));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv }));
                 Assert.Contains("pending row", ex.Message, StringComparison.OrdinalIgnoreCase);
                 var rows = db.Query("SELECT Name FROM data");
                 Assert.Single(rows);

@@ -5,7 +5,6 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
-using squalor.DataBall.Export;
 using Xunit;
 
 namespace squalor.DataBall.Tests
@@ -184,8 +183,8 @@ namespace squalor.DataBall.Tests
 
                 var wideCsv = Path.Combine(dir, "wide.csv");
                 var splitCsv = Path.Combine(dir, "split.csv");
-                await wide.ExportAsync(wideCsv, ExportType.Csv);
-                await split.ExportAsync(splitCsv, ExportType.Csv);
+                await wide.ExportAsync(wideCsv, new ExportOptions { Format = ExportType.Csv });
+                await split.ExportAsync(splitCsv, new ExportOptions { Format = ExportType.Csv });
                 var wideLines = File.ReadAllLines(wideCsv);
                 var splitLines = File.ReadAllLines(splitCsv);
                 Assert.Equal(wideLines[0], splitLines[0]);
@@ -194,12 +193,12 @@ namespace squalor.DataBall.Tests
 
                 split.ApplyFilter(filter);
                 var filteredCsv = Path.Combine(dir, "filtered.csv");
-                await split.ExportAsync(filteredCsv, ExportType.Csv);
+                await split.ExportAsync(filteredCsv, new ExportOptions { Format = ExportType.Csv });
                 Assert.Equal(28, File.ReadAllLines(filteredCsv).Length);
 
                 var hive = Path.Combine(dir, "hive");
                 split.ApplyFilter(null);
-                await split.ExportAsync(Path.Combine(dir, "split.parquet"), ExportType.Parquet);
+                await split.ExportAsync(Path.Combine(dir, "split.parquet"), new ExportOptions { Format = ExportType.Parquet });
                 using var back = new DataBall();
                 await back.ImportAsync(Path.Combine(dir, "split.parquet"));
                 Assert.Equal(81, Count(back, "data"));
@@ -258,20 +257,20 @@ namespace squalor.DataBall.Tests
                 using (var db = new DataBall(TablesConfig(), databasePath: path))
                     await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
 
-                using (var reopened = new DataBall(TablesConfig(), databasePath: path))
+                using (var reopened = DataBall.Open(path, new OpenOptions { Writable = true, SchemaPath = TablesConfig() }))
                 {
                     Assert.Equal("VIEW", TableType(reopened, "data"));
                     Assert.Equal(81, Count(reopened, "data"));
                     Assert.Equal(9, Count(reopened, "setup"));
                 }
 
-                using (var stored = new DataBall(databasePath: path))
+                using (var stored = DataBall.Open(path, new OpenOptions { Writable = true }))
                 {
                     Assert.Equal("VIEW", TableType(stored, "data"));
                     Assert.Equal(81, Count(stored, "data"));
                 }
 
-                using var again = new DataBall(TablesConfig(), databasePath: path);
+                using var again = DataBall.Open(path, new OpenOptions { Writable = true, SchemaPath = TablesConfig() });
                 Assert.Equal(81, Count(again, "data"));
             }
             finally
@@ -741,11 +740,11 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task ImportManager_ImportFromCsv_Append_OnLayout_Routes()
+        public async Task ImportAsync_CsvAppend_OnLayout_RoutesToTables()
         {
             using var db = new DataBall(TablesConfig());
             await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-            Import.ImportManager.ImportFromCsv(db, Fixture("semiconductor-sweep.csv"), append: true);
+            await db.ImportAsync(Fixture("semiconductor-sweep.csv"), new ImportOptions { Append = true });
             Assert.Equal(162, Count(db, "data"));
             Assert.Equal(9, Count(db, "setup"));
             Assert.Equal("VIEW", TableType(db, "data"));
@@ -959,7 +958,7 @@ namespace squalor.DataBall.Tests
                     Assert.Contains("do not determine", FullMessage(ex), StringComparison.OrdinalIgnoreCase);
                     AssertRestored(db);
                 }
-                using var reopened = new DataBall(databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true });
                 AssertRestored(reopened);
             }
             finally { Directory.Delete(dir, true); }
@@ -1184,7 +1183,7 @@ namespace squalor.DataBall.Tests
                     new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["EVM"] = "not-a-number", ["Humidity"] = 40.0 },
                 });
                 Assert.Equal("VARCHAR", other.Query("SELECT typeof(EVM) AS t FROM data")[0]["t"]);
-                var ex = Assert.Throws<DataBallException>(() => db.MergeOrAppend(other, append: true));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(other, new ImportOptions { Append = true }));
                 Assert.Contains("'EVM'", FullMessage(ex), StringComparison.Ordinal);
                 Assert.Contains("DOUBLE", FullMessage(ex), StringComparison.Ordinal);
                 Assert.Contains("VARCHAR", FullMessage(ex), StringComparison.Ordinal);
@@ -1223,7 +1222,7 @@ namespace squalor.DataBall.Tests
                     await db.SaveAsync(ball);
                 }
 
-                using var reopened = DataBall.Open(ball, config);
+                using var reopened = DataBall.Open(ball, new OpenOptions { SchemaPath = config });
                 Assert.Equal("VIEW", TableType(reopened, "data"));
                 Assert.Contains("env", BaseTables(reopened));
                 Assert.Equal(2, Count(reopened, "env"));
@@ -1251,7 +1250,7 @@ namespace squalor.DataBall.Tests
                     db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Humidity"] = 40.0 });
                 }
 
-                using var reopened = new DataBall(config, databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true, SchemaPath = config });
                 Assert.NotNull(reopened.Layout);
                 Assert.Equal(2, Count(reopened, "env"));
                 Assert.Equal(82, Count(reopened, "data"));
@@ -1370,7 +1369,7 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall(config);
                 await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
 
-                db.MergeOrAppend(other, append: true);
+                await db.ImportAsync(other, new ImportOptions { Append = true });
 
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Contains("env", BaseTables(db));
@@ -1421,7 +1420,7 @@ namespace squalor.DataBall.Tests
             await other.ImportAsync(Fixture("semiconductor-sweep.csv"));
             using var db = new DataBall(TablesConfig());
             await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-            db.MergeOrAppend(other, append: true);
+            await db.ImportAsync(other, new ImportOptions { Append = true });
             Assert.Equal(162, Count(db, "data"));
             Assert.Equal(9, Count(db, "setup"));
         }
@@ -1433,7 +1432,7 @@ namespace squalor.DataBall.Tests
             await other.ImportAsync(Fixture("semiconductor-sweep.csv"));
             using var db = new DataBall(TablesConfig());
             await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
-            db.MergeOrAppend(other, append: false);
+            await db.ImportAsync(other, new ImportOptions { Append = false });
             Assert.Equal("VIEW", TableType(db, "data"));
             Assert.Equal(81, Count(db, "data"));
             Assert.NotNull(db.Layout);
@@ -1452,7 +1451,7 @@ namespace squalor.DataBall.Tests
                     db.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 1L, ["Note"] = "x" });
                 }
 
-                using var reopened = new DataBall(TablesConfig(), databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true, SchemaPath = TablesConfig() });
                 Assert.Equal(82, Count(reopened, "data"));
                 Assert.Contains("Note", ViewColumns(reopened));
                 reopened.AddRow(new Dictionary<string, object?> { ["stimulusGrp"] = 99L, ["sweep"] = 2L, ["Note"] = "y" });
@@ -1650,7 +1649,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task ImportManager_ImportFromBall_And_Archive_Replace_OnLayoutSession_Work()
+        public async Task ImportAsync_BallAndArchive_Replace_OnLayoutSession_Work()
         {
             var dir = TempDir();
             try
@@ -1661,25 +1660,25 @@ namespace squalor.DataBall.Tests
                 {
                     await src.ImportAsync(Fixture("semiconductor-sweep.csv"));
                     await src.SaveAsync(ball);
-                    await src.ExportAsync(zipPath, ExportType.Archive);
+                    await src.ExportAsync(zipPath, new ExportOptions { Format = ExportType.Archive });
                 }
 
                 using var db = new DataBall(TablesConfig());
                 await db.ImportAsync(Fixture("semiconductor-sweep.csv"));
                 db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
 
-                Import.ImportManager.ImportFromBall(db, ball, append: false);
+                await db.ImportAsync(ball, new ImportOptions { Append = false });
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(81, Count(db, "data"));
                 Assert.Equal(FixtureTables, BaseTables(db));
 
                 db.AddRows(new[] { Point(99, 1, 25.0, 3.3, -50.0) });
-                Import.ImportManager.ImportFromArchive(db, zipPath, append: false);
+                await db.ImportAsync(zipPath, new ImportOptions { Append = false });
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(81, Count(db, "data"));
 
                 using var empty = new DataBall(TablesConfig());
-                Import.ImportManager.ImportFromBall(empty, ball, append: false);
+                await empty.ImportAsync(ball, new ImportOptions { Append = false });
                 Assert.Equal("VIEW", TableType(empty, "data"));
                 Assert.NotNull(empty.Layout);
             }

@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 using squalor.DataBall;
-using squalor.DataBall.Export;
 
 namespace squalor.DataBall.Cli;
 
@@ -20,7 +19,7 @@ internal static class CliFormat
         ".csv",
     ];
 
-    internal static ExportType DetectExportType(string path)
+    internal static PathFormat DetectFormat(string path)
     {
         try
         {
@@ -32,14 +31,14 @@ internal static class CliFormat
         }
     }
 
-    internal static ExportType ParseFormat(string value)
+    internal static PathFormat ParseFormat(string value)
     {
         return value.Trim().ToLowerInvariant() switch
         {
-            "csv" => ExportType.Csv,
-            "parquet" => ExportType.Parquet,
-            "ball" => ExportType.Ball,
-            "archive" => ExportType.Archive,
+            "csv" => PathFormat.Csv,
+            "parquet" => PathFormat.Parquet,
+            "ball" => PathFormat.Ball,
+            "archive" => PathFormat.Archive,
             _ => throw new DataBallException($"Unknown format '{value}'. Use csv, parquet, ball, or archive."),
         };
     }

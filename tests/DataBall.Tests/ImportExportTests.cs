@@ -15,21 +15,16 @@ namespace squalor.DataBall.Tests
     public class ImportExportTests
     {
         [Theory]
-        [InlineData(false, false, false)]
-        [InlineData(true, false, false)]
-        [InlineData(false, true, false)]
-        [InlineData(true, true, false)]
-        [InlineData(false, false, true)]
-        [InlineData(true, false, true)]
-        [InlineData(false, true, true)]
-        [InlineData(true, true, true)]
-        public async Task ImportAsync_Parquet_ConfigMetadataFields_InMeta(bool hive, bool layout, bool manager)
+        [InlineData(false, false)]
+        [InlineData(true, false)]
+        [InlineData(false, true)]
+        [InlineData(true, true)]
+        public async Task ImportAsync_Parquet_ConfigMetadataFields_InMeta(bool hive, bool layout)
         {
             using var f = new ParquetFixture();
             using var db = new DataBall(f.Config(metadata: true, layout: layout));
             var path = hive ? f.Hive : f.Source;
-            if (manager) await ImportManager.ImportFromParquet(db, path, false);
-            else await db.ImportAsync(path);
+            await db.ImportAsync(path);
             Assert.Equal("007", db.Metadata["Site"]);
             Assert.DoesNotContain(db.Store.GetColumns(), c => c.Name == "Site");
             Assert.Equal(new[] { 1, 2 }, ParquetViewTests.Ids(db));
@@ -57,13 +52,13 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_DoesNotExtractConfigMetadata()
+        public async Task ImportAsync_FromParquetSession_Replace_DoesNotExtractConfigMetadata()
         {
             using var f = new ParquetFixture();
             using var source = DataBall.Open(f.Source);
             ParquetViewTests.AssertView(source);
             using var destination = new DataBall(f.Config(metadata: true));
-            destination.MergeOrAppend(source, append: false);
+            await destination.ImportAsync(source, new ImportOptions { Append = false });
             ParquetViewTests.AssertTable(destination);
             Assert.False(destination.Metadata.ContainsKey("Site"));
             Assert.Equal(new[] { "007", "007" }, destination.Query("SELECT Site FROM data ORDER BY Id").Select(r => r["Site"]));
@@ -72,7 +67,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportToArchive_FailsMidWrite_LeavesExistingFileIntact()
+        public async Task ExportToArchive_FailsMidWrite_LeavesExistingFileIntact()
         {
             var dir = TempDir();
             var previous = ExportManager.AfterArchiveFileCreatedForTests;
@@ -85,7 +80,7 @@ namespace squalor.DataBall.Tests
                 var before = SHA256.HashData(payload);
                 using var db = new DataBall();
                 db.AddColumn("Name", new[] { "Alice" });
-                Assert.ThrowsAny<Exception>(() => db.ExportToArchive(path));
+                await Assert.ThrowsAnyAsync<Exception>(() => db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive }));
                 Assert.True(File.Exists(path));
                 Assert.Equal(before, SHA256.HashData(File.ReadAllBytes(path)));
             }
@@ -104,7 +99,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.csv");
                 using (var db = Sample())
-                    await db.ExportAsync(path, ExportType.Csv);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv });
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -124,7 +119,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.parquet");
                 using (var db = Sample())
-                    await db.ExportAsync(path, ExportType.Parquet);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -146,7 +141,7 @@ namespace squalor.DataBall.Tests
                 using (var db = Sample())
                 {
                     db.SetMetadata("Operator", "Ada");
-                    await db.ExportAsync(path, ExportType.Ball);
+                    await db.SaveAsync(path);
                 }
 
                 Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
@@ -170,7 +165,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.ball");
                 using (var db = Sample())
-                    await db.ExportAsync(path, ExportType.Ball);
+                    await db.SaveAsync(path);
 
                 Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
                 using (var stored = DataBall.Open(path))
@@ -266,7 +261,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.zip");
                 using (var db = Sample())
-                    await db.ExportAsync(path, ExportType.Archive);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -286,7 +281,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.tar.gz");
                 using (var db = Sample())
-                    await db.ExportAsync(path, ExportType.Archive);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -323,14 +318,14 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.tar.xz");
                 using var db = Sample();
-                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, ExportType.Archive));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive }));
                 Assert.Contains("tar.xz", ex.Message, StringComparison.OrdinalIgnoreCase);
                 Assert.Contains("not supported", ex.Message, StringComparison.OrdinalIgnoreCase);
                 Assert.DoesNotContain("InvalidFormatException", ex.ToString(), StringComparison.Ordinal);
                 Assert.False(File.Exists(path));
 
                 var txz = Path.Combine(dir, "people.txz");
-                var exTxz = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(txz, ExportType.Archive));
+                var exTxz = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(txz, new ExportOptions { Format = ExportType.Archive }));
                 Assert.Contains("txz", exTxz.Message, StringComparison.OrdinalIgnoreCase);
                 Assert.False(File.Exists(txz));
             }
@@ -405,7 +400,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.ball");
                 using (var db = Sample())
-                    db.Save(path);
+                    await db.SaveAsync(path);
 
                 Assert.True(File.Exists(path));
                 Assert.Equal("DUCK"u8.ToArray(), File.ReadAllBytes(path)[8..12]);
@@ -428,7 +423,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.csv");
                 using (var db = Sample())
-                    db.Roll(ExportType.Csv, path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv });
 
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
@@ -447,9 +442,9 @@ namespace squalor.DataBall.Tests
             try
             {
                 using var db = new DataBall();
-                Assert.Throws<DataBallException>(() => db.Roll(ExportType.Csv, Path.Combine(dir, "empty.csv")));
-                await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(Path.Combine(dir, "empty.parquet"), ExportType.Parquet));
-                Assert.Throws<DataBallException>(() => db.Save(Path.Combine(dir, "empty.ball")));
+                await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(Path.Combine(dir, "empty.csv"), new ExportOptions { Format = ExportType.Csv }));
+                await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(Path.Combine(dir, "empty.parquet"), new ExportOptions { Format = ExportType.Parquet }));
+                await Assert.ThrowsAsync<DataBallException>(() => db.SaveAsync(Path.Combine(dir, "empty.ball")));
             }
             finally
             {
@@ -458,7 +453,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task ImportManager_CsvAndParquet_StillWork()
+        public async Task ImportAsync_CsvAndParquet_Replace_ImportsEachFormat()
         {
             var dir = TempDir();
             try
@@ -467,16 +462,16 @@ namespace squalor.DataBall.Tests
                 var parquet = Path.Combine(dir, "people.parquet");
                 using (var db = Sample())
                 {
-                    await db.ExportAsync(csv, ExportType.Csv);
-                    await ExportManager.ExportToParquet(db, parquet);
+                    await db.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
+                    await db.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
 
                 using var fromCsv = new DataBall();
-                ImportManager.ImportFromCsv(fromCsv, csv, append: false);
+                await fromCsv.ImportAsync(csv, new ImportOptions { Append = false });
                 AssertPeople(fromCsv);
 
                 using var fromParquet = new DataBall();
-                await ImportManager.ImportFromParquet(fromParquet, parquet, append: false);
+                await fromParquet.ImportAsync(parquet, new ImportOptions { Append = false });
                 AssertPeople(fromParquet);
             }
             finally
@@ -659,7 +654,7 @@ namespace squalor.DataBall.Tests
             {
                 var csv = Path.Combine(dir, "people.CSV");
                 using (var db = Sample())
-                    await db.ExportAsync(Path.Combine(dir, "people.csv"), ExportType.Csv);
+                    await db.ExportAsync(Path.Combine(dir, "people.csv"), new ExportOptions { Format = ExportType.Csv });
                 File.Move(Path.Combine(dir, "people.csv"), csv);
 
                 using var imported = new DataBall();
@@ -673,7 +668,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Import_ArchiveFallback_DoesNotDoubleImport()
+        public async Task Import_ArchiveFallback_DoesNotDoubleImport()
         {
             var dir = TempDir();
             try
@@ -693,7 +688,7 @@ namespace squalor.DataBall.Tests
                 // x.csv/y.csv entry fails it, and the rollback leaves the session as it was.
                 // Before S47 the first CSV survived; either way Alice is never imported twice.
                 using var db = new DataBall();
-                Assert.Throws<DataBallException>(() => ImportManager.ImportFromArchive(db, zipPath, append: false));
+                await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(zipPath, new ImportOptions { Append = false }));
 
                 var exists = Convert.ToInt64(db.Query("""
                     SELECT COUNT(*) AS c FROM information_schema.tables
@@ -720,7 +715,7 @@ namespace squalor.DataBall.Tests
                     db.SetMetadata("N", 5L);
                     db.SetMetadata("F", 1.25f);
                     db.SetMetadata("T", when);
-                    await db.ExportAsync(path, ExportType.Ball);
+                    await db.SaveAsync(path);
                 }
 
                 using var imported = new DataBall();
@@ -751,7 +746,7 @@ namespace squalor.DataBall.Tests
                     db.AddColumn("Name", new[] { "Alice" });
                 }
 
-                using var reopened = new DataBall(databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true });
                 Assert.Equal(5L, Assert.IsType<long>(reopened.Metadata["N"]));
                 Assert.Equal(1.25f, Assert.IsType<float>(reopened.Metadata["F"]));
                 Assert.Equal(when, Assert.IsType<DateTime>(reopened.Metadata["T"]));

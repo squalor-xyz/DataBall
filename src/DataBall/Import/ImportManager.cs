@@ -7,82 +7,23 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using SharpCompress.Archives;
 using SharpCompress.Readers;
-using squalor.DataBall.Export;
 
 namespace squalor.DataBall.Import
 {
     /// <summary>
-    /// Provides static methods for importing data into DataBall from various formats.
+    /// The archive and native <c>.ball</c> import bodies and the archive extraction behind <c>Open</c>;
+    /// <see cref="DataBall.ImportAsync(string, ImportOptions?, System.Threading.CancellationToken)"/> is the way in.
     /// </summary>
-    public static class ImportManager
+    internal static class ImportManager
     {
-        /// <summary>
-        /// Imports data from a Parquet file into the DataBall instance asynchronously.
-        /// </summary>
-        /// <param name="db">The DataBall instance to import into.</param>
-        /// <param name="path">The path to the Parquet file.</param>
-        /// <param name="append">If true, appends data; otherwise, replaces existing data.</param>
-        /// <returns>A <see cref="Task"/> representing the asynchronous import operation.</returns>
-        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static Task ImportFromParquet(DataBall db, string path, bool append)
-        {
-            db.Logger.LogInformation("Importing Parquet from {Path}, append={Append}", path, append);
-            try
-            {
-                db.RunImport(append, () => db.ImportParquetWithMetadata(path, append));
-                db.Logger.LogInformation("Parquet import completed");
-                return Task.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                db.Logger.LogError(ex, "Parquet import failed");
-                throw new DataBallException("Failed to import Parquet file", ex);
-            }
-        }
-
-        /// <summary>
-        /// Imports data from a CSV file into the DataBall instance.
-        /// Column types come from config or <c>AddColumn</c>. Untyped CSV integers stay DuckDB BIGINT / <c>long</c>.
-        /// </summary>
-        /// <param name="db">The DataBall instance to import into.</param>
-        /// <param name="path">The path to the CSV file.</param>
-        /// <param name="append">If true, appends data; otherwise, replaces existing data. Empty dest treats append as replace.</param>
-        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static void ImportFromCsv(DataBall db, string path, bool append)
-        {
-            db.Logger.LogInformation("Importing CSV from {Path}, append={Append}", path, append);
-            try
-            {
-                db.RunImport(append, () => db.ImportCsvWithSchema(path, append));
-                db.Logger.LogInformation("CSV import completed");
-            }
-            catch (Exception ex)
-            {
-                db.Logger.LogError(ex, "CSV import failed");
-                throw new DataBallException("Failed to import CSV file", ex);
-            }
-        }
-
-        /// <summary>
-        /// Imports CSV files from a ZIP, TAR, TAR.GZ, or TAR.XZ archive.
-        /// </summary>
-        /// <param name="db">The DataBall instance to import into.</param>
-        /// <param name="path">The path to the archive.</param>
-        /// <param name="append">If true, the first CSV is appended; subsequent CSVs always append.</param>
-        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static void ImportFromArchive(DataBall db, string path, bool append)
-        {
-            db.RunImport(append, () => ImportFromArchiveCore(db, path, append));
-        }
-
-        /// <summary>Archive import body; <see cref="DataBall.ImportAsync"/> runs it inside its own <c>RunImport</c>.</summary>
-        internal static void ImportFromArchiveCore(DataBall db, string path, bool append, string? sourceType = null)
+        /// <summary>Archive import body; <see cref="DataBall.ImportAsync(string, ImportOptions?, System.Threading.CancellationToken)"/> runs it inside its own <c>RunImport</c>.</summary>
+        internal static void ImportFromArchiveCore(DataBall db, string path, bool append)
         {
             db.Logger.LogInformation("Importing archive from {Path}, append={Append}", path, append);
             var dir = Path.Combine(Path.GetTempPath(), "databall-archive-in-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
             // Each CSV entry is its own source, recorded as <archive>!<entry>.
-            var entrySource = new ArchiveEntrySource(Path.GetFullPath(path), sourceType ?? nameof(BuiltInPath.ArchiveImport));
+            var entrySource = new ArchiveEntrySource(Path.GetFullPath(path), nameof(BuiltInPath.ArchiveImport));
             try
             {
                 var rowsBefore = db.Store.DataTableExists() ? db.Store.RowCount() : 0;
@@ -132,19 +73,7 @@ namespace squalor.DataBall.Import
             }
         }
 
-        /// <summary>
-        /// Imports a native DuckDB .ball file through staging in one transaction.
-        /// </summary>
-        /// <param name="db">The DataBall instance to import into.</param>
-        /// <param name="path">The path to the <c>.ball</c> file.</param>
-        /// <param name="append">If true, appends native rows; otherwise, replaces existing data.</param>
-        /// <exception cref="DataBallException">Thrown when the import operation fails.</exception>
-        public static void ImportFromBall(DataBall db, string path, bool append)
-        {
-            db.RunImport(append, () => ImportFromBallCore(db, path, append));
-        }
-
-        /// <summary>Ball import body; <see cref="DataBall.ImportAsync"/> runs it inside its own <c>RunImport</c>.</summary>
+        /// <summary>Ball import body; <see cref="DataBall.ImportAsync(string, ImportOptions?, System.Threading.CancellationToken)"/> runs it inside its own <c>RunImport</c>.</summary>
         internal static void ImportFromBallCore(DataBall db, string path, bool append)
         {
             var alias = db.Store.AttachReadOnly(path);
@@ -161,8 +90,6 @@ namespace squalor.DataBall.Import
                 db.Store.Detach(alias);
             }
         }
-
-        internal static ExportType DetectImportFormat(string path) => DataBall.DetectFormat(path);
 
         /// <summary>A CSV entry of an archive, extracted to <see cref="Path"/>.</summary>
         internal sealed record ExtractedEntry(string Key, string Path, DateTime? Modified);

@@ -46,7 +46,7 @@ namespace squalor.DataBall.Tests
             var path = FilePath("capture.duckdb");
             using (var db = new DataBall(config, databasePath: path))
                 Assert.False(db.Store.DataTableExists());
-            using var reopened = new DataBall(config, databasePath: path);
+            using var reopened = DataBall.Open(path, new OpenOptions { Writable = true, SchemaPath = config });
             reopened.AddRow(Row(1));
             Assert.True(reopened.Store.DataIsView());
             Assert.Equal(1, Count(reopened));
@@ -62,7 +62,7 @@ namespace squalor.DataBall.Tests
                 db.SetMetadata("source", "ATE");
                 await db.SaveAsync(path);
             }
-            using var reopened = DataBall.Open(path, config);
+            using var reopened = DataBall.Open(path, new OpenOptions { SchemaPath = config });
             Assert.Equal("ATE", reopened.Metadata["source"]);
             Assert.Equal(new[] { "samples", "measurements" }, reopened.Schema.Tables.Keys);
             Assert.False(reopened.Store.DataTableExists());
@@ -150,7 +150,7 @@ namespace squalor.DataBall.Tests
             var overlay = FilePath("overlay.json");
             File.WriteAllText(overlay, """{"metadata":{"site":"A"}}""");
             var before = SHA256.HashData(File.ReadAllBytes(path));
-            using (var db = DataBall.Open(path, withOverlay ? overlay : null))
+            using (var db = DataBall.Open(path, new OpenOptions { SchemaPath = withOverlay ? overlay : null }))
             {
                 var error = await Assert.ThrowsAsync<DataBallException>(() => db.SaveAsync(path));
                 Assert.Equal("Session is read-only; save to another path or open with writable: true", error.Message);
@@ -164,7 +164,7 @@ namespace squalor.DataBall.Tests
         public void Open_Writable_AppendPersists()
         {
             var path = Native();
-            using (var db = DataBall.Open(path, writable: true))
+            using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
             {
                 db.AddRow(Row(3));
             }
@@ -265,7 +265,7 @@ namespace squalor.DataBall.Tests
         public async Task Save_ToOwnLivePath_Checkpoints()
         {
             var path = Native();
-            using (var db = DataBall.Open(path, writable: true))
+            using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
             {
                 db.AddRow(Row(3));
                 await db.SaveAsync(path);
@@ -362,7 +362,7 @@ namespace squalor.DataBall.Tests
             var path = Native();
             using var source = new DataBall();
             source.AddRow(Row(99));
-            using (var held = DataBall.Open(path, writable: true))
+            using (var held = DataBall.Open(path, new OpenOptions { Writable = true }))
             {
                 await Assert.ThrowsAsync<DataBallException>(() => source.SaveAsync(path));
                 held.AddRow(Row(3));
@@ -378,7 +378,7 @@ namespace squalor.DataBall.Tests
             var upper = FilePath("C.ball");
             if (!File.Exists(upper))
                 return; // This temporary directory is case-sensitive.
-            using (var db = DataBall.Open(path, writable: true))
+            using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
             {
                 await db.SaveAsync(upper);
                 db.AddRow(Row(3));
@@ -393,14 +393,14 @@ namespace squalor.DataBall.Tests
             var config = FilePath("metadata.json");
             File.WriteAllText(config, """{"metadata":{"site":"A"}}""");
             var path = Native(config: config);
-            using (var db = DataBall.Open(path, writable: true))
+            using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
             {
                 db.SetMetadata("site", "B");
                 await db.SaveAsync(path);
             }
             using (var db = DataBall.Open(path))
                 Assert.Equal("B", db.Metadata["site"]);
-            using (var db = DataBall.Open(path, writable: true))
+            using (var db = DataBall.Open(path, new OpenOptions { Writable = true }))
                 Assert.Equal("B", db.Metadata["site"]);
             using var store = new DuckDbStore(path, readOnly: true);
             Assert.Equal("B", DuckDbStore.DeserializeMetadataValue((string)store.Query("SELECT value FROM meta WHERE key = 'site'")[0]["value"]!));
@@ -413,7 +413,7 @@ namespace squalor.DataBall.Tests
             var config = FilePath("overlay.json");
             File.WriteAllText(config, """{"metadata":{"source":"overlay","site":"A"}}""");
             var before = SHA256.HashData(File.ReadAllBytes(path));
-            using (var db = DataBall.Open(path, config))
+            using (var db = DataBall.Open(path, new OpenOptions { SchemaPath = config }))
             {
                 Assert.Equal("overlay", db.Metadata["source"]);
                 Assert.Equal("A", db.Metadata["site"]);
@@ -427,7 +427,7 @@ namespace squalor.DataBall.Tests
             var path = Native(config: LayoutConfig());
             var overlay = FilePath("overlay.json");
             File.WriteAllText(overlay, """{"tables":{"measurements":{"kind":"measurements","columns":["value"]},"samples":{"kind":"dimension","columns":["sample"]}}}""");
-            using (var db = DataBall.Open(path, overlay))
+            using (var db = DataBall.Open(path, new OpenOptions { SchemaPath = overlay }))
                 Assert.Equal(2, Count(db));
         }
 
@@ -437,7 +437,7 @@ namespace squalor.DataBall.Tests
             var path = Native(config: LayoutConfig());
             var overlay = FilePath("overlay.json");
             File.WriteAllText(overlay, """{"tables":{"samples":{"kind":"dimension","columns":["value"]},"measurements":{"kind":"measurements","columns":["sample"]}}}""");
-            Assert.Throws<DataBallException>(() => DataBall.Open(path, overlay));
+            Assert.Throws<DataBallException>(() => DataBall.Open(path, new OpenOptions { SchemaPath = overlay }));
         }
 
         [Theory]
@@ -446,7 +446,7 @@ namespace squalor.DataBall.Tests
         public async Task Save_FileBacked_StampsWriterWithoutHistoryGrowth(bool ownPath)
         {
             var path = Native();
-            using var db = DataBall.Open(path, writable: true);
+            using var db = DataBall.Open(path, new OpenOptions { Writable = true });
             db.Store.Execute("UPDATE _databall SET duckdb_version = 'old', storage_version = 'old'");
             var target = ownPath ? path : FilePath("copy.ball");
             await db.SaveAsync(target);
@@ -485,7 +485,7 @@ namespace squalor.DataBall.Tests
             var overlay = FilePath("overlay.json");
             File.WriteAllText(overlay, """{"metadataFields":["Wafer"],"metadataPolicy":"first","metadata":{"site":"A"}}""");
             var copy = FilePath("copy.ball");
-            using (var db = DataBall.Open(path, overlay))
+            using (var db = DataBall.Open(path, new OpenOptions { SchemaPath = overlay }))
                 await db.SaveAsync(copy);
             using (var db = DataBall.Open(copy))
             {

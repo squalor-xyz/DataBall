@@ -16,7 +16,7 @@ public sealed class EngineOptionsTests : IDisposable
     }
 
     private DataBall Open(EngineOptions options, string? path = null, string? schema = null) =>
-        DataBall.Open(path ?? Csv, schema, engine: options);
+        DataBall.Open(path ?? Csv, new OpenOptions { SchemaPath = schema, Engine = options });
 
     private static string? StorePath(DataBall db) => db.StorePath;
 

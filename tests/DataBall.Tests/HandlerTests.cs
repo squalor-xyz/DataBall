@@ -66,9 +66,9 @@ namespace squalor.DataBall.Tests
                 File.WriteAllText(overlay, """{"units":{"Torr":{"type":"double"}},"metadataFieldsAdd":["Wafer"]}""");
 
                 DataBall.RegisterHandler(new CustomCsvHandler());
-                using var withHandler = DataBall.Open(csv, overlay);
+                using var withHandler = DataBall.Open(csv, new OpenOptions { SchemaPath = overlay });
                 DataBall.ClearHandlers();
-                using var withoutHandler = DataBall.Open(csv, overlay);
+                using var withoutHandler = DataBall.Open(csv, new OpenOptions { SchemaPath = overlay });
 
                 AssertSameOverlayShape(withHandler, withoutHandler);
             }
@@ -210,7 +210,7 @@ namespace squalor.DataBall.Tests
                 };
                 DataBall.RegisterHandler(new BatchHandler(true));
                 var ex = Assert.Throws<DataBallException>(() => DataBall.Open(Path.Combine(dir, "input.test"),
-                    engine: new EngineOptions { Store = StoreMode.File, TempDirectory = dir }));
+                    new OpenOptions { Engine = new EngineOptions { Store = StoreMode.File, TempDirectory = dir } }));
                 Assert.IsType<IOException>(ex.InnerException);
                 Assert.Equal(new[] { 10000 }, batches);
                 Assert.NotNull(storePath);
@@ -241,7 +241,7 @@ namespace squalor.DataBall.Tests
                     File.WriteAllText(schema, """{"tables":{"rows":{"kind":"rows","columns":["Id","X"]}}}""");
                 }
                 DataBall.RegisterHandler(new LateValueHandler());
-                using var db = DataBall.Open(Path.Combine(dir, "input.test"), schema);
+                using var db = DataBall.Open(Path.Combine(dir, "input.test"), new OpenOptions { SchemaPath = schema });
                 Assert.Equal("DOUBLE", db.Query("DESCRIBE data").Single(row => (string)row["column_name"]! == "X")["column_type"]);
                 Assert.Equal(1.5, Assert.IsType<double>(db.Query("SELECT X FROM data WHERE X IS NOT NULL")[0]["X"]));
                 var column = db.ReadColumns(new SessionFilter { Columns = ["X"] })["X"];
@@ -286,7 +286,7 @@ namespace squalor.DataBall.Tests
                 var dataDuringBatches = new List<bool>();
                 DataBall.AfterHandlerBatchForTests = (db, _) => dataDuringBatches.Add(db.Store.TableExists("data"));
                 DataBall.RegisterHandler(new LayoutHandler());
-                using var actual = DataBall.Open(Path.Combine(dir, "input.test"), schema);
+                using var actual = DataBall.Open(Path.Combine(dir, "input.test"), new OpenOptions { SchemaPath = schema });
                 using var expected = new DataBall(schema);
                 expected.AddRows(Enumerable.Range(0, 10001).Select(LayoutRow).ToList());
                 // Nothing is written to "data" while the batches stage; the one merge builds it and splits it once.

@@ -2,7 +2,6 @@
 using System;
 using System.IO;
 using System.IO.Compression;
-using squalor.DataBall.Export;
 using squalor.DataBall.Import;
 using Xunit;
 
@@ -11,17 +10,17 @@ namespace squalor.DataBall.Tests
     public class ManagerTests
     {
         [Fact]
-        public void ImportFromArchive_ZipRoundTrip()
+        public async Task ImportFromArchive_ZipRoundTrip()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "people.zip");
                 using (var db = Sample())
-                    ExportManager.ExportToArchive(db, path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
 
                 using var imported = new DataBall();
-                ImportManager.ImportFromArchive(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 AssertPeople(imported);
             }
             finally
@@ -31,17 +30,17 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromBall_RoundTrip()
+        public async Task ImportFromBall_RoundTrip()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "people.ball");
                 using (var db = Sample())
-                    ExportManager.ExportToBall(db, path);
+                    await db.SaveAsync(path);
 
                 using var imported = new DataBall();
-                ImportManager.ImportFromBall(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 AssertPeople(imported);
             }
             finally
@@ -51,7 +50,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromArchive_NoCsv_Throws()
+        public async Task ImportFromArchive_NoCsv_Throws()
         {
             var dir = TempDir();
             try
@@ -61,8 +60,8 @@ namespace squalor.DataBall.Tests
                     zip.CreateEntry("readme.txt");
 
                 using var db = new DataBall();
-                var ex = Assert.Throws<DataBallException>(() =>
-                    ImportManager.ImportFromArchive(db, path, append: false));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() =>
+                    db.ImportAsync(path, new ImportOptions { Append = false }));
                 Assert.Equal("Archive contains no CSV files", ex.Message);
             }
             finally
@@ -72,7 +71,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromBall_LoadsMetadataOnly()
+        public async Task ImportFromBall_LoadsMetadataOnly()
         {
             var dir = TempDir();
             try
@@ -82,7 +81,7 @@ namespace squalor.DataBall.Tests
                     source.SetMetadata("Source", "ATE");
 
                 using var db = new DataBall();
-                ImportManager.ImportFromBall(db, path, append: false);
+                await db.ImportAsync(path, new ImportOptions { Append = false });
                 Assert.Equal("ATE", db.Metadata["Source"]?.ToString());
             }
             finally
@@ -92,12 +91,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportFromCsv_MissingFile_Throws()
+        public async Task ImportFromCsv_MissingFile_Throws()
         {
             using var db = new DataBall();
             var path = Path.Combine(Path.GetTempPath(), "databall-missing-" + Guid.NewGuid().ToString("N") + ".csv");
-            var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, path, append: false));
-            Assert.Equal("Failed to import CSV file", ex.Message);
+            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(path, new ImportOptions { Append = false }));
+            // The removed ImportManager.ImportFromCsv rewrapped this as "Failed to import CSV file"; ImportAsync reports the missing file itself.
+            Assert.StartsWith("File not found:", ex.Message, StringComparison.Ordinal);
+            Assert.Contains(path, ex.Message, StringComparison.Ordinal);
         }
 
         [Fact]
@@ -108,10 +109,10 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.parquet");
                 using (var db = Sample())
-                    await ExportManager.ExportToParquet(db, path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
 
                 using var imported = new DataBall();
-                await ImportManager.ImportFromParquet(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 AssertPeople(imported);
             }
             finally
@@ -121,17 +122,17 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportToBall_RoundTrip()
+        public async Task ExportToBall_RoundTrip()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "people.ball");
                 using (var db = Sample())
-                    ExportManager.ExportToBall(db, path);
+                    await db.SaveAsync(path);
 
                 using var imported = new DataBall();
-                ImportManager.ImportFromBall(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 AssertPeople(imported);
             }
             finally
@@ -141,17 +142,17 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportToArchive_ZipRoundTrip()
+        public async Task ExportToArchive_ZipRoundTrip()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "people.zip");
                 using (var db = Sample())
-                    ExportManager.ExportToArchive(db, path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
 
                 using var imported = new DataBall();
-                ImportManager.ImportFromArchive(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 AssertPeople(imported);
             }
             finally
@@ -168,7 +169,7 @@ namespace squalor.DataBall.Tests
             {
                 var outDir = Path.Combine(dir, "parts");
                 using var db = Sample();
-                await ExportManager.ExportToPartitionedParquet(db, outDir, new[] { "Name" });
+                await db.ExportAsync(outDir, new ExportOptions { Format = ExportType.Parquet, PartitionBy = new[] { "Name" } });
                 await AssertHiveParquetImported(outDir, "Name=Alice", "Name", "Alice");
                 await AssertHiveParquetImported(outDir, "Name=Bob", "Name", "Bob");
             }
@@ -179,14 +180,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Roll_Csv_WritesFile()
+        public async Task Roll_Csv_WritesFile()
         {
             var dir = TempDir();
             try
             {
                 var path = Path.Combine(dir, "people.csv");
                 using var db = Sample();
-                ExportManager.Roll(db, ExportType.Csv, path);
+                await db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv });
                 var text = File.ReadAllText(path).Replace("\r\n", "\n");
                 Assert.Contains("Name,Age", text, StringComparison.Ordinal);
                 Assert.Contains("Alice,30", text, StringComparison.Ordinal);
@@ -206,7 +207,7 @@ namespace squalor.DataBall.Tests
             {
                 var path = Path.Combine(dir, "people.parquet");
                 using var db = Sample();
-                ExportManager.Roll(db, ExportType.Parquet, path);
+                await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
                 using var imported = new DataBall();
                 await imported.ImportAsync(path);
                 AssertPeople(imported);

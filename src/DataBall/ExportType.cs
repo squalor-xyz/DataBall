@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-namespace squalor.DataBall.Export
+namespace squalor.DataBall
 {
     /// <summary>
-    /// Defines the supported export formats for DataBall.
+    /// Defines the supported export formats for <see cref="DataBall.ExportAsync(string, ExportOptions)"/>. A native <c>.ball</c> is saved with <see cref="DataBall.SaveAsync"/>.
     /// </summary>
     public enum ExportType
     {
@@ -19,11 +19,6 @@ namespace squalor.DataBall.Export
         /// <summary>
         /// Export as archive (ZIP, TAR.GZ, TAR.XZ).
         /// </summary>
-        Archive,
-
-        /// <summary>
-        /// Save the whole session as a native DuckDB .ball file.
-        /// </summary>
-        Ball
+        Archive
     }
 }

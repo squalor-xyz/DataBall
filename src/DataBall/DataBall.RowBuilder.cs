@@ -92,23 +92,34 @@ namespace squalor.DataBall
             if (_pendingRow is null)
                 throw new DataBallException("No pending row. Call InitializeRow before CommitRow.");
 
-            ApplyRelationships();
-
-            if (_pendingRow.Count == 0 && !_store.DataTableExists())
-                throw new DataBallException("Cannot commit an empty row.");
-
-            var addedTypes = EnsurePendingColumns();
+            // Relationships reset fields of the pending row in place; a failed commit puts the row back as it was.
+            var row = _pendingRow;
+            var rowBefore = new Dictionary<string, object?>(row, StringComparer.OrdinalIgnoreCase);
+            var snapshot = TakeSnapshot();
             try
             {
-                _store.AddRow(_pendingRow, _expectedColumnTypes);
+                ApplyRelationships();
+
+                if (row.Count == 0 && !_store.DataTableExists())
+                    throw new DataBallException("Cannot commit an empty row.");
+
+                // The new columns, their expected types and the row are one write: a failure restores all of them.
+                _store.InTransaction(() =>
+                {
+                    EnsurePendingColumns(row);
+                    _store.AddRow(row, _expectedColumnTypes);
+                });
             }
             catch
             {
-                ForgetUnstoredColumnTypes(addedTypes);
+                row.Clear();
+                foreach (var pair in rowBefore)
+                    row[pair.Key] = pair.Value;
+                RestoreSnapshot(snapshot);
                 throw;
             }
 
-            RememberRow(_pendingRow);
+            RememberRow(row);
             ClearPending();
             _logger.LogDebug("Committed row");
             SplitIfLayout();
@@ -144,13 +155,12 @@ namespace squalor.DataBall
             }
         }
 
-        /// <summary>Returns the column names whose expected type this call recorded.</summary>
-        private List<string> EnsurePendingColumns()
+        /// <summary>
+        /// Creates the columns the pending row adds (inside the commit's transaction) and records the expected type
+        /// of each one DataBall learns here.
+        /// </summary>
+        private void EnsurePendingColumns(Dictionary<string, object?> row)
         {
-            var added = new List<string>();
-            if (_pendingRow is null)
-                return added;
-
             var existing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             if (_store.DataTableExists())
             {
@@ -158,7 +168,7 @@ namespace squalor.DataBall
                     existing.Add(name);
             }
 
-            foreach (var kv in _pendingRow)
+            foreach (var kv in row)
             {
                 if (existing.Contains(kv.Key))
                     continue;
@@ -176,41 +186,8 @@ namespace squalor.DataBall
                 {
                     _expectedColumnTypes[kv.Key] = clrType;
                     _learnedColumnNames.Add(kv.Key);
-                    added.Add(kv.Key);
                 }
                 existing.Add(kv.Key);
-            }
-
-            return added;
-        }
-
-        /// <summary>
-        /// After a failed commit, drops the expected types recorded for columns the store never
-        /// got (a layout write rolls its new columns back), so a stale type does not constrain later writes.
-        /// </summary>
-        private void ForgetUnstoredColumnTypes(IReadOnlyList<string> added)
-        {
-            if (added.Count == 0)
-                return;
-            // Runs in a catch: a cleanup failure must not replace the commit's exception.
-            try
-            {
-                var stored = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (_store.DataTableExists())
-                {
-                    foreach (var (name, _) in _store.GetColumns())
-                        stored.Add(name);
-                }
-
-                foreach (var name in added)
-                {
-                    if (!stored.Contains(name))
-                        RemoveExpectedType(name);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Could not reconcile expected column types after a failed commit");
             }
         }
 

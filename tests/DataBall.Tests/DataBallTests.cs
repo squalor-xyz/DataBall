@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using squalor.DataBall.Export;
 using squalor.DataBall.Import;
 using Xunit;
 
@@ -218,7 +217,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_ThenQuery()
+        public async Task ImportCsv_ThenQuery()
         {
             var dir = TempDir();
             try
@@ -226,7 +225,7 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "Name,Age\nAlice,30\nBob,25\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, path, append: false);
+                await db.ImportAsync(path, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT \"Name\", \"Age\" FROM \"data\" ORDER BY \"Name\"");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -250,9 +249,9 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall();
                 db.AddColumn("Name", new[] { "Alice", "Bob" });
                 db.AddColumn<int>("Age", new[] { 30, 25 });
-                await ExportManager.ExportToParquet(db, path);
+                await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
                 using var imported = new DataBall();
-                await ImportManager.ImportFromParquet(imported, path, append: false);
+                await imported.ImportAsync(path, new ImportOptions { Append = false });
                 var rows = imported.Query("SELECT \"Name\", \"Age\" FROM \"data\" ORDER BY \"Age\" DESC");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal("Alice", rows[0]["Name"]);
@@ -267,14 +266,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_UnionColumns()
+        public async Task MergeOrAppend_UnionColumns()
         {
             using var a = new DataBall();
             a.AddColumn("Name", new[] { "Alice" });
             using var b = new DataBall();
             b.AddColumn("Name", new[] { "Bob" });
             b.AddColumn<int>("Age", new[] { 25 });
-            a.MergeOrAppend(b, append: true);
+            await a.ImportAsync(b, new ImportOptions { Append = true });
             var rows = a.Query("SELECT \"Name\", \"Age\" FROM \"data\" ORDER BY \"Name\"");
             Assert.Equal(2, rows.Count);
             Assert.Equal("Alice", rows[0]["Name"]);
@@ -296,14 +295,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_IncomingColumnMatchesMetadata_DoesNotThrow()
+        public async Task MergeOrAppend_IncomingColumnMatchesMetadata_DoesNotThrow()
         {
             using var dest = new DataBall();
             dest.SetMetadata("Site", "A");
             dest.AddColumn<int>("Meas", new[] { 1 });
             using var src = new DataBall();
             src.AddColumn("Site", new[] { "A" });
-            dest.MergeOrAppend(src, append: true);
+            await dest.ImportAsync(src, new ImportOptions { Append = true });
             Assert.Equal("A", dest.Metadata["Site"]);
             var rows = dest.Query("SELECT * FROM \"data\"");
             Assert.Equal(2, rows.Count);
@@ -314,7 +313,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_IncomingColumnMatchesMetadata_DoesNotThrow()
+        public async Task ImportCsv_IncomingColumnMatchesMetadata_DoesNotThrow()
         {
             var dir = TempDir();
             try
@@ -324,7 +323,7 @@ namespace squalor.DataBall.Tests
                 dest.AddColumn<int>("Meas", new[] { 1 });
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "Site\nA\n");
-                ImportManager.ImportFromCsv(dest, path, append: true);
+                await dest.ImportAsync(path, new ImportOptions { Append = true });
                 Assert.Equal("A", dest.Metadata["Site"]);
                 var rows = dest.Query("SELECT * FROM \"data\"");
                 Assert.Equal(2, rows.Count);
@@ -338,7 +337,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_DateColumn_ThenAddRow_DoesNotThrow()
+        public async Task ImportCsv_DateColumn_ThenAddRow_DoesNotThrow()
         {
             var dir = TempDir();
             try
@@ -346,7 +345,7 @@ namespace squalor.DataBall.Tests
                 var path = Path.Combine(dir, "data.csv");
                 File.WriteAllText(path, "When,N\n2020-01-02,1\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, path, append: false);
+                await db.ImportAsync(path, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT * FROM \"data\"");
                 Assert.Single(rows);
                 var when = Assert.IsType<DateTime>(rows[0]["When"]);
@@ -470,7 +469,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_AppendFalse_ReplacesRows()
+        public async Task MergeOrAppend_AppendFalse_ReplacesRows()
         {
             using var dest = new DataBall();
             dest.AddColumn("Name", new[] { "Alice" });
@@ -478,7 +477,7 @@ namespace squalor.DataBall.Tests
             using var src = new DataBall();
             src.AddColumn("Name", new[] { "Bob" });
             src.AddColumn<int>("Age", new[] { 25 });
-            dest.MergeOrAppend(src, append: false);
+            await dest.ImportAsync(src, new ImportOptions { Append = false });
             var rows = dest.Query("SELECT \"Name\", \"Age\" FROM \"data\"");
             var row = Assert.Single(rows);
             Assert.Equal("Bob", row["Name"]);
@@ -486,7 +485,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_WithPendingRow_Throws()
+        public async Task MergeOrAppend_WithPendingRow_Throws()
         {
             using var dest = new DataBall();
             dest.AddColumn("Name", new[] { "Alice" });
@@ -494,7 +493,7 @@ namespace squalor.DataBall.Tests
             dest.ModifyField("Name", "Carol");
             using var src = new DataBall();
             src.AddColumn("Name", new[] { "Bob" });
-            var ex = Assert.Throws<DataBallException>(() => dest.MergeOrAppend(src, append: true));
+            var ex = await Assert.ThrowsAsync<DataBallException>(() => dest.ImportAsync(src, new ImportOptions { Append = true }));
             Assert.Equal("Commit or discard the pending row first.", ex.Message);
         }
 
@@ -510,7 +509,7 @@ namespace squalor.DataBall.Tests
         public async Task ExportAsync_EmptyPath_Throws()
         {
             using var db = new DataBall();
-            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync("", ExportType.Csv));
+            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync("", new ExportOptions { Format = ExportType.Csv }));
             Assert.Equal("Path is required", ex.Message);
         }
 
@@ -520,7 +519,7 @@ namespace squalor.DataBall.Tests
             using var db = new DataBall();
             db.AddColumn("Name", new[] { "Alice" });
             var type = (ExportType)999;
-            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync("out.bin", type));
+            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync("out.bin", new ExportOptions { Format = type }));
             Assert.Equal($"Unsupported export type: {type}", ex.Message);
         }
 
@@ -620,7 +619,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ExportToArchive_WritesZipWithCsv()
+        public async Task ExportToArchive_WritesZipWithCsv()
         {
             var dir = TempDir();
             try
@@ -630,7 +629,7 @@ namespace squalor.DataBall.Tests
                 {
                     db.AddColumn("Name", new[] { "Alice" });
                     db.AddColumn<int>("Age", new[] { 30 });
-                    db.ExportToArchive(path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive });
                 }
 
                 Assert.True(File.Exists(path));
@@ -658,7 +657,7 @@ namespace squalor.DataBall.Tests
                 {
                     db.AddColumn("Name", new[] { "Alice", "Bob" });
                     db.AddColumn<int>("Age", new[] { 30, 25 });
-                    db.Roll(ExportType.Parquet, path);
+                    await db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet });
                 }
 
                 using var imported = new DataBall();
@@ -703,7 +702,7 @@ namespace squalor.DataBall.Tests
                     db.AddColumn("Name", new[] { "Alice", "Bob" });
                     db.AddColumn<int>("Age", new[] { 30, 25 });
                     db.SetMetadata("Operator", "Ada");
-                    db.Roll(ExportType.Ball, path);
+                    await db.SaveAsync(path);
                 }
 
                 using var imported = new DataBall();
@@ -764,7 +763,7 @@ namespace squalor.DataBall.Tests
                 db.AddColumn("Name", new[] { "Alice" });
                 db.InitializeRow();
                 db.ModifyField("Name", "Bob");
-                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, ExportType.Csv));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv }));
                 Assert.Equal("Commit or discard the pending row first.", ex.Message);
             }
             finally
