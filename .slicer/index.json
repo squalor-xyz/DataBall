@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 28,
+  "next_id": 31,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -854,6 +854,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "ab7605a1-89e7-4c85-87f7-d4d547d3b78a",
+          "kind": "",
+          "text": "**2026-10-13** — From the db-27 relay (architect, 2026-10-13): CSV casting in opens now happens only in StageCsv/CoerceColumnsOf; ImportAsync keeps its own CSV path, which is the remaining second import pipeline (possibly db-16).",
+          "created_at": "2026-10-13T11:54:24Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -926,6 +937,17 @@
           "kind": "",
           "text": "**2026-10-11** — **2026-10-11** — From the db-11 relay (architect, 2026-10-11): per-source transforms should attach to the many-file staging loop (DataBall.OpenMany.cs, StageSourcesAsync). Single CSV and handler opens still use OpenOneAsync, so either stage them too (see the db-24 note) or patch both paths.",
           "created_at": "2026-10-11T22:04:59Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "d52187f4-0f85-4949-9e53-d97c14cb6699",
+          "kind": "",
+          "text": "**2026-10-13** — From the db-27 relay (architect, 2026-10-13): opens now stage through one loop (StageSourcesAsync), except the lone Parquet-view route (DataBall.Open.cs OpenOne) and ImportAsync/append (ImportCoreAsync). For transforms: extend the view condition to 'no tables and no transforms' (as a layout already forces staging), and decide whether ImportAsync stages through the same loop.",
+          "created_at": "2026-10-13T11:54:23Z",
           "attempt": 0,
           "by": "Jon R",
           "verified_by": "",
@@ -1897,7 +1919,7 @@
       "id": "db-27",
       "title": "DataBall opens must stage through one path and reconcile metadata in one planner",
       "short_title": "One staging path, one metadata planner",
-      "status": "open",
+      "status": "done",
       "has_slice": true,
       "depends_on": [
         "db-24"
@@ -1924,6 +1946,28 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "29966657-3b4e-4327-9368-6763f3a12b62",
+          "kind": "",
+          "text": "**2026-10-13** — Owner decisions, review round 1 (2026-10-13): (D5) fix single-open parity: a configured metadata field named like a built-in source column may still reach Metadata; only the source-column level is refused for it (falls back to a row column). (D6) keep the D2 restage loop (repeats until no further skip). (D7) accepted: a file skipped only because a skipped handler's overlay typed its column stays skipped after the restage (D2 'surviving sources'); revisit later. (D8) accept InsertStagingRows reading MAX(_row) once, plus explicit ORDER BY _row on the cast CTAS and spine insert; accept a non-DuckDB .ball as sole input being an ordinary bad file.",
+          "created_at": "2026-10-13T10:59:23Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        },
+        {
+          "id": "80b1f349-c7fa-4c9b-8c49-e2410e048e83",
+          "kind": "",
+          "text": "**2026-10-13** — Verified outcome (2026-10-13): OpenOne keeps only pointer, native and the lone Parquet view; every other single source stages and merges like a many-file open (D3 handler staged, D4 wording). MetadataPlanner (PlanOpen, PlanStaged, PlanAgainstStored, Rejects, ClassifyField) serves the many-file merge, wide append and layout append; append demotion unchanged (D1); built-in-named fields keep single-open parity (D5). Bounce skips per-source columns; per-source backfills decide the type with DecideColumnMerge (PlanPerSourceBackfills) and throw a named conflict. D2 restage from survivors (loop, D6). Layout spine order hardened (D8). 981 library + 55 CLI pass, format clean; reviewer + architect findings confirmed fixed; gate VERDICT: PASS (Sonnet). Follow-ups: db-28, db-29, db-30; notes on db-12, db-13.",
+          "created_at": "2026-10-13T11:54:24Z",
+          "attempt": 1,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -1944,6 +1988,123 @@
         "importance": 2,
         "urgency": 2,
         "effort": null,
+        "attempts": 1
+      }
+    },
+    {
+      "id": "db-28",
+      "title": "Refresh the how-it-works HTML/PDF renders",
+      "short_title": "Refresh the how-it-works HTML/PDF renders",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "de5ab7f6-d857-4d4f-b915-02dcbaf79173",
+          "kind": "",
+          "text": "**2026-10-13** — From the db-27 relay (architect + reviewer, 2026-10-13): docs/how-it-works.md changed in db-27 (§14 OpenOne/staging, restage, metadata planner, handler drain, PlanPerSourceBackfills); the committed .html/.pdf (786e63f) now drift. Refresh per AGENTS.md Docs: audit .md against src/, ./scripts/render-docs.sh, check diagrams, commit all three.",
+          "created_at": "2026-10-13T11:54:21Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "",
+        "flags": [],
+        "trees": [],
+        "trees_literal": false,
+        "findings": "",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 1,
+        "urgency": 2,
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-29",
+      "title": "Row builder's last-row fallback reads one row; drop the staged handler's RememberRow",
+      "short_title": "Row builder's last-row fallback reads one row; drop the staged handler's RememberRow",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "d6b2cb1c-512e-4266-ba4f-7033039bc5ed",
+          "kind": "",
+          "text": "**2026-10-13** — From the db-27 relay (architect + reviewer, 2026-10-13): a lone handler open keeps RememberRow via StagedSource.LastRow (D3), but it is not mutation-checkable: InitializeRow's LoadLastRow fallback (DataBall.RowBuilder.cs:217-236) reads SELECT * FROM data into memory to take the last row. Make that fallback read one row (by _row/rowid order), then drop RememberRow for staged handlers and StagedSource.LastRow (needs an owner amendment of D3).",
+          "created_at": "2026-10-13T11:54:22Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "",
+        "flags": [],
+        "trees": [],
+        "trees_literal": false,
+        "findings": "",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 1,
+        "urgency": 1,
+        "effort": 1,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-30",
+      "title": "A D2 restage retries files skipped only because of a skipped handler's overlay",
+      "short_title": "A D2 restage retries files skipped only because of a skipped handler's overlay",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "c2439dd0-f30b-4dfa-812f-83662a8383be",
+          "kind": "",
+          "text": "**2026-10-13** — From the db-27 relay (reviewer, 2026-10-13; owner D7 accepted as is in db-27): CSV B fails only because skipped handler A's overlay typed one of its columns; after the restage without A's overlay, B stays skipped though it would now open. Option: when the config narrows, restage every route except handler-overlay skips and drop the other skip entries. Also: archive entries are skipped as <archive>!<entry> while routes are keyed by archive path, so an archive never triggers a restage (harmless today).",
+          "created_at": "2026-10-13T11:54:23Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "",
+        "flags": [],
+        "trees": [],
+        "trees_literal": false,
+        "findings": "",
+        "discovered_from": "",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 1,
+        "urgency": 1,
+        "effort": 2,
         "attempts": 0
       }
     }

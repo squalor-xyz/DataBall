@@ -22,7 +22,7 @@ License: **Apache-2.0** as of 1.1.0 (1.0.0 was MPL-2.0).
 
 Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the storage layout may be multi-table via config `tables`; the API stays rows + `"data"`), Polars, DataFrame, SQLite, matrix Bounce, MotherDuck, Spectre.Console, Coverlet, GB-scale fixtures in CI, nuget.org listing, watch folders, a TUI, a separate pipeline product (Conflux folds into DataBall).
 
-27 items · — 11 · done 15 · parked 1
+30 items · — 13 · done 16 · parked 1
 
 ## v2.0
 
@@ -51,20 +51,23 @@ Hierarchical `DataFile`/`DataGroup`/`DataSweep` as an **object model** (the stor
 | 18 | [db-24](slices/db-24.md) | DataBall many-file opens must have a bad-file policy and an open report | S | 1 | databall | db-11 split (owner, 2026-10-10) | done |
 | 19 | [db-25](slices/db-25.md) | DataBall many-file opens must accept native .ball sources | S | 2 | databall | db-11 split (owner, 2026-10-10) | — |
 | 20 | [db-26](slices/db-26.md) | DataBall wide CSV appends must apply the CSV schema before merging | M | 2 | databall | db-22 relay (pre-existing on 7c17c59), owner 2026-10-11 | done |
-| 21 | [db-27](slices/db-27.md) | One staging path, one metadata planner | M | - | databall | db-11 relay (architect, 2026-10-11) · discovered from db-11 | — |
+| 21 | [db-27](slices/db-27.md) | One staging path, one metadata planner | M | - | databall | db-11 relay (architect, 2026-10-11) · discovered from db-11 | done |
+| 22 | db-28 | Refresh the how-it-works HTML/PDF renders |  | 1 |  |  | — |
+| 23 | db-29 | Row builder's last-row fallback reads one row; drop the staged handler's RememberRow |  | 1 |  |  | — |
+| 24 | db-30 | A D2 restage retries files skipped only because of a skipped handler's overlay |  | 2 |  |  | — |
 
 ---
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 22 | [db-19](slices/db-19.md) | DataBall must declare its relay profile for scripted landing | S | 1 | databall | owner 2026-10-10 (relay scripts); agents-repo S59 | parked |
-| 23 | [db-20](slices/db-20.md) | Trial Stryker.NET mutation testing in place of hand-run mutations | M `[OWNER]` | 2 | databall | DataBall relays db-07 to db-10, owner 2026-10-10 | — |
-| 24 | [db-21](slices/db-21.md) | DataBall must have micro-benchmarks for its hot read and open paths | M `[OWNER]` | 2 | databall | DataBall db-10 relay, owner 2026-10-10 | — |
+| 25 | [db-19](slices/db-19.md) | DataBall must declare its relay profile for scripted landing | S | 1 | databall | owner 2026-10-10 (relay scripts); agents-repo S59 | parked |
+| 26 | [db-20](slices/db-20.md) | Trial Stryker.NET mutation testing in place of hand-run mutations | M `[OWNER]` | 2 | databall | DataBall relays db-07 to db-10, owner 2026-10-10 | — |
+| 27 | [db-21](slices/db-21.md) | DataBall must have micro-benchmarks for its hot read and open paths | M `[OWNER]` | 2 | databall | DataBall db-10 relay, owner 2026-10-10 | — |
 
 ---
 
 | # | Slice | Title | Size | Effort | Trees | Findings | Status |
 |---|---|---|---|---|---|---|---|
-| 25 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
-| 26 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | done |
-| 27 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | done |
+| 28 | [db-01](slices/db-01.md) | DataBall Bounce and column edits must work on layouts | M | 3 | databall | owner charter (2026-09-23) (was suite S48) | done |
+| 29 | [db-02](slices/db-02.md) | DataBall dimension growth on append | M | 2 | databall | owner charter (2026-09-23); split from db-01 (2026-09-29) (was suite S50) | done |
+| 30 | [db-04](slices/db-04.md) | Tag and release DataBall v1.3.0 | S `[OWNER]` | 1 | databall | owner request (2026-09-29) | done |

@@ -1301,25 +1301,24 @@ namespace squalor.DataBall
             var sourceRowCount = RowCountOf(sourceTable);
             // Every type merge is decided before the first change, so a conflict leaves the session as it was.
             var widen = PlanColumnWidening(GetColumns(), GetColumnsOf(sourceTable), sourceTable, incomingName, configTypes, _ => "data");
+            // A new column that is a per-source column of the source table: the rows already in "data" take their source's value.
+            var perSourceTypes = PlanPerSourceBackfills(GetColumns(), GetColumnsOf(sourceTable).Select(c => (c.Name, c.Name, c.DuckDbType)), sourceTable, incomingName);
             var backfills = ApplyMetadataAgainstSource(sourceTable);
 
             var srcCols = GetColumnsOf(sourceTable);
             var dstCols = GetColumns();
             var dstByName = dstCols.ToDictionary(c => c.Name, StringComparer.OrdinalIgnoreCase);
-            // A new column that is a per-source column of the source table: the rows already in "data" take their source's value.
-            var perSource = dstByName.ContainsKey(Lineage.KeyColumn)
-                ? new HashSet<string>(SourceMetadataColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase)
-                : new HashSet<string>();
             var fromSource = new List<(string Name, string Type)>();
 
             foreach (var (srcName, srcType) in srcCols)
             {
                 if (dstByName.ContainsKey(srcName))
                     continue;
-                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(srcName)} {srcType}");
-                dstByName[srcName] = (srcName, srcType);
-                if (perSource.Contains(srcName))
-                    fromSource.Add((srcName, srcType));
+                var type = perSourceTypes.TryGetValue(srcName, out var merged) ? merged : srcType;
+                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(srcName)} {type}");
+                dstByName[srcName] = (srcName, type);
+                if (perSourceTypes.ContainsKey(srcName))
+                    fromSource.Add((srcName, type));
             }
 
             // Widened columns take the wider type in place; their values insert without a cast.
@@ -1356,6 +1355,46 @@ namespace squalor.DataBall
             }
 
             Execute($"INSERT INTO \"data\" BY NAME SELECT {string.Join(", ", selectParts)} FROM {qSrc}");
+        }
+
+        /// <summary>
+        /// The type of each new row column of an append that is also a per-source column of the <c>source</c> table, keyed by the row
+        /// column's name: <see cref="DecideColumnMerge"/> of the type the source table holds and the type the incoming data has, so a backfill never
+        /// narrows the stored values. Throws, naming both types, the column and <paramref name="incomingName"/>, when they cannot merge. Reads only;
+        /// empty when <paramref name="existing"/> has no <c>_source_key</c>.
+        /// </summary>
+        internal Dictionary<string, string> PlanPerSourceBackfills(
+            IReadOnlyList<(string Name, string DuckDbType)> existing,
+            IEnumerable<(string Column, string Name, string DuckDbType)> incoming,
+            string sourceTable,
+            string incomingName)
+        {
+            var types = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (!existing.Any(c => c.Name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase)))
+                return types;
+            var perSource = SourceMetadataColumns();
+            foreach (var (column, name, incomingType) in incoming)
+            {
+                if (existing.Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    continue;
+                var held = perSource.FirstOrDefault(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                if (held.Name is null)
+                    continue;
+                if (NormalizeType(held.DuckDbType) == NormalizeType(incomingType))
+                {
+                    types[name] = incomingType;
+                    continue;
+                }
+                var decision = DecideColumnMerge(held.DuckDbType, incomingType,
+                    () => IsAllNull(sourceTable, column), () => IsAllNull(Lineage.Table, held.Name));
+                if (decision.Kind == ColumnMerge.Conflict)
+                {
+                    throw new DataBallException(
+                        $"Cannot append {incomingName}: per-source column '{held.Name}' has type {held.DuckDbType} in the source table and {incomingType} in the incoming data");
+                }
+                types[name] = decision.Type;
+            }
+            return types;
         }
 
         /// <summary>
@@ -1844,13 +1883,15 @@ namespace squalor.DataBall
         private List<(string Column, object? Value)> ApplyMetadataAgainstSource(string sourceTable)
         {
             var backfills = new List<(string Column, object? Value)>();
-            var storedWins = string.Equals(MetadataPolicySource?.Invoke(), "first", StringComparison.OrdinalIgnoreCase);
+            var policy = MetadataPlanner.ParsePolicy(MetadataPolicySource?.Invoke());
             var dstNames = new HashSet<string>(GetColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
             var qSrc = QuoteIdent(sourceTable);
 
             foreach (var pair in _metadata.ToList())
             {
-                if (dstNames.Contains(pair.Key))
+                // A key that is a column of "data" is left by the planner; no need to look at the incoming table for it.
+                var home = dstNames.Contains(pair.Key) ? FieldHome.SessionColumn : FieldHome.Stored;
+                if (MetadataPlanner.PlanAgainstStored(policy, home, () => false).Level == MetadataLevel.Leave)
                     continue;
 
                 var srcCols = GetColumnsOf(sourceTable);
@@ -1862,13 +1903,13 @@ namespace squalor.DataBall
                     continue;
 
                 var qK = QuoteIdent(srcCol.Name);
-                var differing = storedWins ? 0 : Convert.ToInt64(
+                var decision = MetadataPlanner.PlanAgainstStored(policy, home, () => Convert.ToInt64(
                     ExecuteScalarParameterized(
                         $"SELECT COUNT(*) FILTER (WHERE {qK} IS DISTINCT FROM $v) FROM {qSrc}",
                         Param("v", pair.Value)),
-                    CultureInfo.InvariantCulture);
+                    CultureInfo.InvariantCulture) > 0);
 
-                if (differing == 0)
+                if (decision.Level == MetadataLevel.Drop)
                 {
                     // Never drop the source table while another column (the key) remains.
                     if (srcCols.Count > 1)
@@ -1877,6 +1918,8 @@ namespace squalor.DataBall
                         DropColumnFromTable(sourceTable, srcCol.Name);
                     continue;
                 }
+                if (decision.Level != MetadataLevel.Demote)
+                    continue;
 
                 Execute($"ALTER TABLE \"data\" ADD COLUMN {qK} {srcCol.DuckDbType}");
                 backfills.Add((srcCol.Name, pair.Value));

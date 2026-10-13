@@ -291,15 +291,20 @@ namespace squalor.DataBall
             var native = plan.Entries.FirstOrDefault(e => e.Kind != OpenKind.Detected);
             if (native is not null && (plan.Entries.Count > 1 || plan.Skipped.Count > 0))
                 throw NativeWithOtherInputs(native);
-            // One source opens as a single path does. An archive is always staged: its CSV entries are sources of their own.
+            // A snapshot pointer, a native .ball and a lone Parquet view open as a single path always did. Every other source, a lone one
+            // included, is staged and merged as the sources of a many-file open are; an archive is always staged: its CSV entries are sources of their own.
+            ResolvedOpen? resolved = null;
             if (plan.Entries.Count == 1 && !IsArchive(plan.Entries[0]))
             {
-                var db = await OpenSoleAsync(plan, options, cancellationToken).ConfigureAwait(false);
-                if (db.OpenReport is null && plan.Entries[0].Kind == OpenKind.Detected)
-                    db.OpenReport = db.ReportSources(plan.Ignored, null, plan.Skipped);
-                return db;
+                var db = OpenSole(plan, options, out resolved);
+                if (db is not null)
+                {
+                    if (db.OpenReport is null && plan.Entries[0].Kind == OpenKind.Detected)
+                        db.OpenReport = db.ReportSources(plan.Ignored, null, plan.Skipped);
+                    return db;
+                }
             }
-            return await OpenManyAsync(plan, options, cancellationToken).ConfigureAwait(false);
+            return await OpenManyAsync(plan, options, resolved, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>The refusal of a native .ball or snapshot pointer that is not the sole input.</summary>
@@ -308,23 +313,31 @@ namespace squalor.DataBall
             : new DataBallException($"'{entry.Path}' is a native .ball; native sources cannot be opened together with other inputs yet, open it on its own");
 
         /// <summary>
-        /// Opens the one entry of a plan. Under <see cref="BadFilePolicy.Skip"/> a failure names every file the open could not open, with its cause,
-        /// as a many-file open does when every input is bad; under <see cref="BadFilePolicy.Abort"/> the failure is what a single-path open always threw.
+        /// Opens the one entry of a plan when it is a snapshot pointer, a native <c>.ball</c> or a Parquet view; null when it is to be staged.
+        /// Under <see cref="BadFilePolicy.Skip"/> a failure names every file the open could not open, with its cause, as a many-file open does
+        /// when every input is bad; under <see cref="BadFilePolicy.Abort"/> the failure is what a single-path open always threw.
         /// </summary>
-        private static async Task<DataBall> OpenSoleAsync(OpenPlan plan, OpenOptions options, CancellationToken cancellationToken)
+        private static DataBall? OpenSole(OpenPlan plan, OpenOptions options, out ResolvedOpen? resolved)
         {
             var entry = plan.Entries[0];
+            resolved = null;
             try
             {
-                return await OpenOneAsync(entry, plan.Bytes, options, cancellationToken).ConfigureAwait(false);
+                return OpenOne(entry, plan.Bytes, options, out resolved);
             }
             catch (DataBallException ex) when (options.OnBadFile == BadFilePolicy.Skip)
             {
-                var message = plan.Skipped.Count == 0
-                    ? $"Cannot open '{entry.Path}': {FailureMessage(ex)}"
-                    : $"No file to open: every input was skipped as bad: {OpenInputs.Every(plan.Skipped.Select(s => s.Path).Append(entry.Path))}: {FailureMessage(ex)}";
-                throw new DataBallException(message, ex);
+                throw SoleFailure(plan, entry.Path, FailureMessage(ex), ex);
             }
+        }
+
+        /// <summary>The failure of the one entry of a plan under <see cref="BadFilePolicy.Skip"/>, worded as it always was for a single path.</summary>
+        private static DataBallException SoleFailure(OpenPlan plan, string path, string cause, Exception? inner)
+        {
+            var message = plan.Skipped.Count == 0
+                ? $"Cannot open '{path}': {cause}"
+                : $"No file to open: every input was skipped as bad: {OpenInputs.Every(plan.Skipped.Select(s => s.Path).Append(path))}: {cause}";
+            return inner is null ? new DataBallException(message) : new DataBallException(message, inner);
         }
 
         private static bool IsArchive(OpenEntry entry) =>
@@ -363,9 +376,13 @@ namespace squalor.DataBall
                 skipped.ToList());
         }
 
-        /// <summary>Opens a sole entry exactly as a single-path open always did.</summary>
-        private static async Task<DataBall> OpenOneAsync(OpenEntry entry, long inputBytes, OpenOptions options, CancellationToken cancellationToken)
+        /// <summary>
+        /// Opens a sole entry as a single-path open always did when that is a snapshot pointer, a native <c>.ball</c> or a Parquet view
+        /// (which keeps its pushdown). Anything else returns null with the configuration already resolved, for the staged route.
+        /// </summary>
+        private static DataBall? OpenOne(OpenEntry entry, long inputBytes, OpenOptions options, out ResolvedOpen? resolved)
         {
+            resolved = null;
             var path = entry.OpenPath;
             var schemaPath = options.SchemaPath;
             var engine = options.Engine;
@@ -376,53 +393,19 @@ namespace squalor.DataBall
                 return new DataBall(string.IsNullOrEmpty(schemaPath) ? null : Config.LoadConfig(schemaPath), null, path, readOnly: !options.Writable, native: true, engine);
 
             var (effective, store, routes) = ResolveOpenConfig(new[] { entry }, inputBytes, options);
-            var handler = routes[0].Handler;
-            var delegates = routes[0].Delegates;
-            var report = entry.Report!;
+            resolved = new ResolvedOpen(effective, store, routes);
+            if (!(routes[0].Delegates && entry.Report!.BuiltInPath == BuiltInPath.ParquetView && effective.Tables.Count == 0))
+                return null;
+
             var db = new DataBall(effective, engine, temporary: store == StoreMode.File);
             try
             {
-                var sourceType = routes[0].SourceType;
-                if (delegates && report.BuiltInPath == BuiltInPath.ParquetView && !db.HasLayoutConfig)
+                var source = SourceFile.Describe(path, routes[0].SourceType, entry.HiveFiles);
+                db.RunImport(false, () =>
                 {
-                    var source = SourceFile.Describe(path, sourceType, entry.HiveFiles);
-                    db.RunImport(false, () =>
-                    {
-                        db._store.AttachParquetView(path, db._store.AddSource(source), entry.HiveFiles);
-                        db.ExtractConfiguredMetadata("data", false);
-                    });
-                    return db;
-                }
-
-                if (handler is not null && !delegates)
-                {
-                    // The handler's rows are the file's rows: each carries the key of its source, which the handler cannot choose.
-                    var key = db._store.AddSource(SourceFile.Describe(path, sourceType));
-                    var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);
-                    IReadOnlyDictionary<string, object?>? last = null;
-                    await foreach (var row in handler.Parse(path, db.Schema, cancellationToken).ConfigureAwait(false))
-                    {
-                        last = row;
-                        batch.Add(KeyHandlerRow(row, key));
-                        if (batch.Count == HandlerBatchSize)
-                        {
-                            db._store.AddRows(batch, db._expectedColumnTypes);
-                            db.RememberRow(last);
-                            AfterHandlerBatchForTests?.Invoke(db, batch.Count);
-                            batch.Clear();
-                        }
-                    }
-                    if (batch.Count > 0)
-                    {
-                        db._store.AddRows(batch, db._expectedColumnTypes);
-                        db.RememberRow(last!);
-                        AfterHandlerBatchForTests?.Invoke(db, batch.Count);
-                    }
-                    db.SplitIfLayout();
-                    return db;
-                }
-
-                await db.ImportCoreAsync(path, null, sourceType).ConfigureAwait(false);
+                    db._store.AttachParquetView(path, db._store.AddSource(source), entry.HiveFiles);
+                    db.ExtractConfiguredMetadata("data", false);
+                });
                 return db;
             }
             catch (Exception ex)
@@ -433,6 +416,9 @@ namespace squalor.DataBall
                 throw new DataBallException("Open failed", ex);
             }
         }
+
+        /// <summary>The configuration of an open, resolved once: the effective config, the store it needs and how each entry is read.</summary>
+        private sealed record ResolvedOpen(Config Config, StoreMode Store, List<EntryRoute> Routes);
 
         /// <summary>How an entry is read: its handler, whether that handler delegates, the type its source records, and the route when several sources are staged.</summary>
         private sealed record EntryRoute(OpenEntry Entry, IFormatHandler? Handler, bool Delegates, string SourceType, SourceRoute? Route);
@@ -446,32 +432,56 @@ namespace squalor.DataBall
         {
             try
             {
-                var effective = Config.CreateDefaults();
-                var routes = new List<EntryRoute>(entries.Count);
-                foreach (var entry in entries)
+                var routes = ResolveRoutes(entries);
+                var effective = ResolveConfig(routes, options);
+                return (effective, (options.Engine ?? new EngineOptions()).ResolveStore(inputBytes), routes);
+            }
+            catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
+            {
+                throw new DataBallException("Open configuration failed", ex);
+            }
+        }
+
+        /// <summary>How each detected entry is read: its handler, whether that handler delegates to the generic import, and the type its source records.</summary>
+        private static List<EntryRoute> ResolveRoutes(IReadOnlyList<OpenEntry> entries)
+        {
+            var routes = new List<EntryRoute>(entries.Count);
+            foreach (var entry in entries)
+            {
+                var report = entry.Report!;
+                var handler = report.Winner;
+                var delegates = handler is null || handler.DelegatesToGenericImport;
+                if (delegates && report.BuiltInPath is null)
+                    throw new DataBallException($"No built-in import path for this match{Environment.NewLine}{report}");
+                // What the source table records as the type: the handler's name (a JSON type's id) or the built-in path.
+                var type = handler?.Name ?? report.BuiltInPath?.ToString() ?? nameof(BuiltInPath.CsvImport);
+                SourceRoute? route = !delegates ? SourceRoute.Handler : report.BuiltInPath switch
                 {
-                    var report = entry.Report!;
-                    var handler = report.Winner;
-                    var delegates = handler is null || handler.DelegatesToGenericImport;
-                    if (delegates && report.BuiltInPath is null)
-                        throw new DataBallException($"No built-in import path for this match{Environment.NewLine}{report}");
-                    if (handler?.Overlay is { } overlay)
+                    BuiltInPath.CsvImport => SourceRoute.Csv,
+                    BuiltInPath.ParquetView => entry.Hive ? SourceRoute.Hive : SourceRoute.Parquet,
+                    BuiltInPath.ArchiveImport => SourceRoute.Archive,
+                    _ => null,
+                };
+                routes.Add(new EntryRoute(entry, handler, delegates, type, route));
+            }
+            return routes;
+        }
+
+        /// <summary>The effective config of <paramref name="routes"/>: the defaults, each route's handler overlay in order, then <c>schemaPath</c>.</summary>
+        private static Config ResolveConfig(IReadOnlyList<EntryRoute> routes, OpenOptions options)
+        {
+            try
+            {
+                var effective = Config.CreateDefaults();
+                foreach (var route in routes)
+                {
+                    if (route.Handler?.Overlay is { } overlay)
                         effective = Config.Merge(effective, overlay);
-                    // What the source table records as the type: the handler's name (a JSON type's id) or the built-in path.
-                    var type = handler?.Name ?? report.BuiltInPath?.ToString() ?? nameof(BuiltInPath.CsvImport);
-                    SourceRoute? route = !delegates ? SourceRoute.Handler : report.BuiltInPath switch
-                    {
-                        BuiltInPath.CsvImport => SourceRoute.Csv,
-                        BuiltInPath.ParquetView => entry.Hive ? SourceRoute.Hive : SourceRoute.Parquet,
-                        BuiltInPath.ArchiveImport => SourceRoute.Archive,
-                        _ => null,
-                    };
-                    routes.Add(new EntryRoute(entry, handler, delegates, type, route));
                 }
                 if (!string.IsNullOrEmpty(options.SchemaPath))
                     effective = Config.Merge(effective, Config.LoadConfig(options.SchemaPath));
                 TableLayout.Validate(effective);
-                return (effective, (options.Engine ?? new EngineOptions()).ResolveStore(inputBytes), routes);
+                return effective;
             }
             catch (Exception ex) when (ex is not DataBallException and not OperationCanceledException)
             {

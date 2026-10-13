@@ -407,29 +407,30 @@ namespace squalor.DataBall
             IReadOnlyDictionary<string, Type>? configTypes)
         {
             var qStaging = QuoteIdent(staging);
-            var policyFirst = string.Equals(config.MetadataPolicy, "first", StringComparison.OrdinalIgnoreCase);
+            var policy = MetadataPlanner.ParsePolicy(config.MetadataPolicy);
             var ignore = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var demote = new List<(string Key, object? Value)>();
             var wideNameFor = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var pair in _metadata.ToList())
             {
-                // A key that is already a wide column is data, not a constant to reconcile (legacy guard).
-                if (current.WideColumns.Contains(pair.Key, StringComparer.OrdinalIgnoreCase))
-                    continue;
                 var col = stagingCols.FirstOrDefault(c => c.Name.Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
                 if (col.Name is null)
                     continue;
-                var differing = Convert.ToInt64(
+                // A key that is already a wide column is data, not a constant to reconcile (legacy guard).
+                var home = current.WideColumns.Contains(pair.Key, StringComparer.OrdinalIgnoreCase) ? FieldHome.SessionColumn : FieldHome.Stored;
+                var decision = MetadataPlanner.PlanAgainstStored(policy, home, () => Convert.ToInt64(
                     ExecuteScalarParameterized(
                         $"SELECT COUNT(*) FILTER (WHERE {QuoteIdent(col.Name)} IS DISTINCT FROM $v) FROM {qStaging}",
                         Param("v", pair.Value)),
-                    CultureInfo.InvariantCulture);
-                if (differing == 0 || policyFirst)
+                    CultureInfo.InvariantCulture) > 0);
+                if (decision.Level == MetadataLevel.Drop)
                 {
                     ignore.Add(col.Name);
                     continue;
                 }
+                if (decision.Level != MetadataLevel.Demote)
+                    continue;
 
                 demote.Add((pair.Key, pair.Value));
                 wideNameFor[col.Name] = pair.Key;
@@ -495,11 +496,16 @@ namespace squalor.DataBall
             var fromSource = new List<string>();
             if (current.WideColumns.Contains(Lineage.KeyColumn, StringComparer.OrdinalIgnoreCase))
             {
-                var perSource = new HashSet<string>(SourceMetadataColumns().Select(c => c.Name), StringComparer.OrdinalIgnoreCase);
+                // The type of such a column is decided with the type the source table holds, so the backfill never narrows its values.
+                var backfillTypes = PlanPerSourceBackfills(
+                    current.WideColumns.Select(w => (w, string.Empty)).ToList(),
+                    incoming.Select(c => (c.Staging, c.Wide, types[c.Wide])),
+                    staging, incomingName);
                 foreach (var c in incoming)
                 {
-                    if (!perSource.Contains(c.Wide) || current.WideColumns.Contains(c.Wide, StringComparer.OrdinalIgnoreCase))
+                    if (!backfillTypes.TryGetValue(c.Wide, out var backfillType))
                         continue;
+                    types[c.Wide] = backfillType;
                     fromSource.Add(c.Wide);
                     if (!next.TableFor(c.Wide).Equals(next.Spine.Name, StringComparison.OrdinalIgnoreCase))
                         rematerialize = true;
@@ -590,9 +596,12 @@ namespace squalor.DataBall
 
             var byWide = incoming.ToDictionary(c => c.Wide, c => c, StringComparer.OrdinalIgnoreCase);
             var dimensionColumns = new HashSet<string>(layout.Dimensions.SelectMany(d => d.Columns), StringComparer.OrdinalIgnoreCase);
+            // The last row key is read here, not joined in as a subquery: a window over a scalar subquery emits its rows out of order
+            // when the staging table was created in the same transaction (a lone staged open), and the spine would then be stored out of row order.
+            var lastRow = Convert.ToInt64(ExecuteScalar($"SELECT COALESCE(MAX({qRow}), 0) FROM {qSpine}"), CultureInfo.InvariantCulture);
             var castParts = new List<string>
             {
-                $"row_number() OVER (ORDER BY rowid) + (SELECT COALESCE(MAX({qRow}), 0) FROM {qSpine}) AS {qRow}"
+                $"row_number() OVER (ORDER BY rowid) + {lastRow.ToString(CultureInfo.InvariantCulture)} AS {qRow}"
             };
             var present = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var wide in layout.WideColumns)
@@ -611,7 +620,8 @@ namespace squalor.DataBall
                 }
             }
 
-            Execute($"CREATE OR REPLACE TEMP TABLE {qCast} AS SELECT {string.Join(", ", castParts)} FROM {qStaging}");
+            // Stored in row-key order, so the spine below is too.
+            Execute($"CREATE OR REPLACE TEMP TABLE {qCast} AS SELECT {string.Join(", ", castParts)} FROM {qStaging} ORDER BY {qRow}");
 
             if (consumeSource)
                 Execute($"DROP TABLE {qStaging}");
@@ -646,7 +656,7 @@ namespace squalor.DataBall
             spineParts.AddRange(layout.Spine.Columns.Where(present.Contains).Select(QuoteIdent));
             foreach (var d in layout.Dimensions)
                 spineParts.Add($"{TableLayout.KeyExpression(d)} AS {QuoteIdent(d.KeyColumnName)}");
-            Execute($"INSERT INTO {qSpine} BY NAME SELECT {string.Join(", ", spineParts)} FROM {qCast}");
+            Execute($"INSERT INTO {qSpine} BY NAME SELECT {string.Join(", ", spineParts)} FROM {qCast} ORDER BY {qRow}");
 
             foreach (var g in layout.MeasurementGroups)
             {

@@ -730,6 +730,9 @@ namespace squalor.DataBall
             if (partitionColumns is { Length: > 0 })
                 skip = new HashSet<string>(partitionColumns, StringComparer.OrdinalIgnoreCase);
 
+            // A per-source column of the source table stays a column of "data" too, even when every row holds one value now.
+            var perSource = _store.SourceMetadataColumns().Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
             foreach (var (name, _) in _store.GetColumns().ToList())
             {
                 // Last remaining constant column drops "data"; stop rather than query a missing table.
@@ -739,6 +742,8 @@ namespace squalor.DataBall
                     continue;
                 // Constant in a single-file session, but it is lineage: it stays a column.
                 if (name.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (perSource.Contains(name))
                     continue;
 
                 var q = DuckDbStore.QuoteIdent(name);
@@ -1014,102 +1019,81 @@ namespace squalor.DataBall
             }
         }
 
+        /// <summary>
+        /// What a configured metadata field's name says before any data is looked at: lineage (<see cref="FieldHome.Reserved"/>), a declared table
+        /// key (<see cref="FieldHome.LayoutKey"/>), a built-in column of the <c>source</c> table (<see cref="FieldHome.BuiltInSourceName"/>), or
+        /// nothing special (<see cref="FieldHome.Fresh"/>).
+        /// </summary>
+        private FieldHome ClassifyField(string field)
+        {
+            if (field.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
+                return FieldHome.Reserved;
+            if (IsLayoutKeyColumn(field))
+                return FieldHome.LayoutKey;
+            return DuckDbStore.IsBuiltInSourceColumn(field) ? FieldHome.BuiltInSourceName : FieldHome.Fresh;
+        }
+
         /// <summary>True when a declared <c>tables</c> entry names <paramref name="column"/> in its <c>key</c>.</summary>
         private bool IsLayoutKeyColumn(string column) =>
             _config.Tables.Values.Any(t => t.Key.Any(k => k.Equals(column, StringComparison.OrdinalIgnoreCase)));
 
+        /// <summary>
+        /// Gives each configured metadata field of <paramref name="table"/> the level <see cref="MetadataPlanner"/> decides. With
+        /// <paramref name="append"/> (staging rows joining a live session) the column stays in the table: the append reconciliation compares it
+        /// with the stored value afterwards.
+        /// </summary>
         private void ExtractConfiguredMetadata(string table, bool append, IReadOnlySet<string>? reconciled = null)
         {
             if (!_store.TableExists(table) || _config.MetadataFields.Count == 0)
                 return;
 
-            var qTable = DuckDbStore.QuoteIdent(table);
-            var policy = _config.MetadataPolicy ?? "liftConstant";
+            var policy = MetadataPlanner.ParsePolicy(_config.MetadataPolicy);
             var existing = _store.SnapshotMetadata();
+            long? rows = null; // read once, and only for bounce
             // A field a many-file open made a column of the source table stays out of Metadata for good: an append makes it a row column.
             var perSource = _store.SourceMetadataColumns().Select(c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var field in _config.MetadataFields.ToList())
             {
                 if (reconciled?.Contains(field) == true)
                     continue; // already compared with stored metadata by the append path
-                if (field.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase))
-                    continue; // lineage, never a metadata field
-                if (IsLayoutKeyColumn(field))
-                    continue; // a declared table key stays data: the split needs it, even when it is constant
                 var cols = _store.GetColumnsOf(table);
                 var match = cols.FirstOrDefault(c => c.Name.Equals(field, StringComparison.OrdinalIgnoreCase));
                 if (match.Name is null)
                     continue;
-                if (perSource.Contains(match.Name))
-                    continue;
-                var storedValue = append && existing.ContainsKey(match.Name);
-                var enforceConstant = policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase);
-                var sessionColumn = !storedValue && append && _store.GetColumns().Any(c => c.Name.Equals(match.Name, StringComparison.OrdinalIgnoreCase));
-                if (sessionColumn && !enforceConstant)
-                    continue; // the session already holds the field as a column: it stays data, never also metadata
-                if (storedValue && !enforceConstant)
-                    continue; // the append reconciliation compares against the stored value
 
-                var q = DuckDbStore.QuoteIdent(match.Name);
-                var rows = _store.Query($"""
-                    SELECT
-                      COUNT(DISTINCT {q}) FILTER (WHERE {q} IS NOT NULL) AS d,
-                      COUNT(*) FILTER (WHERE {q} IS NULL) AS n,
-                      any_value({q}) AS v
-                    FROM {qTable}
-                    """);
-                var distinct = Convert.ToInt64(rows[0]["d"], CultureInfo.InvariantCulture);
-                var nulls = Convert.ToInt64(rows[0]["n"], CultureInfo.InvariantCulture);
-                var value = rows[0]["v"];
-
-                if (storedValue)
+                // What the session already holds under the name refines a name that is not special in itself.
+                var home = ClassifyField(field);
+                if (home is FieldHome.Fresh or FieldHome.BuiltInSourceName)
                 {
-                    // Only requireConstant gets here: a value differing from the stored one demotes, but one file must still be constant.
-                    if (distinct > 1)
-                        throw new DataBallException($"Metadata field '{match.Name}' is not constant");
-                    continue;
+                    if (perSource.Contains(match.Name))
+                        home = FieldHome.PerSource;
+                    else if (append && existing.ContainsKey(match.Name))
+                        home = FieldHome.Stored;
+                    else if (append && _store.GetColumns().Any(c => c.Name.Equals(match.Name, StringComparison.OrdinalIgnoreCase)))
+                        home = FieldHome.SessionColumn; // the session already holds the field as a column: it stays data, never also metadata
                 }
 
-                if (sessionColumn)
+                var column = match.Name;
+                var decision = MetadataPlanner.PlanStaged(policy, home, column, () =>
                 {
-                    // requireConstant still checks a column field within this file; the field itself is never lifted.
-                    if (distinct > 1)
-                        throw new DataBallException($"Metadata field '{match.Name}' is not constant");
+                    var profile = _store.ProfileColumns(table, new[] { column })[column];
+                    return new FieldFacts(profile, policy == MetadataPolicyKind.Bounce ? rows ??= _store.StagedRowCount(table) : 0);
+                });
+                if (decision.Level != MetadataLevel.Metadata)
                     continue;
-                }
 
-                if (policy.Equals("first", StringComparison.OrdinalIgnoreCase))
+                // Under first a column without a value sets nothing, but still leaves the rows.
+                var value = decision.FirstNonNull ? _store.FirstNonNull(table, column) : decision.Value;
+                if (!decision.FirstNonNull || value is not null)
+                    _store.SetMetadata(column, value);
+                if (!append)
                 {
-                    var first = _store.Query($"SELECT {q} FROM {qTable} WHERE {q} IS NOT NULL LIMIT 1");
-                    if (first.Count > 0)
-                        _store.SetMetadata(match.Name, first[0][match.Name]);
-                    if (!append)
-                    {
-                        if (table == "data" && _store.IsViewBacked)
-                            _store.ExcludeFromView(match.Name);
-                        else
-                            _store.RemoveColumnOf(table, match.Name);
-                        RemoveExpectedType(match.Name);
-                    }
-                    continue;
+                    if (table == "data" && _store.IsViewBacked)
+                        _store.ExcludeFromView(column);
+                    else
+                        _store.RemoveColumnOf(table, column);
+                    RemoveExpectedType(column);
                 }
-
-                if (distinct == 1 && (nulls == 0 || policy.Equals("bounce", StringComparison.OrdinalIgnoreCase) is false))
-                {
-                    _store.SetMetadata(match.Name, value);
-                    if (!append)
-                    {
-                        if (table == "data" && _store.IsViewBacked)
-                            _store.ExcludeFromView(match.Name);
-                        else
-                            _store.RemoveColumnOf(table, match.Name);
-                        RemoveExpectedType(match.Name);
-                    }
-                    continue;
-                }
-
-                if (enforceConstant && distinct > 1)
-                    throw new DataBallException($"Metadata field '{match.Name}' is not constant");
             }
         }
 

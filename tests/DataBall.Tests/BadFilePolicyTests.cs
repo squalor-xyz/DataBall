@@ -83,6 +83,69 @@ namespace squalor.DataBall.Tests
             }
         }
 
+        /// <summary>db-27: a file opened alone fails as a file of a many-file open does, naming itself.</summary>
+        [Fact]
+        public void Open_SingleFile_Abort_NamesSource()
+        {
+            var dir = TempDir();
+            var temp = Path.Combine(dir, "temp");
+            Directory.CreateDirectory(temp);
+            try
+            {
+                // The header types n as a number, so the text cannot be staged.
+                var bad = Csv(dir, "bad.csv", "n(dB)\nabc\n");
+                var engine = new EngineOptions { Store = StoreMode.File, TempDirectory = temp };
+
+                var reserved = new List<string>();
+                DuckDbStore.ExclusivePathReservedForTests = path => { lock (reserved) reserved.Add(path); };
+                try
+                {
+                    var ex = Assert.Throws<DataBallException>(() => DataBall.Open(bad, engine: engine));
+                    Assert.StartsWith($"Cannot open '{bad}': ", ex.Message);
+                    var viaList = Assert.Throws<DataBallException>(() => DataBall.Open(new[] { bad }, new OpenOptions { Engine = engine }));
+                    Assert.StartsWith($"Cannot open '{bad}': ", viaList.Message);
+                }
+                finally
+                {
+                    DuckDbStore.ExclusivePathReservedForTests = null;
+                }
+                // No session is left: the gate is clear and the temporary store is gone.
+                var ours = reserved.Where(p => p.StartsWith(temp, StringComparison.Ordinal)).ToList();
+                Assert.NotEmpty(ours);
+                foreach (var path in ours)
+                    Assert.False(DuckDbStore.HoldsExclusivePathForTests(path), $"still in the open-file gate: {path}");
+                Assert.Empty(Directory.GetFileSystemEntries(temp));
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>db-27, characterization: a lone file that Skip cannot open fails with the wording a single-path open always had.</summary>
+        [Fact]
+        public void Open_SingleFile_Skip_KeepsItsWording()
+        {
+            var dir = TempDir();
+            try
+            {
+                var bad = Csv(dir, "bad.csv", "n(dB)\nabc\n");
+                var notes = Csv(dir, "notes.txt", "not data");
+
+                var alone = Assert.Throws<DataBallException>(() => DataBall.Open(new[] { bad }, Skip));
+                Assert.StartsWith($"Cannot open '{bad}': ", alone.Message);
+
+                // A file skipped before it was read comes first, and the cause of the lone file that remained closes the message.
+                var withNotes = Assert.Throws<DataBallException>(() => DataBall.Open(new[] { notes, bad }, Skip));
+                Assert.StartsWith($"No file to open: every input was skipped as bad: {notes}, {bad}: ", withNotes.Message);
+                Assert.DoesNotContain("Cannot open", withNotes.Message);
+            }
+            finally
+            {
+                Directory.Delete(dir, true);
+            }
+        }
+
         [Fact]
         public void Open_BadFile_Skip_OtherFilesLand()
         {
@@ -733,22 +796,48 @@ namespace squalor.DataBall.Tests
             }
         }
 
+        /// <summary>
+        /// db-27: a skipped source's handler overlay does not shape the session. When the overlay changed the config, the surviving
+        /// sources are resolved and staged again, so the session equals opening them alone; when it changed nothing they are staged once.
+        /// </summary>
         [Fact]
-        public void Open_SkippedFilesHandlerOverlay_StillShapesTheConfig()
+        public void Open_SkippedHandlerOverlay_DoesNotShapeConfig()
         {
             var dir = TempDir();
             DataBall.ClearHandlers();
             try
             {
-                // The overlay comes from the handler that matched the file, not from its rows, so a skipped file keeps it.
+                var counter = new CountingHandler();
                 DataBall.RegisterHandler(new OverlayExplodingHandler());
-                var a = Csv(dir, "a.csv", "id\n1\n");
+                DataBall.RegisterHandler(new PlainExplodingHandler());
+                DataBall.RegisterHandler(counter);
+                // Gain is a whole number untyped; the exploding handler's overlay would type it as a double and make Site a metadata field.
+                var a = Csv(dir, "a.csv", "id,Gain,Site\n1,5,S1\n2,5,S1\n");
                 var bad = Csv(dir, "z.over", "anything");
+                var count = Csv(dir, "m.count", "anything");
 
-                using var db = DataBall.Open(new[] { a, bad }, Skip);
-                Assert.Equal(new[] { a }, db.Sources.Select(s => s.Path).ToArray());
-                Assert.Single(db.OpenReport!.Skipped);
-                Assert.Contains("Site", db.Schema.MetadataFields);
+                using var alone = DataBall.Open(new[] { a, count });
+                counter.Calls = 0;
+                using var db = DataBall.Open(new[] { a, count, bad }, Skip);
+
+                Assert.Equal(new[] { a, count }, db.Sources.Select(s => s.Path).ToArray());
+                Assert.Equal(bad, Assert.Single(db.OpenReport!.Skipped).Path);
+                Assert.DoesNotContain("Site", db.Schema.MetadataFields);
+                Assert.Equal(alone.Schema.ToJson(), db.Schema.ToJson());
+                Assert.Equal(alone.Metadata.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray(), db.Metadata.OrderBy(p => p.Key, StringComparer.Ordinal).ToArray());
+                Assert.Equal(alone.Query("DESCRIBE data").Select(r => ((string)r["column_name"]!, (string)r["column_type"]!)).ToArray(),
+                    db.Query("DESCRIBE data").Select(r => ((string)r["column_name"]!, (string)r["column_type"]!)).ToArray());
+                Assert.Equal("BIGINT", db.Query("DESCRIBE data").Single(r => (string)r["column_name"]! == "Gain")["column_type"]);
+                Assert.Contains("Site", DataColumns(db));
+                // The overlay changed the config, so the surviving handler source was staged again, once.
+                Assert.Equal(2, counter.Calls);
+
+                // A skipped source whose handler brings no overlay changes nothing: the survivors are staged once.
+                counter.Calls = 0;
+                var plain = Csv(dir, "y.plain", "anything");
+                using var kept = DataBall.Open(new[] { a, count, plain }, Skip);
+                Assert.Equal(plain, Assert.Single(kept.OpenReport!.Skipped).Path);
+                Assert.Equal(1, counter.Calls);
             }
             finally
             {
@@ -850,14 +939,14 @@ namespace squalor.DataBall.Tests
             }
         }
 
-        /// <summary>Claims <c>.over</c> files, overlays a metadata field <c>Site</c>, and throws from the first read.</summary>
+        /// <summary>Claims <c>.over</c> files, overlays a metadata field <c>Site</c> and a typed column <c>Gain</c>, and throws from the first read.</summary>
         private sealed class OverlayExplodingHandler : IFormatHandler
         {
             public bool CanHandle(string path, Stream sniff) => path.EndsWith(".over", StringComparison.OrdinalIgnoreCase);
 
             public string Name => "OverlayExplodingHandler";
 
-            public Config? Overlay => new Config { MetadataFieldsAdd = { "Site" } };
+            public Config? Overlay => new Config { MetadataFieldsAdd = { "Site" }, Columns = { ["Gain"] = "double" } };
 
             public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
                 string path,
@@ -870,6 +959,48 @@ namespace squalor.DataBall.Tests
                 if (path.Length >= 0)
                     throw new InvalidOperationException("overlay handler exploded");
                 yield break;
+            }
+        }
+
+        /// <summary>Claims <c>.plain</c> files, has no overlay, and throws from the first read.</summary>
+        private sealed class PlainExplodingHandler : IFormatHandler
+        {
+            public bool CanHandle(string path, Stream sniff) => path.EndsWith(".plain", StringComparison.OrdinalIgnoreCase);
+
+            public string Name => "PlainExplodingHandler";
+
+            public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
+                string path,
+                Config schema,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                _ = schema;
+                await Task.Yield();
+                cancellationToken.ThrowIfCancellationRequested();
+                if (path.Length >= 0)
+                    throw new InvalidOperationException("plain handler exploded");
+                yield break;
+            }
+        }
+
+        /// <summary>Claims <c>.count</c> files, yields one row, and counts how often it is asked to parse.</summary>
+        private sealed class CountingHandler : IFormatHandler
+        {
+            public int Calls;
+
+            public bool CanHandle(string path, Stream sniff) => path.EndsWith(".count", StringComparison.OrdinalIgnoreCase);
+
+            public string Name => "CountingHandler";
+
+            public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
+                string path,
+                Config schema,
+                [EnumeratorCancellation] CancellationToken cancellationToken = default)
+            {
+                _ = (path, schema);
+                Calls++;
+                await Task.Yield();
+                yield return new Dictionary<string, object?> { ["id"] = 9L, ["Gain"] = 5L };
             }
         }
 
