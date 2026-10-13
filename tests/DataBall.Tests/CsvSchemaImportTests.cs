@@ -9,7 +9,7 @@ namespace squalor.DataBall.Tests
     public class CsvSchemaImportTests
     {
         [Fact]
-        public void ImportCsv_ParenUnits_RenamesAndTypesDouble()
+        public async Task ImportCsv_ParenUnits_RenamesAndTypesDouble()
         {
             var dir = TempDir();
             try
@@ -17,7 +17,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "EVM(dB),I_Total(A)\n1.5,0.02\n2.25,0.03\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 var rows = db.Query("SELECT EVM, I_Total FROM data ORDER BY EVM");
                 Assert.Equal(2, rows.Count);
                 Assert.Equal(1.5, Assert.IsType<double>(rows[0]["EVM"]), 3);
@@ -30,7 +30,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_LotMetadata_MovesToMetaWhenConstant()
+        public async Task ImportCsv_LotMetadata_MovesToMetaWhenConstant()
         {
             var dir = TempDir();
             try
@@ -38,7 +38,7 @@ namespace squalor.DataBall.Tests
                 var csv = Path.Combine(dir, "meas.csv");
                 File.WriteAllText(csv, "Lot,EVM(dB)\nL1,1.5\nL1,2.0\n");
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv, append: false);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
                 Assert.Equal("L1", db.Metadata["Lot"]?.ToString());
                 var cols = db.Query("SELECT * FROM data LIMIT 1")[0];
                 Assert.False(cols.ContainsKey("Lot"));
@@ -51,7 +51,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void ImportCsv_LotVaries_ThrowsWhenRequireConstant()
+        public async Task ImportCsv_LotVaries_ThrowsWhenRequireConstant()
         {
             var dir = TempDir();
             try
@@ -61,7 +61,7 @@ namespace squalor.DataBall.Tests
                 var config = Path.Combine(dir, "strict.json");
                 File.WriteAllText(config, """{"metadataPolicy":"requireConstant"}""");
                 using var db = new DataBall(config);
-                var ex = Assert.Throws<DataBallException>(() => ImportManager.ImportFromCsv(db, csv, append: false));
+                var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(csv, new ImportOptions { Append = false }));
                 var msg = (ex.InnerException ?? ex).Message;
                 Assert.Contains("Lot", msg, StringComparison.Ordinal);
             }

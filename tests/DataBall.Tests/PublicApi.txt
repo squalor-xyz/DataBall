@@ -1,0 +1,298 @@
+squalor.DataBall.BadFilePolicy : enum
+squalor.DataBall.BadFilePolicy.const Abort : BadFilePolicy = 0
+squalor.DataBall.BadFilePolicy.const Skip : BadFilePolicy = 1
+squalor.DataBall.BuiltInPath : enum
+squalor.DataBall.BuiltInPath.const ArchiveImport : BuiltInPath = 3
+squalor.DataBall.BuiltInPath.const BallImport : BuiltInPath = 4
+squalor.DataBall.BuiltInPath.const CsvImport : BuiltInPath = 2
+squalor.DataBall.BuiltInPath.const NativeBall : BuiltInPath = 0
+squalor.DataBall.BuiltInPath.const ParquetView : BuiltInPath = 1
+squalor.DataBall.ColumnData : abstract class
+squalor.DataBall.ColumnData.ElementType : Type { get }
+squalor.DataBall.ColumnData.Name : String { get }
+squalor.DataBall.ColumnData.Nulls : Boolean[]? { get }
+squalor.DataBall.ColumnData.Values : Array { get }
+squalor.DataBall.ColumnData<T> : sealed class : squalor.DataBall.ColumnData
+squalor.DataBall.ColumnData<T>.Values : T[] { get }
+squalor.DataBall.ColumnPredicate : sealed class
+squalor.DataBall.ColumnPredicate..ctor()
+squalor.DataBall.ColumnPredicate.Op : PredicateOp { get init }
+squalor.DataBall.ColumnPredicate.Value : Object? { get init }
+squalor.DataBall.ColumnPredicate.ValueTo : Object? { get init }
+squalor.DataBall.ColumnPredicate.required Column : String { get init }
+squalor.DataBall.ColumnSet : sealed class
+squalor.DataBall.ColumnSet.Columns : IReadOnlyList<ColumnData> { get }
+squalor.DataBall.ColumnSet.Item[String name] : ColumnData { get }
+squalor.DataBall.ColumnSet.RowCount : Int64 { get }
+squalor.DataBall.Config : class
+squalor.DataBall.Config..ctor()
+squalor.DataBall.Config.Classification : List<String> { get set }
+squalor.DataBall.Config.Columns : Dictionary<String, String> { get set }
+squalor.DataBall.Config.Csv : CsvConfig { get set }
+squalor.DataBall.Config.Metadata : Dictionary<String, Object> { get set }
+squalor.DataBall.Config.MetadataFields : List<String> { get set }
+squalor.DataBall.Config.MetadataFieldsAdd : List<String> { get set }
+squalor.DataBall.Config.MetadataPolicy : String? { get set }
+squalor.DataBall.Config.Parameters : Dictionary<String, ParameterSpec> { get set }
+squalor.DataBall.Config.Relationships : List<Relationship> { get set }
+squalor.DataBall.Config.ResolveRole(String canonicalName) : String
+squalor.DataBall.Config.ResolveTypeName(String canonicalName, String? unit) : String?
+squalor.DataBall.Config.Stimulus : List<String> { get set }
+squalor.DataBall.Config.Tables : Dictionary<String, TableSpec> { get set }
+squalor.DataBall.Config.TryResolveUnitType(String unit) : String?
+squalor.DataBall.Config.Units : Dictionary<String, UnitSpec> { get set }
+squalor.DataBall.Config.static CreateDefaults() : Config
+squalor.DataBall.Config.static LoadConfig(String path) : Config
+squalor.DataBall.Config.static LoadMerged(String path) : Config
+squalor.DataBall.Config.static Merge(Config baseline, Config overlay) : Config
+squalor.DataBall.Config.static ParseColumnType(String name) : Type
+squalor.DataBall.CsvConfig : sealed class
+squalor.DataBall.CsvConfig..ctor()
+squalor.DataBall.CsvConfig.HeaderPatterns : List<String> { get set }
+squalor.DataBall.DataBall : sealed class : System.IDisposable
+squalor.DataBall.DataBall..ctor(String? configPath = default, ILogger? logger = default, String? databasePath = default, EngineOptions? engine = default)
+squalor.DataBall.DataBall.AddColumn(String name, IEnumerable<String> values) : Void
+squalor.DataBall.DataBall.AddColumn<T>(String name, IEnumerable<T> values) : Void where T : struct
+squalor.DataBall.DataBall.AddRow(IReadOnlyDictionary<String, Object> values) : Void
+squalor.DataBall.DataBall.AddRows(IEnumerable<IReadOnlyDictionary<String, Object>> rows) : Void
+squalor.DataBall.DataBall.ApplyFilter(SessionFilter? filter) : Void
+squalor.DataBall.DataBall.Bounce(String? partitionedParquetPath = default, String[]? partitionColumns = default) : Task
+squalor.DataBall.DataBall.CommitRow() : Void
+squalor.DataBall.DataBall.Count(SessionFilter filter) : Int64
+squalor.DataBall.DataBall.CurrentFilter : SessionFilter? { get }
+squalor.DataBall.DataBall.Dispose() : Void
+squalor.DataBall.DataBall.ExportAsync(String path, ExportOptions options) : Task
+squalor.DataBall.DataBall.Filter(SessionFilter filter) : IReadOnlyList<Dictionary<String, Object>>
+squalor.DataBall.DataBall.ImportAsync(DataBall other, ImportOptions? options = default) : Task
+squalor.DataBall.DataBall.ImportAsync(IReadOnlyList<String> inputs, ImportOptions? options = default, CancellationToken cancellationToken = default) : Task
+squalor.DataBall.DataBall.ImportAsync(String path, ImportOptions? options = default, CancellationToken cancellationToken = default) : Task
+squalor.DataBall.DataBall.InitializeRow(IReadOnlyDictionary<String, Object>? initial = default) : Void
+squalor.DataBall.DataBall.Metadata : IReadOnlyDictionary<String, Object> { get }
+squalor.DataBall.DataBall.ModifyField(String field, Object? value) : Void
+squalor.DataBall.DataBall.OpenReport : OpenReport? { get }
+squalor.DataBall.DataBall.OpenedSnapshot : SnapshotInfo? { get }
+squalor.DataBall.DataBall.PublishSnapshotAsync(SnapshotOptions options) : Task<SnapshotInfo>
+squalor.DataBall.DataBall.Query(String sql) : IReadOnlyList<Dictionary<String, Object>>
+squalor.DataBall.DataBall.ReadColumns(SessionFilter filter) : ColumnSet
+squalor.DataBall.DataBall.ReadRowsAsync(SessionFilter filter, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.DataBall.RemoveColumn(String name) : Void
+squalor.DataBall.DataBall.SaveAsync(String path, SaveOptions? options = default) : Task
+squalor.DataBall.DataBall.Schema : Config { get }
+squalor.DataBall.DataBall.SetMetadata(String key, Object? value) : Void
+squalor.DataBall.DataBall.Sources : IReadOnlyList<SourceInfo> { get }
+squalor.DataBall.DataBall.Squish(String? partitionedParquetPath = default, String[]? partitionColumns = default) : Task
+squalor.DataBall.DataBall.static ClearHandlers() : Void
+squalor.DataBall.DataBall.static Detect(String path) : DetectionReport
+squalor.DataBall.DataBall.static FileTypes : IReadOnlyList<FileTypeInfo> { get }
+squalor.DataBall.DataBall.static Open(IReadOnlyList<String> inputs, OpenOptions? options = default) : DataBall
+squalor.DataBall.DataBall.static Open(String path, OpenOptions? options = default) : DataBall
+squalor.DataBall.DataBall.static OpenAsync(IReadOnlyList<String> inputs, OpenOptions? options = default, CancellationToken cancellationToken = default) : Task<DataBall>
+squalor.DataBall.DataBall.static OpenAsync(String path, OpenOptions? options = default, CancellationToken cancellationToken = default) : Task<DataBall>
+squalor.DataBall.DataBall.static ReadSnapshotGeneration(String pointerPath) : Int32?
+squalor.DataBall.DataBall.static RegisterFileType(String path) : Void
+squalor.DataBall.DataBall.static RegisterHandler(IFormatHandler handler) : Void
+squalor.DataBall.DataBallException : class : System.Exception, System.Runtime.Serialization.ISerializable
+squalor.DataBall.DataBallException..ctor(String message)
+squalor.DataBall.DataBallException..ctor(String message, Exception innerException)
+squalor.DataBall.DetectionOutcome : enum
+squalor.DataBall.DetectionOutcome.const Ambiguous : DetectionOutcome = 2
+squalor.DataBall.DetectionOutcome.const Generic : DetectionOutcome = 1
+squalor.DataBall.DetectionOutcome.const Match : DetectionOutcome = 0
+squalor.DataBall.DetectionOutcome.const None : DetectionOutcome = 3
+squalor.DataBall.DetectionReport : sealed class
+squalor.DataBall.DetectionReport.BuiltInPath : BuiltInPath? { get }
+squalor.DataBall.DetectionReport.FallbackReason : String { get }
+squalor.DataBall.DetectionReport.Handlers : IReadOnlyList<HandlerDetection> { get }
+squalor.DataBall.DetectionReport.Outcome : DetectionOutcome { get }
+squalor.DataBall.DetectionReport.Reason : String { get }
+squalor.DataBall.DetectionReport.Winner : IFormatHandler? { get }
+squalor.DataBall.DetectionReport.virtual ToString() : String
+squalor.DataBall.DetectionScore : sealed class
+squalor.DataBall.DetectionScore..ctor(Double score, IReadOnlyList<String> reasons)
+squalor.DataBall.DetectionScore.Reasons : IReadOnlyList<String> { get }
+squalor.DataBall.DetectionScore.Score : Double { get }
+squalor.DataBall.EngineOptions : sealed class
+squalor.DataBall.EngineOptions..ctor()
+squalor.DataBall.EngineOptions.InMemoryMaxBytes : Int64? { get set }
+squalor.DataBall.EngineOptions.MemoryLimit : String? { get set }
+squalor.DataBall.EngineOptions.Store : StoreMode { get set }
+squalor.DataBall.EngineOptions.TempDirectory : String? { get set }
+squalor.DataBall.EngineOptions.Threads : Int32? { get set }
+squalor.DataBall.ExportOptions : sealed class
+squalor.DataBall.ExportOptions..ctor()
+squalor.DataBall.ExportOptions.PartitionBy : IReadOnlyList<String>? { get init }
+squalor.DataBall.ExportOptions.required Format : ExportType { get init }
+squalor.DataBall.ExportType : enum
+squalor.DataBall.ExportType.const Archive : ExportType = 2
+squalor.DataBall.ExportType.const Csv : ExportType = 0
+squalor.DataBall.ExportType.const Parquet : ExportType = 1
+squalor.DataBall.FileProbe : sealed class
+squalor.DataBall.FileProbe..ctor(String path)
+squalor.DataBall.FileProbe.Delimiter : Char { get }
+squalor.DataBall.FileProbe.Extension : String { get }
+squalor.DataBall.FileProbe.FileName : String { get }
+squalor.DataBall.FileProbe.Head : ReadOnlyMemory<Byte> { get }
+squalor.DataBall.FileProbe.HeadLines : IReadOnlyList<String> { get }
+squalor.DataBall.FileProbe.HeaderFields : IReadOnlyList<String> { get }
+squalor.DataBall.FileProbe.IsDirectory : Boolean { get }
+squalor.DataBall.FileProbe.IsParquet : Boolean { get }
+squalor.DataBall.FileProbe.LastWriteTime : DateTime { get }
+squalor.DataBall.FileProbe.Length : Int64 { get }
+squalor.DataBall.FileProbe.ParquetColumns : IReadOnlyList<String> { get }
+squalor.DataBall.FileProbe.Path : String { get }
+squalor.DataBall.FileTypes.FileTypeInfo : sealed class : System.IEquatable<FileTypeInfo>
+squalor.DataBall.FileTypes.FileTypeInfo..ctor(String Id, Int32 Version, String Origin)
+squalor.DataBall.FileTypes.FileTypeInfo.Deconstruct(out String Id, out Int32 Version, out String Origin) : Void
+squalor.DataBall.FileTypes.FileTypeInfo.Equals(FileTypeInfo? other) : Boolean
+squalor.DataBall.FileTypes.FileTypeInfo.Id : String { get init }
+squalor.DataBall.FileTypes.FileTypeInfo.Origin : String { get init }
+squalor.DataBall.FileTypes.FileTypeInfo.Version : Int32 { get init }
+squalor.DataBall.FileTypes.FileTypeInfo.static op_Equality(FileTypeInfo? left, FileTypeInfo? right) : Boolean
+squalor.DataBall.FileTypes.FileTypeInfo.static op_Inequality(FileTypeInfo? left, FileTypeInfo? right) : Boolean
+squalor.DataBall.FileTypes.FileTypeInfo.virtual Equals(Object? obj) : Boolean
+squalor.DataBall.FileTypes.FileTypeInfo.virtual GetHashCode() : Int32
+squalor.DataBall.FileTypes.FileTypeInfo.virtual ToString() : String
+squalor.DataBall.HandlerDetection : sealed class : System.IEquatable<HandlerDetection>
+squalor.DataBall.HandlerDetection..ctor(String Name, Double Score, Double MinScore, Int32 Priority, IReadOnlyList<String> Reasons, String? Origin)
+squalor.DataBall.HandlerDetection.Deconstruct(out String Name, out Double Score, out Double MinScore, out Int32 Priority, out IReadOnlyList<String> Reasons, out String? Origin) : Void
+squalor.DataBall.HandlerDetection.Equals(HandlerDetection? other) : Boolean
+squalor.DataBall.HandlerDetection.MinScore : Double { get init }
+squalor.DataBall.HandlerDetection.Name : String { get init }
+squalor.DataBall.HandlerDetection.Origin : String? { get init }
+squalor.DataBall.HandlerDetection.Priority : Int32 { get init }
+squalor.DataBall.HandlerDetection.Reasons : IReadOnlyList<String> { get init }
+squalor.DataBall.HandlerDetection.Score : Double { get init }
+squalor.DataBall.HandlerDetection.static op_Equality(HandlerDetection? left, HandlerDetection? right) : Boolean
+squalor.DataBall.HandlerDetection.static op_Inequality(HandlerDetection? left, HandlerDetection? right) : Boolean
+squalor.DataBall.HandlerDetection.virtual Equals(Object? obj) : Boolean
+squalor.DataBall.HandlerDetection.virtual GetHashCode() : Int32
+squalor.DataBall.HandlerDetection.virtual ToString() : String
+squalor.DataBall.HeaderParser : static class
+squalor.DataBall.HeaderParser.const NameOnly : String = {name}
+squalor.DataBall.HeaderParser.const NameUnderscoreUnit : String = {name}_{unit}
+squalor.DataBall.HeaderParser.const NameUnitParens : String = {name}({unit})
+squalor.DataBall.HeaderParser.static Parse(String header, IReadOnlyList<String> patterns, Func<String, Boolean> isKnownUnit) : ValueTuple<String, String>
+squalor.DataBall.IFormatHandler : interface
+squalor.DataBall.IFormatHandler.DelegatesToGenericImport : Boolean { get }
+squalor.DataBall.IFormatHandler.MinScore : Double { get }
+squalor.DataBall.IFormatHandler.Name : String { get }
+squalor.DataBall.IFormatHandler.Overlay : Config? { get }
+squalor.DataBall.IFormatHandler.Priority : Int32 { get }
+squalor.DataBall.IFormatHandler.abstract CanHandle(String path, Stream sniff) : Boolean
+squalor.DataBall.IFormatHandler.abstract Parse(String path, Config schema, CancellationToken cancellationToken = default) : IAsyncEnumerable<IReadOnlyDictionary<String, Object>>
+squalor.DataBall.IFormatHandler.virtual Score(FileProbe probe) : DetectionScore
+squalor.DataBall.ImportOptions : sealed class
+squalor.DataBall.ImportOptions..ctor()
+squalor.DataBall.ImportOptions.Append : Boolean { get init }
+squalor.DataBall.OpenOptions : sealed class
+squalor.DataBall.OpenOptions..ctor()
+squalor.DataBall.OpenOptions.Engine : EngineOptions? { get init }
+squalor.DataBall.OpenOptions.OnBadFile : BadFilePolicy { get init }
+squalor.DataBall.OpenOptions.Recursive : Boolean { get init }
+squalor.DataBall.OpenOptions.SchemaPath : String? { get init }
+squalor.DataBall.OpenOptions.Writable : Boolean { get init }
+squalor.DataBall.OpenReport : sealed class
+squalor.DataBall.OpenReport.Ignored : IReadOnlyList<String> { get }
+squalor.DataBall.OpenReport.Skipped : IReadOnlyList<SkippedFile> { get }
+squalor.DataBall.OpenReport.Sources : IReadOnlyList<OpenedSource> { get }
+squalor.DataBall.OpenedSource : sealed class : System.IEquatable<OpenedSource>
+squalor.DataBall.OpenedSource..ctor(SourceInfo Source, Int64 Rows)
+squalor.DataBall.OpenedSource.Deconstruct(out SourceInfo Source, out Int64 Rows) : Void
+squalor.DataBall.OpenedSource.Equals(OpenedSource? other) : Boolean
+squalor.DataBall.OpenedSource.Rows : Int64 { get init }
+squalor.DataBall.OpenedSource.Source : SourceInfo { get init }
+squalor.DataBall.OpenedSource.static op_Equality(OpenedSource? left, OpenedSource? right) : Boolean
+squalor.DataBall.OpenedSource.static op_Inequality(OpenedSource? left, OpenedSource? right) : Boolean
+squalor.DataBall.OpenedSource.virtual Equals(Object? obj) : Boolean
+squalor.DataBall.OpenedSource.virtual GetHashCode() : Int32
+squalor.DataBall.OpenedSource.virtual ToString() : String
+squalor.DataBall.ParameterRole : static class
+squalor.DataBall.ParameterRole.const Classification : String = classification
+squalor.DataBall.ParameterRole.const Identity : String = identity
+squalor.DataBall.ParameterRole.const Meas : String = meas
+squalor.DataBall.ParameterRole.const Metadata : String = metadata
+squalor.DataBall.ParameterRole.const Stimulus : String = stimulus
+squalor.DataBall.ParameterSpec : sealed class
+squalor.DataBall.ParameterSpec..ctor()
+squalor.DataBall.ParameterSpec.Role : String? { get set }
+squalor.DataBall.ParameterSpec.Type : String? { get set }
+squalor.DataBall.ParsedHeader : sealed class
+squalor.DataBall.ParsedHeader..ctor(String raw, String name, String? unit, String role, Type? clrType)
+squalor.DataBall.ParsedHeader.ClrType : Type? { get }
+squalor.DataBall.ParsedHeader.Name : String { get }
+squalor.DataBall.ParsedHeader.Raw : String { get }
+squalor.DataBall.ParsedHeader.Role : String { get }
+squalor.DataBall.ParsedHeader.Unit : String? { get }
+squalor.DataBall.PredicateOp : enum
+squalor.DataBall.PredicateOp.const Eq : PredicateOp = 0
+squalor.DataBall.PredicateOp.const Ge : PredicateOp = 2
+squalor.DataBall.PredicateOp.const In : PredicateOp = 1
+squalor.DataBall.PredicateOp.const Le : PredicateOp = 3
+squalor.DataBall.PredicateOp.const Range : PredicateOp = 4
+squalor.DataBall.Relationship : class
+squalor.DataBall.Relationship..ctor()
+squalor.DataBall.Relationship.ResetFields : List<String> { get set }
+squalor.DataBall.Relationship.TriggerField : String { get set }
+squalor.DataBall.SaveOptions : sealed class
+squalor.DataBall.SaveOptions..ctor()
+squalor.DataBall.SaveOptions.Link : Boolean { get init }
+squalor.DataBall.SchemaResolver : static class
+squalor.DataBall.SchemaResolver.static Resolve(String rawHeader, Config config) : ParsedHeader
+squalor.DataBall.SchemaResolver.static ResolveAll(IEnumerable<String> rawHeaders, Config config) : IReadOnlyList<ParsedHeader>
+squalor.DataBall.SessionFilter : sealed class
+squalor.DataBall.SessionFilter..ctor()
+squalor.DataBall.SessionFilter.Columns : IReadOnlyList<String>? { get init }
+squalor.DataBall.SessionFilter.Predicates : IReadOnlyList<ColumnPredicate> { get init }
+squalor.DataBall.SkippedFile : sealed class : System.IEquatable<SkippedFile>
+squalor.DataBall.SkippedFile..ctor(String Path, String Message, Int64? Row, String? Column, String? Value)
+squalor.DataBall.SkippedFile.Column : String? { get init }
+squalor.DataBall.SkippedFile.Deconstruct(out String Path, out String Message, out Int64? Row, out String? Column, out String? Value) : Void
+squalor.DataBall.SkippedFile.Equals(SkippedFile? other) : Boolean
+squalor.DataBall.SkippedFile.Message : String { get init }
+squalor.DataBall.SkippedFile.Path : String { get init }
+squalor.DataBall.SkippedFile.Row : Int64? { get init }
+squalor.DataBall.SkippedFile.Value : String? { get init }
+squalor.DataBall.SkippedFile.static op_Equality(SkippedFile? left, SkippedFile? right) : Boolean
+squalor.DataBall.SkippedFile.static op_Inequality(SkippedFile? left, SkippedFile? right) : Boolean
+squalor.DataBall.SkippedFile.virtual Equals(Object? obj) : Boolean
+squalor.DataBall.SkippedFile.virtual GetHashCode() : Int32
+squalor.DataBall.SkippedFile.virtual ToString() : String
+squalor.DataBall.SnapshotInfo : sealed class
+squalor.DataBall.SnapshotInfo.Bytes : Int64 { get init }
+squalor.DataBall.SnapshotInfo.Duration : TimeSpan { get init }
+squalor.DataBall.SnapshotInfo.Generation : Int32 { get init }
+squalor.DataBall.SnapshotInfo.Path : String { get init }
+squalor.DataBall.SnapshotInfo.PointerPath : String { get init }
+squalor.DataBall.SnapshotOptions : sealed class
+squalor.DataBall.SnapshotOptions..ctor()
+squalor.DataBall.SnapshotOptions.EmbedViews : Boolean { get init }
+squalor.DataBall.SnapshotOptions.Keep : Int32 { get init }
+squalor.DataBall.SnapshotOptions.required Directory : String { get init }
+squalor.DataBall.SnapshotOptions.required Name : String { get init }
+squalor.DataBall.SourceInfo : sealed class : System.IEquatable<SourceInfo>
+squalor.DataBall.SourceInfo.AddedUtc : DateTime { get init }
+squalor.DataBall.SourceInfo.Bytes : Int64 { get init }
+squalor.DataBall.SourceInfo.Equals(SourceInfo? other) : Boolean
+squalor.DataBall.SourceInfo.Key : Int64 { get init }
+squalor.DataBall.SourceInfo.ModifiedUtc : DateTime? { get init }
+squalor.DataBall.SourceInfo.Path : String { get init }
+squalor.DataBall.SourceInfo.Sha256 : String? { get init }
+squalor.DataBall.SourceInfo.Type : String { get init }
+squalor.DataBall.SourceInfo.virtual Equals(Object? obj) : Boolean
+squalor.DataBall.SourceInfo.virtual GetHashCode() : Int32
+squalor.DataBall.SourceInfo.virtual ToString() : String
+squalor.DataBall.StoreMode : enum
+squalor.DataBall.StoreMode.const Auto : StoreMode = 0
+squalor.DataBall.StoreMode.const File : StoreMode = 2
+squalor.DataBall.StoreMode.const Memory : StoreMode = 1
+squalor.DataBall.TableSpec : sealed class
+squalor.DataBall.TableSpec..ctor()
+squalor.DataBall.TableSpec.Columns : List<String> { get set }
+squalor.DataBall.TableSpec.Key : List<String> { get set }
+squalor.DataBall.TableSpec.Kind : String { get set }
+squalor.DataBall.TableSpec.Parent : String? { get set }
+squalor.DataBall.TableSpec.Roles : List<String> { get set }
+squalor.DataBall.UnitSpec : sealed class
+squalor.DataBall.UnitSpec..ctor()
+squalor.DataBall.UnitSpec.Aliases : List<String> { get set }
+squalor.DataBall.UnitSpec.Type : String { get set }

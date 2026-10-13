@@ -7,7 +7,6 @@ using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
 using Xunit;
-using squalor.DataBall.Export;
 
 namespace squalor.DataBall.Tests
 {
@@ -79,7 +78,7 @@ namespace squalor.DataBall.Tests
         {
             var fixture = Path.Combine(AppContext.BaseDirectory, "fixtures");
             using var db = DataBall.Open(Path.Combine(fixture, "semiconductor-sweep.csv"),
-                Path.Combine(fixture, "semiconductor-sweep.tables.json"));
+                new OpenOptions { SchemaPath = Path.Combine(fixture, "semiconductor-sweep.tables.json") });
             Assert.Equal("VIEW", db.Query("SELECT table_type FROM information_schema.tables WHERE table_name='data'")[0]["table_type"]);
             var filter = new SessionFilter { Columns = ["EVM", "Temp"] };
             var columns = db.ReadColumns(filter);
@@ -192,7 +191,7 @@ namespace squalor.DataBall.Tests
                             case "Count": db.Count(new SessionFilter()); break;
                             case "Filter": db.Filter(new SessionFilter()); break;
                             case "ReadColumns": db.ReadColumns(new SessionFilter()); break;
-                            case "ExportAsync": await db.ExportAsync(path + ".csv", ExportType.Csv); break;
+                            case "ExportAsync": await db.ExportAsync(path + ".csv", new ExportOptions { Format = ExportType.Csv }); break;
                             case "SaveAsync": await db.SaveAsync(path + ".ball"); break;
                             case "Delete": db.Query("DELETE FROM data WHERE Id = -1"); break;
                         }

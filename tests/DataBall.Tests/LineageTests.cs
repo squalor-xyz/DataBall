@@ -9,7 +9,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using squalor.DataBall.Export;
 using squalor.DataBall.Import;
 using Xunit;
 
@@ -120,7 +119,7 @@ namespace squalor.DataBall.Tests
                 var csv = WriteCsv(dir, "a.csv", "id,Gain(dB)\n1,20.5\n");
                 var config = Path.Combine(dir, "overlay.json");
                 File.WriteAllText(config, """{ "metadataFields": ["_source_key", "Lot"] }""");
-                using var db = DataBall.Open(csv, config);
+                using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = config });
                 Assert.Equal(new[] { "id", "Gain", "_source_key" }, DataColumns(db));
                 Assert.False(db.Metadata.ContainsKey("_source_key"));
             }
@@ -156,7 +155,7 @@ namespace squalor.DataBall.Tests
                 var csv = WriteCsv(dir, "a.csv", "id\n1\n");
                 var config = Path.Combine(dir, "units.json");
                 File.WriteAllText(config, """{ "units": { "key": { "type": "double" } } }""");
-                using var db = DataBall.Open(csv, config);
+                using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = config });
                 Assert.Equal(new[] { "id", "_source_key" }, DataColumns(db));
                 Assert.Equal(1L, Assert.IsType<long>(db.Query("SELECT _source_key FROM data")[0]["_source_key"]));
                 Assert.DoesNotContain(db.Schema.Columns.Keys, k => k.StartsWith("_source", StringComparison.Ordinal));
@@ -171,7 +170,7 @@ namespace squalor.DataBall.Tests
         public void Open_LayoutSession_SpineCarriesKey()
         {
             var csv = Fixture("semiconductor-sweep.csv");
-            using var db = DataBall.Open(csv, Fixture("semiconductor-sweep.tables.json"));
+            using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = Fixture("semiconductor-sweep.tables.json") });
 
             Assert.Equal("VIEW", TableType(db, "data"));
             var wide = DataColumns(db);
@@ -209,7 +208,7 @@ namespace squalor.DataBall.Tests
                 // The key must stay on the spine anyway.
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "rf": { "kind": "measurements", "roles": ["meas"] } } }""");
-                using var db = DataBall.Open(csv, config);
+                using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = config });
                 var owners = db.Query("""
                     SELECT table_name FROM information_schema.columns
                     WHERE table_schema = 'main' AND column_name = '_source_key' AND table_name <> 'data'
@@ -257,7 +256,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Open_TarGz_EntriesAreSources()
+        public async Task Open_TarGz_EntriesAreSources()
         {
             var dir = TempDir();
             try
@@ -266,7 +265,7 @@ namespace squalor.DataBall.Tests
                 using (var seed = new DataBall())
                 {
                     seed.AddRow(new Dictionary<string, object?> { ["v"] = "X" });
-                    seed.ExportToArchive(tar);
+                    await seed.ExportAsync(tar, new ExportOptions { Format = ExportType.Archive });
                 }
                 using var db = DataBall.Open(tar);
                 var only = Assert.Single(db.Sources);
@@ -281,7 +280,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Open_ParquetView_ConstantKey()
+        public async Task Open_ParquetView_ConstantKey()
         {
             var dir = TempDir();
             try
@@ -294,7 +293,7 @@ namespace squalor.DataBall.Tests
                         new Dictionary<string, object?> { ["id"] = 1L, ["v"] = 1.5 },
                         new Dictionary<string, object?> { ["id"] = 2L, ["v"] = 2.5 },
                     });
-                    seed.Roll(ExportType.Parquet, parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 using var db = DataBall.Open(parquet);
 
@@ -377,7 +376,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void Open_ParquetWithLayoutConfig_CopiesWithKey()
+        public async Task Open_ParquetWithLayoutConfig_CopiesWithKey()
         {
             var dir = TempDir();
             try
@@ -390,11 +389,11 @@ namespace squalor.DataBall.Tests
                         new Dictionary<string, object?> { ["id"] = 1L, ["v"] = 1.5 },
                         new Dictionary<string, object?> { ["id"] = 2L, ["v"] = 2.5 },
                     });
-                    seed.Roll(ExportType.Parquet, parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "m": { "kind": "measurements", "columns": ["v"] } } }""");
-                using var db = DataBall.Open(parquet, config);
+                using var db = DataBall.Open(parquet, new OpenOptions { SchemaPath = config });
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(new[] { "id", "v", "_source_key" }, DataColumns(db));
                 Assert.All(db.Query("SELECT _source_key FROM data"), r => Assert.Equal(1L, r["_source_key"]));
@@ -424,7 +423,7 @@ namespace squalor.DataBall.Tests
                 }
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "m": { "kind": "measurements", "columns": ["v"] } } }""");
-                using var db = DataBall.Open(hive, config);
+                using var db = DataBall.Open(hive, new OpenOptions { SchemaPath = config });
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(2L, Convert.ToInt64(db.Query("SELECT count(*) AS n FROM data WHERE _source_key = 1")[0]["n"]));
                 var source = Assert.Single(db.Sources);
@@ -447,7 +446,7 @@ namespace squalor.DataBall.Tests
                 using (var seed = new DataBall())
                 {
                     seed.AddRow(new Dictionary<string, object?> { ["id"] = 1L });
-                    await seed.ExportAsync(parquet, ExportType.Parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 var csv = WriteCsv(dir, "b.csv", "id\n2\n");
                 using var db = DataBall.Open(parquet);
@@ -532,7 +531,7 @@ namespace squalor.DataBall.Tests
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "names": { "kind": "dimension", "columns": ["Name"] } } }""");
                 DataBall.RegisterHandler(new LineageHandler(path));
-                using var db = DataBall.Open(path, config);
+                using var db = DataBall.Open(path, new OpenOptions { SchemaPath = config });
                 Assert.Equal("VIEW", TableType(db, "data"));
                 Assert.Equal(2L, Convert.ToInt64(db.Query("SELECT count(*) AS n FROM data WHERE _source_key = 1")[0]["n"]));
                 Assert.Equal("LineageHandler", Assert.Single(db.Sources).Type);
@@ -784,7 +783,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public async Task ImportManager_StaticRoutes_RecordSources()
+        public async Task ImportAsync_Routes_RecordSources()
         {
             var dir = TempDir();
             try
@@ -794,16 +793,16 @@ namespace squalor.DataBall.Tests
                 using (var seed = new DataBall())
                 {
                     seed.AddRow(new Dictionary<string, object?> { ["id"] = 2L });
-                    seed.Roll(ExportType.Parquet, parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 var zip = Path.Combine(dir, "z.zip");
                 using (var archive = ZipFile.Open(zip, ZipArchiveMode.Create))
                     AddEntry(archive, "e.csv", "id\n3\n");
 
                 using var db = new DataBall();
-                ImportManager.ImportFromCsv(db, csv, append: false);
-                await ImportManager.ImportFromParquet(db, parquet, append: true);
-                ImportManager.ImportFromArchive(db, zip, append: true);
+                await db.ImportAsync(csv, new ImportOptions { Append = false });
+                await db.ImportAsync(parquet, new ImportOptions { Append = true });
+                await db.ImportAsync(zip, new ImportOptions { Append = true });
 
                 Assert.Equal(new[] { csv, parquet, zip + "!e.csv" }, db.Sources.Select(s => s.Path).ToArray());
                 Assert.Equal(new[] { "CsvImport", "ParquetView", "ArchiveImport" }, db.Sources.Select(s => s.Type).ToArray());
@@ -850,7 +849,7 @@ namespace squalor.DataBall.Tests
         [Fact]
         public void Capture_Rows_Layout_NullKey()
         {
-            using var db = DataBall.Open(Fixture("semiconductor-sweep.csv"), Fixture("semiconductor-sweep.tables.json"));
+            using var db = DataBall.Open(Fixture("semiconductor-sweep.csv"), new OpenOptions { SchemaPath = Fixture("semiconductor-sweep.tables.json") });
             db.AddRow(new Dictionary<string, object?> { ["sweep"] = 99L, ["Pout"] = 1.5 });
             db.InitializeRow();
             db.ModifyField("sweep", 100L);
@@ -932,7 +931,7 @@ namespace squalor.DataBall.Tests
                 var csv = WriteCsv(dir, "a.csv", "id,Teststand,Gain(dB)\n1,T1,1.5\n2,T1,2.5\n");
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "setup": { "kind": "dimension", "columns": ["Teststand"] } } }""");
-                using var db = DataBall.Open(csv, config);
+                using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = config });
                 await db.Bounce();
 
                 Assert.Equal("VIEW", TableType(db, "data"));
@@ -962,7 +961,7 @@ namespace squalor.DataBall.Tests
                 await right.ImportAsync(b2, new ImportOptions { Append = true });
                 var rightBefore = right.Sources.ToArray();
 
-                left.MergeOrAppend(right, append: true);
+                await left.ImportAsync(right, new ImportOptions { Append = true });
 
                 // Keys 1 and 2 of `right` collided with `left`; they now follow it, paths and hashes intact.
                 Assert.Equal(new[] { 1L, 2L, 3L, 4L }, left.Sources.Select(s => s.Key).ToArray());
@@ -987,7 +986,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_Replace_TakesTheOtherSessionsSources()
+        public async Task MergeOrAppend_Replace_TakesTheOtherSessionsSources()
         {
             var dir = TempDir();
             try
@@ -996,7 +995,7 @@ namespace squalor.DataBall.Tests
                 var b = WriteCsv(dir, "b.csv", "id\n2\n");
                 using var left = DataBall.Open(a);
                 using var right = DataBall.Open(b);
-                left.MergeOrAppend(right, append: false);
+                await left.ImportAsync(right, new ImportOptions { Append = false });
 
                 var source = Assert.Single(left.Sources);
                 Assert.Equal(b, source.Path);
@@ -1011,7 +1010,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_CaptureOnlyOther_LeavesNullKeysAndOurSources()
+        public async Task MergeOrAppend_CaptureOnlyOther_LeavesNullKeysAndOurSources()
         {
             var dir = TempDir();
             try
@@ -1020,7 +1019,7 @@ namespace squalor.DataBall.Tests
                 using var left = DataBall.Open(a);
                 using var right = new DataBall();
                 right.AddRow(new Dictionary<string, object?> { ["id"] = 2L });
-                left.MergeOrAppend(right, append: true);
+                await left.ImportAsync(right, new ImportOptions { Append = true });
 
                 Assert.Equal(a, Assert.Single(left.Sources).Path);
                 var rows = left.Query("SELECT id, _source_key FROM data ORDER BY id");
@@ -1034,7 +1033,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_OtherSessionKeysWithoutSources_AreNulled()
+        public async Task MergeOrAppend_OtherSessionKeysWithoutSources_AreNulled()
         {
             var dir = TempDir();
             try
@@ -1045,7 +1044,7 @@ namespace squalor.DataBall.Tests
                 right.AddRow(new Dictionary<string, object?> { ["id"] = 2L });
                 // Keys with no source table behind them: reachable only below the public API.
                 right.Store.Execute("ALTER TABLE \"data\" ADD COLUMN \"_source_key\" BIGINT DEFAULT 9");
-                left.MergeOrAppend(right, append: true);
+                await left.ImportAsync(right, new ImportOptions { Append = true });
                 var rows = left.Query("SELECT id, _source_key FROM data ORDER BY id");
                 Assert.Equal(1L, rows[0]["_source_key"]);
                 Assert.Null(rows[1]["_source_key"]);
@@ -1214,17 +1213,17 @@ namespace squalor.DataBall.Tests
                 };
 
                 var csv = Path.Combine(dir, "out.csv");
-                await db.ExportAsync(csv, ExportType.Csv);
+                await db.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                 AssertCsv(File.ReadAllLines(csv), expected);
 
                 var zip = Path.Combine(dir, "out.zip");
-                await db.ExportAsync(zip, ExportType.Archive);
+                await db.ExportAsync(zip, new ExportOptions { Format = ExportType.Archive });
                 using (var archive = ZipFile.OpenRead(zip))
                 using (var reader = new StreamReader(archive.GetEntry("data.csv")!.Open()))
                     AssertCsv(reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries), expected);
 
                 var tgz = Path.Combine(dir, "out.tar.gz");
-                await db.ExportAsync(tgz, ExportType.Archive);
+                await db.ExportAsync(tgz, new ExportOptions { Format = ExportType.Archive });
                 using (var again = new DataBall())
                 {
                     await again.ImportAsync(tgz);
@@ -1232,7 +1231,7 @@ namespace squalor.DataBall.Tests
                 }
 
                 var parquet = Path.Combine(dir, "out.parquet");
-                await db.ExportAsync(parquet, ExportType.Parquet);
+                await db.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 var described = db.Query($"DESCRIBE SELECT * FROM read_parquet('{parquet.Replace('\\', '/')}')");
                 Assert.Equal(new[] { "id", "Gain", "_source_file", "_source_type" }, described.Select(r => (string)r["column_name"]!).ToArray());
                 var rows = db.Query($"SELECT id, _source_file, _source_type FROM read_parquet('{parquet.Replace('\\', '/')}') ORDER BY id");
@@ -1264,17 +1263,17 @@ namespace squalor.DataBall.Tests
                 });
 
                 var csv = Path.Combine(dir, "filtered.csv");
-                await db.ExportAsync(csv, ExportType.Csv);
+                await db.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                 AssertCsv(File.ReadAllLines(csv), new[] { "2,21.5," + a + ",CsvImport", "3,22.5," + b + ",CsvImport" });
 
                 var zip = Path.Combine(dir, "filtered.zip");
-                await db.ExportAsync(zip, ExportType.Archive);
+                await db.ExportAsync(zip, new ExportOptions { Format = ExportType.Archive });
                 using (var archive = ZipFile.OpenRead(zip))
                 using (var reader = new StreamReader(archive.GetEntry("data.csv")!.Open()))
                     AssertCsv(reader.ReadToEnd().Split('\n', StringSplitOptions.RemoveEmptyEntries), new[] { "2,21.5," + a + ",CsvImport", "3,22.5," + b + ",CsvImport" });
 
                 var parquet = Path.Combine(dir, "filtered.parquet");
-                await db.ExportAsync(parquet, ExportType.Parquet);
+                await db.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 var rows = db.Query($"SELECT id, _source_file FROM read_parquet('{parquet.Replace('\\', '/')}') ORDER BY id");
                 Assert.Equal(new[] { a, b }, rows.Select(r => (string)r["_source_file"]!).ToArray());
             }
@@ -1295,13 +1294,13 @@ namespace squalor.DataBall.Tests
 
                 db.ApplyFilter(new SessionFilter { Columns = ["id"] });
                 var narrow = Path.Combine(dir, "narrow.csv");
-                await db.ExportAsync(narrow, ExportType.Csv);
+                await db.ExportAsync(narrow, new ExportOptions { Format = ExportType.Csv });
                 Assert.Equal(new[] { "id", "1" }, File.ReadAllLines(narrow));
 
                 // Naming the key keeps the lineage columns in the export.
                 db.ApplyFilter(new SessionFilter { Columns = ["id", "_source_key"] });
                 var keyed = Path.Combine(dir, "keyed.csv");
-                await db.ExportAsync(keyed, ExportType.Csv);
+                await db.ExportAsync(keyed, new ExportOptions { Format = ExportType.Csv });
                 AssertCsv(File.ReadAllLines(keyed), new[] { "1," + a + ",CsvImport" }, "id,_source_file,_source_type");
             }
             finally
@@ -1319,7 +1318,7 @@ namespace squalor.DataBall.Tests
                 using var db = new DataBall();
                 db.AddRow(new Dictionary<string, object?> { ["id"] = 1L, ["Gain"] = 2.5 });
                 var csv = Path.Combine(dir, "plain.csv");
-                await db.ExportAsync(csv, ExportType.Csv);
+                await db.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                 Assert.Equal(new[] { "id,Gain", "1,2.5" }, File.ReadAllLines(csv));
             }
             finally
@@ -1337,7 +1336,7 @@ namespace squalor.DataBall.Tests
                 var a = WriteCsv(dir, "a.csv", "id\n1\n");
                 var first = Path.Combine(dir, "first.csv");
                 using (var db = DataBall.Open(a))
-                    await db.ExportAsync(first, ExportType.Csv);
+                    await db.ExportAsync(first, new ExportOptions { Format = ExportType.Csv });
 
                 using var again = DataBall.Open(first);
                 // The first export's lineage columns arrive renamed, as ordinary data, beside a new key.
@@ -1350,7 +1349,7 @@ namespace squalor.DataBall.Tests
 
                 // The second export carries both: where the rows came from before, and the file they were read from now.
                 var second = Path.Combine(dir, "second.csv");
-                await again.ExportAsync(second, ExportType.Csv);
+                await again.ExportAsync(second, new ExportOptions { Format = ExportType.Csv });
                 var lines = File.ReadAllLines(second);
                 Assert.Equal("id,origin_source_file,origin_source_type,_source_file,_source_type", lines[0]);
                 Assert.Equal("1," + a + ",CsvImport," + first + ",CsvImport", lines[1]);
@@ -1370,7 +1369,7 @@ namespace squalor.DataBall.Tests
                 var a = WriteCsv(dir, "a.csv", "id\n1\n");
                 var parquet = Path.Combine(dir, "first.parquet");
                 using (var db = DataBall.Open(a))
-                    await db.ExportAsync(parquet, ExportType.Parquet);
+                    await db.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
 
                 // Parquet view
                 using (var view = DataBall.Open(parquet))
@@ -1510,12 +1509,12 @@ namespace squalor.DataBall.Tests
         public async Task Export_Layout_ResolvesSource()
         {
             var csv = Fixture("semiconductor-sweep.csv");
-            using var db = DataBall.Open(csv, Fixture("semiconductor-sweep.tables.json"));
+            using var db = DataBall.Open(csv, new OpenOptions { SchemaPath = Fixture("semiconductor-sweep.tables.json") });
             var dir = TempDir();
             try
             {
                 var output = Path.Combine(dir, "layout.csv");
-                await db.ExportAsync(output, ExportType.Csv);
+                await db.ExportAsync(output, new ExportOptions { Format = ExportType.Csv });
                 var lines = File.ReadAllLines(output);
                 Assert.Equal(82, lines.Length);
                 Assert.EndsWith(",EVM,_source_file,_source_type", lines[0]);
@@ -1587,7 +1586,7 @@ namespace squalor.DataBall.Tests
             {
                 var a = WriteCsv(dir, "a.csv", "id\n1\n");
                 using var db = DataBall.Open(a);
-                await ExportManager.ExportToPartitionedParquet(db, Path.Combine(dir, "flat"), Array.Empty<string>());
+                await db.ExportAsync(Path.Combine(dir, "flat"), new ExportOptions { Format = ExportType.Parquet, PartitionBy = Array.Empty<string>() });
                 var rows = db.Query($"SELECT id, _source_file FROM read_parquet('{Path.Combine(dir, "flat", "data.parquet").Replace('\\', '/')}')");
                 Assert.Equal(a, Assert.Single(rows)["_source_file"]);
             }
@@ -1611,7 +1610,7 @@ namespace squalor.DataBall.Tests
                 var ball = Path.Combine(dir, "session.ball");
                 await db.SaveAsync(ball);
                 var viaExport = Path.Combine(dir, "export.ball");
-                await db.ExportAsync(viaExport, ExportType.Ball);
+                await db.SaveAsync(viaExport);
 
                 foreach (var path in new[] { ball, viaExport })
                 {
@@ -1625,7 +1624,7 @@ namespace squalor.DataBall.Tests
                     Assert.Null(rows[2]["_source_key"]);
                     // Exports of the reopened session resolve like the original's.
                     var csv = Path.Combine(dir, "again.csv");
-                    await reopened.ExportAsync(csv, ExportType.Csv);
+                    await reopened.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                     Assert.Equal("id,Gain,_source_file,_source_type", File.ReadAllLines(csv)[0]);
                 }
             }
@@ -1644,7 +1643,7 @@ namespace squalor.DataBall.Tests
                 var csv = Fixture("semiconductor-sweep.csv");
                 var config = Fixture("semiconductor-sweep.tables.json");
                 var ball = Path.Combine(dir, "layout.ball");
-                using (var db = DataBall.Open(csv, config))
+                using (var db = DataBall.Open(csv, new OpenOptions { SchemaPath = config }))
                     await db.SaveAsync(ball);
                 using var reopened = DataBall.Open(ball);
                 Assert.Equal(Path.GetFullPath(csv), Assert.Single(reopened.Sources).Path);
@@ -1666,7 +1665,7 @@ namespace squalor.DataBall.Tests
                 using (var seed = new DataBall())
                 {
                     seed.AddRow(new Dictionary<string, object?> { ["id"] = 1L });
-                    await seed.ExportAsync(parquet, ExportType.Parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 var ball = Path.Combine(dir, "linked.ball");
                 using (var db = DataBall.Open(parquet))
@@ -1732,7 +1731,7 @@ namespace squalor.DataBall.Tests
                         new Dictionary<string, object?> { ["id"] = 1L },
                         new Dictionary<string, object?> { ["id"] = 2L },
                     });
-                    await seed.ExportAsync(parquet, ExportType.Parquet);
+                    await seed.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 }
                 using var db = DataBall.Open(parquet);
                 var key = Assert.IsType<ColumnData<long>>(db.ReadColumns(new SessionFilter())["_source_key"]);
@@ -1885,15 +1884,15 @@ namespace squalor.DataBall.Tests
                 Assert.Equal(0L, Convert.ToInt64(fresh.Query("SELECT count(*) AS n FROM information_schema.tables WHERE table_name = 'source'")[0]["n"]));
 
                 var csv = Path.Combine(dir, "out.csv");
-                await fresh.ExportAsync(csv, ExportType.Csv);
+                await fresh.ExportAsync(csv, new ExportOptions { Format = ExportType.Csv });
                 Assert.Equal(new[] { "id,Gain,_source_file,_source_type", "5,2.5,," }, File.ReadAllLines(csv));
 
                 var parquet = Path.Combine(dir, "out.parquet");
-                await fresh.ExportAsync(parquet, ExportType.Parquet);
+                await fresh.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
                 var described = fresh.Query($"DESCRIBE SELECT * FROM read_parquet('{parquet.Replace('\\', '/')}')");
                 Assert.Equal(new[] { "id", "Gain", "_source_file", "_source_type" }, described.Select(r => (string)r["column_name"]!).ToArray());
                 var zip = Path.Combine(dir, "out.zip");
-                await fresh.ExportAsync(zip, ExportType.Archive);
+                await fresh.ExportAsync(zip, new ExportOptions { Format = ExportType.Archive });
                 using var archive = ZipFile.OpenRead(zip);
                 using var reader = new StreamReader(archive.GetEntry("data.csv")!.Open());
                 Assert.Equal("id,Gain,_source_file,_source_type", reader.ReadLine());
@@ -1961,7 +1960,7 @@ namespace squalor.DataBall.Tests
                 var a2 = WriteCsv(dir, "a2.csv", "id,Teststand,Gain\n1,T1,1.5\n2,T2,2.5\n");
                 var config = Path.Combine(dir, "layout.json");
                 File.WriteAllText(config, """{ "tables": { "setup": { "kind": "dimension", "columns": ["Teststand"] } } }""");
-                using var db = DataBall.Open(a, config);
+                using var db = DataBall.Open(a, new OpenOptions { SchemaPath = config });
                 await db.ImportAsync(a2, new ImportOptions { Append = true });
                 await db.Bounce();
                 Assert.Equal("VIEW", TableType(db, "data"));
@@ -2064,7 +2063,7 @@ namespace squalor.DataBall.Tests
                 DataBall.RegisterHandler(new LineageHandler(path));
                 using var db = DataBall.Open(path);
                 using var other = DataBall.Open(a);
-                db.MergeOrAppend(other, append: true);
+                await db.ImportAsync(other, new ImportOptions { Append = true });
                 var rows = db.Query("SELECT Name, _source_key FROM data ORDER BY Name");
                 Assert.Equal(new[] { ("A", 1L), ("B", 1L), ("C", 2L) }, rows.Select(r => ((string)r["Name"]!, (long)r["_source_key"]!)).ToArray());
                 await Task.CompletedTask;

@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Text.Json;
 using DuckDB.NET.Data;
-using squalor.DataBall.Export;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -64,7 +63,7 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
 
     private static IReadOnlyList<Dictionary<string, object?>> ReopenRows(string path)
     {
-        using var reopened = new DataBall(databasePath: path);
+        using var reopened = DataBall.Open(path, new OpenOptions { Writable = true });
         return reopened.Query(OrderedRows);
     }
 
@@ -77,7 +76,7 @@ public sealed class BallDuckDbTrialTests(ITestOutputHelper output)
         using (var wide = new DataBall())
         {
             wide.AddRows(rows);
-            await wide.ExportAsync(parquet, ExportType.Parquet);
+            await wide.ExportAsync(parquet, new ExportOptions { Format = ExportType.Parquet });
         }
         var duckBytes = Bytes(duck);
         var parquetBytes = Bytes(parquet);

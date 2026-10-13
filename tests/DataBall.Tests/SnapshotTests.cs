@@ -214,7 +214,7 @@ public sealed class SnapshotTests : IDisposable
             Assert.Equal("Session is read-only; open with writable: true to change it", error.Message);
         }
 
-        var writable = Assert.Throws<DataBallException>(() => DataBall.Open(pointer, writable: true));
+        var writable = Assert.Throws<DataBallException>(() => DataBall.Open(pointer, new OpenOptions { Writable = true }));
         Assert.Equal($"A snapshot is read-only; {pointer} cannot be opened with writable: true", writable.Message);
 
         db.AddRow(Row(4));

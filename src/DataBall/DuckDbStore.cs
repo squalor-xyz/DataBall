@@ -965,16 +965,20 @@ namespace squalor.DataBall
             var sqlType = ToDuckDbType(clrType);
             if (Layout is not null)
                 return; // the routed AddRow grows the layout schema inside its own transaction
-            if (!DataTableExists())
+            // The ALTER is a write: it joins the caller's transaction (CommitRow), so a failed row rolls the column back too.
+            InTransaction(() =>
             {
-                Execute($"CREATE TABLE \"data\" ({QuoteIdent(name)} {sqlType})");
-                return;
-            }
+                if (!DataTableExists())
+                {
+                    Execute($"CREATE TABLE \"data\" ({QuoteIdent(name)} {sqlType})");
+                    return;
+                }
 
-            if (GetColumns().Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
-                return;
+                if (GetColumns().Any(c => c.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                    return;
 
-            Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(name)} {sqlType}");
+                Execute($"ALTER TABLE \"data\" ADD COLUMN {QuoteIdent(name)} {sqlType}");
+            });
         }
 
         internal void AddColumn<T>(string name, IReadOnlyList<T> values)
@@ -1739,7 +1743,7 @@ namespace squalor.DataBall
             return resolved;
         }
 
-        internal void ExportPartitionedParquet(string directory, IReadOnlyList<string> partitionColumns)
+        internal void ExportPartitionedParquet(string directory, IReadOnlyList<string> partitionColumns, ParameterizedSql? select = null)
         {
             ThrowIfDisposed();
             var resolved = ResolvePartitionColumns(partitionColumns);
@@ -1750,8 +1754,13 @@ namespace squalor.DataBall
             var qDir = QuotePath(directory);
             var by = string.Join(", ", resolved.Select(QuoteIdent));
             // DuckDB errors when every remaining column is a partition column unless those columns are also written into the files.
-            var rows = ResolveSourceSql("SELECT * FROM \"data\"", []);
-            Execute($"COPY ({rows}) TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)");
+            var parameters = select?.Parameters ?? [];
+            var rows = ResolveSourceSql(select is null ? "SELECT * FROM \"data\"" : select.Value.Sql, parameters);
+            var sql = $"COPY ({rows}) TO {qDir} (FORMAT PARQUET, PARTITION_BY ({by}), OVERWRITE true, WRITE_PARTITION_COLUMNS true)";
+            if (parameters.Length > 0)
+                ExecuteParameterized(sql, parameters);
+            else
+                Execute(sql);
         }
 
         private static void ClearHiveTarget(string directory)

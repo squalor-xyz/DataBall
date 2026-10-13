@@ -19,6 +19,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="fixtures\**" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="PublicApi.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="PublicApi.Handlers.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="CopyTrialProbe" AfterTargets="Build">
     <ItemGroup>

@@ -148,7 +148,8 @@ public class CliImportManyTests
 
             Assert.Equal(1, imported.Exit);
             Assert.Contains("--append takes one plain input", imported.StdErr);
-            Assert.Contains("db-16", imported.StdErr);
+            Assert.Contains("open together", imported.StdErr);
+            Assert.DoesNotContain("db-16", imported.StdErr);
             Assert.False(File.Exists(ball));
         }
         finally

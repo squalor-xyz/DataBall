@@ -21,7 +21,7 @@ public class FileTypeTests : DetectionFixture
         var input = Write("input.csv", "Id,Value\n1,2\n");
         Register("{\"extension\":[\".csv\"]}", """{"columns":{"Value":"double"}}""");
         var schema = Write("schema.json", """{"columns":{"Value":"string"}}""");
-        using var db = DataBall.Open(input, schema);
+        using var db = DataBall.Open(input, new OpenOptions { SchemaPath = schema });
         Assert.Equal("VARCHAR", db.Query("DESCRIBE data").Single(r => (string)r["column_name"]! == "Value")["column_type"]);
     }
 

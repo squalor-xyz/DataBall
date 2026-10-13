@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 using System.Globalization;
 using squalor.DataBall;
-using squalor.DataBall.Export;
 
 namespace squalor.DataBall.Cli;
 
@@ -35,12 +34,12 @@ internal static class CliApp
                     await db.ImportAsync(input);
                 }
 
-                await db.ExportAsync(output, CliFormat.DetectExportType(output));
+                await WriteOutputAsync(db, output, CliFormat.DetectFormat(output));
                 return 0;
             }
 
             if (append)
-                throw new DataBallException("--append takes one plain input: several inputs, a glob, --recursive or --skip-bad open together, and appending them arrives with db-16");
+                throw new DataBallException("--append takes one plain input: several inputs, a glob, --recursive or --skip-bad open together");
             var options = new OpenOptions
             {
                 SchemaPath = configPath,
@@ -52,12 +51,22 @@ internal static class CliApp
             // A native .ball or snapshot opens with no report: it skipped nothing.
             foreach (var skip in opened.OpenReport?.Skipped ?? Array.Empty<SkippedFile>())
                 stderr.WriteLine($"Skipped {skip.Path}: {skip.Message}");
-            await opened.ExportAsync(output, CliFormat.DetectExportType(output));
+            await WriteOutputAsync(opened, output, CliFormat.DetectFormat(output));
             return 0;
         });
     }
 
     private static bool HasWildcard(string input) => input.AsSpan().IndexOfAny('*', '?') >= 0;
+
+    // A .ball is a native save; every other format is an export.
+    private static Task WriteOutputAsync(DataBall db, string path, PathFormat format) => format switch
+    {
+        PathFormat.Ball => db.SaveAsync(path),
+        PathFormat.Csv => db.ExportAsync(path, new ExportOptions { Format = ExportType.Csv }),
+        PathFormat.Parquet => db.ExportAsync(path, new ExportOptions { Format = ExportType.Parquet }),
+        PathFormat.Archive => db.ExportAsync(path, new ExportOptions { Format = ExportType.Archive }),
+        _ => throw new ArgumentOutOfRangeException(nameof(format), format, null),
+    };
 
     internal static Task<int> ExportAsync(
         string input,
@@ -72,9 +81,9 @@ internal static class CliApp
             using var db = new DataBall(engine: ResolveEngine(engine, input));
             await db.ImportAsync(input);
             var type = format is null
-                ? CliFormat.DetectExportType(output)
+                ? CliFormat.DetectFormat(output)
                 : CliFormat.ParseFormat(format);
-            await db.ExportAsync(output, type);
+            await WriteOutputAsync(db, output, type);
             return 0;
         });
     }
@@ -92,7 +101,7 @@ internal static class CliApp
             await db.Bounce();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
             RejectIfSamePath(input, dest);
-            await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
+            await WriteOutputAsync(db, dest, CliFormat.DetectFormat(dest));
             return 0;
         });
     }
@@ -122,7 +131,7 @@ internal static class CliApp
             await db.Squish();
             var dest = string.IsNullOrEmpty(output) ? CliFormat.DefaultBallPath(input) : output;
             RejectIfSamePath(input, dest);
-            await db.ExportAsync(dest, CliFormat.DetectExportType(dest));
+            await WriteOutputAsync(db, dest, CliFormat.DetectFormat(dest));
             return 0;
         });
     }
@@ -240,7 +249,7 @@ internal static class CliApp
     private static void WriteInfo(string path, DataBall db, TextWriter stdout)
     {
         stdout.WriteLine($"File: {path}");
-        stdout.WriteLine($"Format: {CliFormat.DetectExportType(path)}");
+        stdout.WriteLine($"Format: {CliFormat.DetectFormat(path)}");
 
         var exists = db.Query("""
             SELECT COUNT(*) AS c FROM information_schema.tables

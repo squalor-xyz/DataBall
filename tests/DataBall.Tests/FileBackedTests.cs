@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using squalor.DataBall.Export;
 using Xunit;
 
 namespace squalor.DataBall.Tests
@@ -55,7 +54,7 @@ namespace squalor.DataBall.Tests
                     db.AddColumn<int>("Age", new[] { 30 });
                 }
 
-                using var reopened = new DataBall(databasePath: path);
+                using var reopened = DataBall.Open(path, new OpenOptions { Writable = true });
                 Assert.Equal("ATE", reopened.Metadata["Source"]);
                 var row = Assert.Single(reopened.Query("SELECT Name, Age FROM data"));
                 Assert.Equal("Alice", row["Name"]);
@@ -76,7 +75,8 @@ namespace squalor.DataBall.Tests
             {
                 using var first = new DataBall(databasePath: path);
                 first.AddColumn("Name", new[] { "Alice" });
-                Assert.Throws<DataBallException>(() => new DataBall(databasePath: path));
+                // The constructor refuses an existing file before DuckDB is asked; a writable Open reaches the file lock.
+                Assert.Throws<DataBallException>(() => DataBall.Open(path, new OpenOptions { Writable = true }));
             }
             finally
             {

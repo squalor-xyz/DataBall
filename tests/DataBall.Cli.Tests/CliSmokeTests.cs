@@ -361,6 +361,36 @@ public class CliSmokeTests
     }
 
     [Fact]
+    public async Task Export_FormatBall_WritesNativeBall_ThenInfo()
+    {
+        var dir = TempDir();
+        try
+        {
+            var csv = Path.Combine(dir, "people.csv");
+            File.WriteAllText(csv, "Name,Age\nAlice,30\nBob,25\n");
+
+            // --format ball saves a native .ball whatever the extension says (SaveAsync, not a file export).
+            var odd = Path.Combine(dir, "session.dat");
+            Assert.Equal(0, (await Run("export", csv, odd, "--format", "ball")).Exit);
+            var head = new byte[12];
+            using (var stream = File.OpenRead(odd))
+                Assert.Equal(12, stream.Read(head, 0, head.Length));
+            Assert.Equal("DUCK", System.Text.Encoding.ASCII.GetString(head, 8, 4));
+
+            var ball = Path.Combine(dir, "out.ball");
+            Assert.Equal(0, (await Run("export", csv, ball, "--format", "ball")).Exit);
+            var info = await Run("info", ball);
+            Assert.Equal(0, info.Exit);
+            Assert.Contains("Format: Ball", info.StdOut);
+            Assert.Contains("Rows: 2", info.StdOut);
+        }
+        finally
+        {
+            Directory.Delete(dir, true);
+        }
+    }
+
+    [Fact]
     public async Task Squish_WithoutPartition_WritesSiblingBall()
     {
         var dir = TempDir();

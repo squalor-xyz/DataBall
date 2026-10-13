@@ -552,7 +552,7 @@ namespace squalor.DataBall.Tests
                 var b = WriteFile(dir, "b.csv", "id,Gain(dB)\n2,2.5\n");
                 using var db = new DataBall();
                 await db.ImportAsync(a);
-                ImportManager.ImportFromCsv(db, b, append: true);
+                await db.ImportAsync(b, new ImportOptions { Append = true });
 
                 Assert.Equal(new[] { "id:BIGINT", "Gain:DOUBLE", "_source_key:BIGINT" }, Columns(db));
                 Assert.Equal(new object?[] { 1.5, 2.5 }, db.Query("SELECT Gain FROM data ORDER BY id").Select(r => r["Gain"]).ToArray());
@@ -961,7 +961,7 @@ namespace squalor.DataBall.Tests
                         new Dictionary<string, object?> { ["Lot"] = "L2", ["Gain"] = 2.0 },
                         new Dictionary<string, object?> { ["Lot"] = "L3", ["Gain"] = 3.0 },
                     });
-                    writer.Save(ball);
+                    await writer.SaveAsync(ball);
                 }
                 using var db = new DataBall(config);
                 await db.ImportAsync(a);
@@ -991,7 +991,7 @@ namespace squalor.DataBall.Tests
                 await other.ImportAsync(b);
                 using var db = new DataBall(config);
                 await db.ImportAsync(a);
-                db.MergeOrAppend(other, append: true);
+                await db.ImportAsync(other, new ImportOptions { Append = true });
 
                 Assert.Equal("L1", db.Metadata["Lot"]);
                 Assert.Single(db.Metadata);

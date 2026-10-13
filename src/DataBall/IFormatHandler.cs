@@ -40,7 +40,7 @@ namespace squalor.DataBall
         Config? Overlay => null;
 
         /// <summary>
-        /// When true, <see cref="DataBall.Open(string, string?, bool, EngineOptions?)"/> runs generic <c>ImportAsync</c> on the outer
+        /// When true, <see cref="DataBall.Open(string, OpenOptions?)"/> runs generic <c>ImportAsync</c> on the outer
         /// session (with overlay schema) instead of draining <see cref="Parse"/>.
         /// Custom CSV is a sniffer, not a second importer.
         /// </summary>
@@ -48,7 +48,7 @@ namespace squalor.DataBall
 
         /// <summary>
         /// Yields canonical session rows (column name → value) for <paramref name="path"/>.
-        /// <paramref name="schema"/> is the overlay-merged config from <see cref="DataBall.Open(string, string?, bool, EngineOptions?)"/>.
+        /// <paramref name="schema"/> is the overlay-merged config from <see cref="DataBall.Open(string, OpenOptions?)"/>.
         /// </summary>
         IAsyncEnumerable<IReadOnlyDictionary<string, object?>> Parse(
             string path,

@@ -236,7 +236,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_ConfigTypedColumn_StillCasts()
+        public async Task MergeOrAppend_ConfigTypedColumn_StillCasts()
         {
             // MergeOrAppend stages the other session's parquet without expected types; the configured
             // BIGINT must keep casting (2.4 -> 2), not widen to DOUBLE.
@@ -248,7 +248,7 @@ namespace squalor.DataBall.Tests
                 db.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 1L } });
                 using var other = new DataBall();
                 other.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 2.4 } });
-                db.MergeOrAppend(other, append: true);
+                await db.ImportAsync(other, new ImportOptions { Append = true });
 
                 Assert.Equal("BIGINT", ColumnType(db, "data", "v"));
                 var rows = db.Query("SELECT v FROM data ORDER BY v");
@@ -418,7 +418,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_IntegerThenFloat_WidensToDouble()
+        public async Task MergeOrAppend_IntegerThenFloat_WidensToDouble()
         {
             using var db = new DataBall();
             db.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 1 } });
@@ -426,7 +426,7 @@ namespace squalor.DataBall.Tests
             other.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 2.5f } });
             Assert.Equal("FLOAT", ColumnType(other, "data", "v"));
 
-            db.MergeOrAppend(other, append: true);
+            await db.ImportAsync(other, new ImportOptions { Append = true });
 
             Assert.Equal("DOUBLE", ColumnType(db, "data", "v"));
             var rows = db.Query("SELECT v FROM data ORDER BY v");
@@ -436,14 +436,14 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_Conflict_NamesTheMergedSession()
+        public async Task MergeOrAppend_Conflict_NamesTheMergedSession()
         {
             using var db = new DataBall();
             db.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 1.5 } });
             using var other = new DataBall();
             other.AddRows(new[] { new Dictionary<string, object?> { ["v"] = "abc" } });
 
-            var ex = Assert.Throws<DataBallException>(() => db.MergeOrAppend(other, append: true));
+            var ex = await Assert.ThrowsAsync<DataBallException>(() => db.ImportAsync(other, new ImportOptions { Append = true }));
             var message = FullMessage(ex);
             Assert.Contains("the merged session", message);
             Assert.DoesNotContain(".parquet", message);
@@ -519,7 +519,7 @@ namespace squalor.DataBall.Tests
                 using (var writer = new DataBall())
                 {
                     writer.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 2.4 } });
-                    writer.Save(ball);
+                    await writer.SaveAsync(ball);
                 }
                 var config = WriteConfig(dir, """{ "columns": { "v": "long" } }""");
                 using var db = new DataBall(config);
@@ -615,10 +615,10 @@ namespace squalor.DataBall.Tests
                     db.InitializeRow(new Dictionary<string, object?> { ["id"] = 1L, ["v"] = 1 });
                     db.CommitRow();
                     Assert.Equal("INTEGER", ColumnType(db, "data", "v"));
-                    db.Save(ball);
+                    await db.SaveAsync(ball);
                 }
 
-                using var reopened = DataBall.Open(ball, writable: true);
+                using var reopened = DataBall.Open(ball, new OpenOptions { Writable = true });
                 await reopened.ImportAsync(more, new ImportOptions { Append = true });
 
                 Assert.Equal("DOUBLE", ColumnType(reopened, "data", "v"));
@@ -633,7 +633,7 @@ namespace squalor.DataBall.Tests
         }
 
         [Fact]
-        public void MergeOrAppend_LearnedType_DoesNotBlockWidening()
+        public async Task MergeOrAppend_LearnedType_DoesNotBlockWidening()
         {
             using var db = new DataBall();
             db.InitializeRow(new Dictionary<string, object?> { ["v"] = 1 });
@@ -642,7 +642,7 @@ namespace squalor.DataBall.Tests
             using var other = new DataBall();
             other.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 2.7 } });
 
-            db.MergeOrAppend(other, append: true);
+            await db.ImportAsync(other, new ImportOptions { Append = true });
 
             Assert.Equal("DOUBLE", ColumnType(db, "data", "v"));
             var rows = db.Query("SELECT v FROM data ORDER BY v");
@@ -660,7 +660,7 @@ namespace squalor.DataBall.Tests
                 using (var writer = new DataBall())
                 {
                     writer.AddRows(new[] { new Dictionary<string, object?> { ["v"] = "abc" } });
-                    writer.Save(ball);
+                    await writer.SaveAsync(ball);
                 }
                 using var db = new DataBall();
                 db.AddRows(new[] { new Dictionary<string, object?> { ["v"] = 1.5 } });
@@ -692,7 +692,7 @@ namespace squalor.DataBall.Tests
                 {
                     await writer.ImportAsync(csvSource);
                     Assert.Equal("BIGINT", ColumnType(writer, "data", "_source_key"));
-                    writer.Save(ball);
+                    await writer.SaveAsync(ball);
                 }
                 var first = WriteFile(dir, "first.csv", "v\n1\n");
                 using var db = new DataBall();
@@ -725,7 +725,7 @@ namespace squalor.DataBall.Tests
             other.Query("ALTER TABLE \"data\" ALTER COLUMN \"v\" SET DATA TYPE TIMESTAMPTZ");
             Assert.Equal("TIMESTAMP WITH TIME ZONE", ColumnType(other, "data", "v"));
 
-            db.MergeOrAppend(other, append: true);
+            await db.ImportAsync(other, new ImportOptions { Append = true });
 
             // The widened type is the canonical TIMESTAMP, not the spelling of the incoming type.
             Assert.Equal("TIMESTAMP", ColumnType(db, "data", "v"));

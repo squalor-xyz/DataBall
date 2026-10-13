@@ -100,7 +100,7 @@ namespace squalor.DataBall.Tests
                 DuckDbStore.ExclusivePathReservedForTests = path => { lock (reserved) reserved.Add(path); };
                 try
                 {
-                    var ex = Assert.Throws<DataBallException>(() => DataBall.Open(bad, engine: engine));
+                    var ex = Assert.Throws<DataBallException>(() => DataBall.Open(bad, new OpenOptions { Engine = engine }));
                     Assert.StartsWith($"Cannot open '{bad}': ", ex.Message);
                     var viaList = Assert.Throws<DataBallException>(() => DataBall.Open(new[] { bad }, new OpenOptions { Engine = engine }));
                     Assert.StartsWith($"Cannot open '{bad}': ", viaList.Message);
