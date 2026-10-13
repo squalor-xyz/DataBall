@@ -145,7 +145,8 @@ namespace squalor.DataBall.Tests
                 {
                     batches.Add(count);
                     var expected = batches.Sum();
-                    var stored = db.Query("SELECT COUNT(*) AS n, MIN(Id) AS lo, MAX(Id) AS hi, COUNT(DISTINCT Id) AS unique_ids FROM data")[0];
+                    // The batches land in the staging table of the source; "data" comes with the one merge.
+                    var stored = db.Query("SELECT COUNT(*) AS n, MIN(Id) AS lo, MAX(Id) AS hi, COUNT(DISTINCT Id) AS unique_ids FROM _stg_1")[0];
                     Assert.Equal((long)expected, stored["n"]);
                     Assert.Equal(0L, stored["lo"]);
                     Assert.Equal((long)expected - 1, stored["hi"]);
@@ -155,6 +156,37 @@ namespace squalor.DataBall.Tests
                 using var db = DataBall.Open(Path.Combine(dir, "input.test"));
                 Assert.Equal(new[] { 10000, 10000, 5000 }, batches);
                 Assert.Equal(25000L, db.Count(new SessionFilter()));
+            }
+            finally
+            {
+                DataBall.AfterHandlerBatchForTests = null;
+                Directory.Delete(dir, true);
+            }
+        }
+
+        /// <summary>db-27: a single handler file is staged batch by batch, merged once, and its last parsed row is remembered.</summary>
+        [Fact]
+        public void Open_SingleHandler_Staged_RemembersLastRow()
+        {
+            var dir = HandlerDirectory();
+            try
+            {
+                var seen = new List<(long Staged, bool DataExists)>();
+                DataBall.AfterHandlerBatchForTests = (db, _) => seen.Add((db.Store.StagedRowCount("_stg_1"), db.Store.DataTableExists()));
+                DataBall.RegisterHandler(new BatchHandler(false));
+                using var db = DataBall.Open(Path.Combine(dir, "input.test"));
+
+                // Each batch lands in the staging table of the source; "data" appears with the one merge, after the last batch.
+                Assert.Equal(new[] { (10000L, false), (20000L, false), (25000L, false) }, seen.ToArray());
+                Assert.Equal(25000L, db.Count(new SessionFilter()));
+                Assert.Empty(db.Query("SELECT table_name FROM duckdb_tables() WHERE table_name LIKE '_stg_%'"));
+                var source = Assert.Single(db.OpenReport!.Sources);
+                Assert.Equal(25000L, source.Rows);
+
+                // The last row the handler parsed is the one InitializeRow copies.
+                db.InitializeRow();
+                db.CommitRow();
+                Assert.Equal(2L, Convert.ToInt64(db.Query("SELECT count(*) AS n FROM data WHERE Id = 24999")[0]["n"]));
             }
             finally
             {
@@ -251,13 +283,15 @@ namespace squalor.DataBall.Tests
             {
                 var schema = Path.Combine(dir, "layout.json");
                 File.WriteAllText(schema, """{"tables":{"dimension":{"kind":"dimension","columns":["Key"]},"rows":{"kind":"rows","columns":["Id"]}}}""");
-                var batchKinds = new List<string>();
-                DataBall.AfterHandlerBatchForTests = (db, _) => batchKinds.Add((string)db.Query("SELECT table_type FROM information_schema.tables WHERE table_name='data'")[0]["table_type"]!);
+                var dataDuringBatches = new List<bool>();
+                DataBall.AfterHandlerBatchForTests = (db, _) => dataDuringBatches.Add(db.Store.TableExists("data"));
                 DataBall.RegisterHandler(new LayoutHandler());
                 using var actual = DataBall.Open(Path.Combine(dir, "input.test"), schema);
                 using var expected = new DataBall(schema);
                 expected.AddRows(Enumerable.Range(0, 10001).Select(LayoutRow).ToList());
-                Assert.Equal(new[] { "BASE TABLE", "BASE TABLE" }, batchKinds);
+                // Nothing is written to "data" while the batches stage; the one merge builds it and splits it once.
+                Assert.Equal(new[] { false, false }, dataDuringBatches);
+                Assert.Equal(1, actual.Store.LayoutSplits);
                 Assert.Equal(expected.Query("SELECT * FROM data ORDER BY Id").Select(row => row.ToArray()), actual.Query("SELECT * EXCLUDE (_source_key) FROM data ORDER BY Id").Select(row => row.ToArray()));
                 Assert.Equal(expected.Query("SELECT * FROM dimension ORDER BY Key").Select(row => row.ToArray()), actual.Query("SELECT * FROM dimension ORDER BY Key").Select(row => row.ToArray()));
             }

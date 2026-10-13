@@ -35,30 +35,68 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Opens two or more sources into one session: every source is staged in its own table (TEMP in a memory store, a regular table in
-        /// the temporary file store, which spills to disk), then one merge builds
-        /// <c>"data"</c> and the <c>source</c> table, and one split follows. A failure disposes the session; nothing is left behind.
+        /// Opens its sources into one session: every source, a lone one included, is staged in its own table (TEMP in a memory store, a regular table in
+        /// the temporary file store, which spills to disk), then one merge builds <c>"data"</c> and the <c>source</c> table, and one split follows.
+        /// A failure disposes the session; nothing is left behind. When a source that was skipped had brought a handler overlay that changed
+        /// the config, the config is resolved again from the sources that remain and they are staged again, so the session is the one
+        /// the remaining sources open on their own.
         /// </summary>
-        private static async Task<DataBall> OpenManyAsync(OpenPlan plan, OpenOptions options, CancellationToken cancellationToken)
+        private static async Task<DataBall> OpenManyAsync(OpenPlan plan, OpenOptions options, ResolvedOpen? resolved, CancellationToken cancellationToken)
         {
             foreach (var entry in plan.Entries)
             {
                 if (entry.Kind != OpenKind.Detected)
                     throw NativeWithOtherInputs(entry);
-                if (entry.Report!.BuiltInPath is BuiltInPath.NativeBall or BuiltInPath.BallImport)
+                if (plan.Entries.Count > 1 && entry.Report!.BuiltInPath is BuiltInPath.NativeBall or BuiltInPath.BallImport)
                     throw new DataBallException($"'{entry.Path}' is a native .ball; native sources cannot be opened together with other inputs yet, open it on its own");
             }
-            var (effective, store, routes) = ResolveOpenConfig(plan.Entries, plan.Bytes, options);
+            var (effective, store, routes) = resolved is null
+                ? ResolveOpenConfig(plan.Entries, plan.Bytes, options)
+                : (resolved.Config, resolved.Store, resolved.Routes);
 
             var db = new DataBall(effective, options.Engine, temporary: store == StoreMode.File);
             var extractions = new List<string>();
             var skipped = new List<SkippedFile>(plan.Skipped);
+            // A lone file (not an archive, whose entries are sources of their own) fails under Skip as a single path always did.
+            var sole = plan.Entries.Count == 1 && options.OnBadFile == BadFilePolicy.Skip && !IsArchive(plan.Entries[0]) ? plan.Entries[0] : null;
             try
             {
-                var staged = await db.StageSourcesAsync(routes, options.OnBadFile, skipped, extractions, cancellationToken).ConfigureAwait(false);
+                var current = routes;
+                var config = effective;
+                List<StagedSource> staged;
+                while (true)
+                {
+                    staged = await db.StageSourcesAsync(current, options.OnBadFile, skipped, extractions, cancellationToken).ConfigureAwait(false);
+                    var gone = new HashSet<string>(skipped.Select(s => s.Path), StringComparer.Ordinal);
+                    var survivors = current.Where(r => !gone.Contains(r.Entry.Path)).ToList();
+                    if (survivors.Count == current.Count || survivors.Count == 0)
+                        break;
+                    var narrowed = ResolveConfig(survivors, options);
+                    if (narrowed.ToJson() == config.ToJson())
+                        break;
+                    // A skipped source's handler overlay shaped the config the others were staged under: start over without it.
+                    db.Dispose();
+                    db = new DataBall(narrowed, options.Engine, temporary: store == StoreMode.File);
+                    config = narrowed;
+                    current = survivors;
+                }
                 if (staged.Count == 0)
+                {
+                    if (sole is not null)
+                        throw SoleFailure(plan, sole.Path, skipped.Last(s => s.Path == sole.Path).Message, null);
                     throw new DataBallException($"No file to open: every input was skipped as bad: {OpenInputs.Every(skipped.Select(s => s.Path))}");
-                db.RunImport(false, () => db.MergeStagedSources(staged));
+                }
+                try
+                {
+                    db.RunImport(false, () => db.MergeStagedSources(staged));
+                }
+                catch (DataBallException ex) when (sole is not null)
+                {
+                    throw new DataBallException($"Cannot open '{sole.Path}': {FailureMessage(ex)}", ex);
+                }
+                // A lone handler file leaves its last parsed row for InitializeRow to copy, as every row written by hand does.
+                if (plan.Entries.Count == 1 && staged[0].LastRow is { } last)
+                    db.RememberRow(last);
                 db.OpenReport = db.ReportSources(plan.Ignored, staged.ToDictionary(s => s.Key, s => s.Rows), skipped);
                 return db;
             }
@@ -127,8 +165,6 @@ namespace squalor.DataBall
         {
             var entry = route.Entry;
             var type = route.SourceType;
-            if (route.Route is null)
-                throw new DataBallException($"No built-in import path for '{entry.Path}'");
             if (route.Route == SourceRoute.Archive)
             {
                 StageArchive(entry.OpenPath, type, policy, skipped, excluded, extractions, staged);
@@ -138,6 +174,9 @@ namespace squalor.DataBall
             var learned = SnapshotLearned();
             try
             {
+                // A .ball file that is not a native DuckDB file has no route: it is a bad file like any other.
+                if (route.Route is null)
+                    throw new DataBallException("No built-in import path for this file");
                 switch (route.Route.Value)
                 {
                     case SourceRoute.Csv:
@@ -198,14 +237,15 @@ namespace squalor.DataBall
         /// </summary>
         private void RejectNonConstant(List<StagedSource> staged)
         {
-            if (!(_config.MetadataPolicy ?? "liftConstant").Equals("requireConstant", StringComparison.OrdinalIgnoreCase))
+            var policy = MetadataPlanner.ParsePolicy(_config.MetadataPolicy);
+            if (policy != MetadataPolicyKind.RequireConstant)
                 return;
             var source = staged[^1];
             var columns = MetadataFieldsToReconcile().Select(f => HeldColumn(source.Table, f)).OfType<string>().ToList();
             if (columns.Count == 0)
                 return;
             var profile = _store.ProfileColumns(source.Table, columns);
-            var varying = columns.FirstOrDefault(c => profile[c].Distinct > 1);
+            var varying = columns.FirstOrDefault(c => MetadataPlanner.Rejects(policy, new FieldFacts(profile[c], source.Rows)));
             if (varying is null)
                 return;
             staged.RemoveAt(staged.Count - 1);
@@ -359,8 +399,10 @@ namespace squalor.DataBall
             var key = staged.Count + 1L;
             var table = StagingTable(key);
             var batch = new List<IReadOnlyDictionary<string, object?>>(HandlerBatchSize);
+            IReadOnlyDictionary<string, object?>? last = null;
             await foreach (var row in handler.Parse(path, Schema, cancellationToken).ConfigureAwait(false))
             {
+                last = row;
                 batch.Add(KeyHandlerRow(row, key));
                 if (batch.Count == HandlerBatchSize)
                 {
@@ -376,7 +418,7 @@ namespace squalor.DataBall
             }
             if (!_store.TableExists(table))
                 _store.StageNoRows(table);
-            staged.Add(new StagedSource(table, record, key, _store.StagedRowCount(table), true));
+            staged.Add(new StagedSource(table, record, key, _store.StagedRowCount(table), true) { LastRow = last });
         }
 
         /// <summary>
@@ -392,22 +434,20 @@ namespace squalor.DataBall
         }
 
         /// <summary>
-        /// Gives each configured metadata field the lowest level its values need, across all staged sources:
-        /// constant in every source and present in all of them (one value) goes to <c>Metadata</c>; constant within each source that has it
+        /// Gives each configured metadata field the lowest level its values need, across all staged sources, as <see cref="MetadataPlanner"/>
+        /// decides: constant in every source and present in all of them (one value) goes to <c>Metadata</c>; constant within each source that has it
         /// but absent from some or different between them becomes a column of the <c>source</c> table; varying within any source stays a
         /// row column for every row, NULL where a source lacks it. Under <c>first</c> the first value found goes to <c>Metadata</c> and the
         /// column leaves every source; under <c>requireConstant</c> a field that varies within a source throws; under <c>bounce</c> a source with
-        /// empty cells is not constant. A declared table key, a field a handler wrote, and a name the <c>source</c> table already uses stay row columns.
+        /// empty cells is not constant. A declared table key and a field a handler wrote stay row columns. A name the <c>source</c> table's built-in
+        /// columns use (<c>path</c>, <c>type</c>, …) may still reach Metadata; only the source-column level is refused for it, and it falls back to a row column.
         /// </summary>
         private IReadOnlyList<SourceMetadataColumn> ReconcileSourceMetadata(IReadOnlyList<StagedSource> staged)
         {
             var result = new List<SourceMetadataColumn>();
             if (_config.MetadataFields.Count == 0)
                 return result;
-            var policy = _config.MetadataPolicy ?? "liftConstant";
-            var first = policy.Equals("first", StringComparison.OrdinalIgnoreCase);
-            var bounce = policy.Equals("bounce", StringComparison.OrdinalIgnoreCase);
-            var require = policy.Equals("requireConstant", StringComparison.OrdinalIgnoreCase);
+            var policy = MetadataPlanner.ParsePolicy(_config.MetadataPolicy);
 
             var fields = MetadataFieldsToReconcile();
 
@@ -438,91 +478,83 @@ namespace squalor.DataBall
                 var holders = Enumerable.Range(0, staged.Count).Where(i => held[i].ContainsKey(field)).ToList();
                 if (holders.Count == 0)
                     continue;
-                // Handler rows are written as they are: a field a handler brought stays a row column.
-                if (holders.Any(i => staged[i].FromHandler))
-                    continue;
                 var name = held[holders[0]][field];
+                var facts = holders
+                    .Select(i => new OpenHolder(i, staged[i].FromHandler,
+                        staged[i].FromHandler ? default : new FieldFacts(profiles[i][held[i][field]], staged[i].Rows)))
+                    .ToList();
+                var decision = MetadataPlanner.PlanOpen(policy, ClassifyField(field), name, facts, staged.Count);
 
-                if (first)
+                switch (decision.Level)
                 {
-                    foreach (var i in holders)
-                    {
-                        var value = _store.FirstNonNull(staged[i].Table, held[i][field]);
-                        if (value is null)
-                            continue;
-                        _store.SetMetadata(name, value);
-                        break;
-                    }
-                    DropField(staged, held, holders, field, name);
-                    continue;
-                }
-
-                var constants = new List<(int Index, object? Value)>();
-                var varying = false;
-                foreach (var i in holders)
-                {
-                    var p = profiles[i][held[i][field]];
-                    if (p.Distinct > 1)
-                    {
-                        if (require)
-                            throw new DataBallException($"Metadata field '{name}' is not constant");
-                        varying = true;
-                        break;
-                    }
-                    if (p.Distinct == 0)
-                        continue; // all empty: no value
-                    if (bounce && p.NonNull < staged[i].Rows)
-                        varying = true; // bounce lifts only a column without empty cells
-                    else
-                        constants.Add((i, p.Value));
-                }
-                if (varying || constants.Count == 0)
-                    continue;
-
-                if (constants.Count == staged.Count && constants.All(c => SameValue(c.Value, constants[0].Value)))
-                {
-                    _store.SetMetadata(name, constants[0].Value);
-                }
-                else
-                {
-                    var values = new object?[staged.Count];
-                    string? type = null;
-                    var typeFrom = constants[0].Index;
-                    foreach (var (index, value) in constants)
-                    {
-                        values[index] = value;
-                        var t = types[index][field];
-                        if (type is null)
-                            type = t;
-                        else if (DuckDbStore.MergedColumnType(type, t) is { } merged)
-                            type = merged;
+                    case MetadataLevel.Metadata:
+                        if (decision.FirstNonNull)
+                        {
+                            foreach (var i in holders)
+                            {
+                                var value = _store.FirstNonNull(staged[i].Table, held[i][field]);
+                                if (value is null)
+                                    continue;
+                                _store.SetMetadata(name, value);
+                                break;
+                            }
+                        }
                         else
                         {
-                            // A data column with types that cannot merge fails the open; so does a per-source column.
-                            throw new DataBallException(
-                                $"Cannot merge '{staged[index].Record.Path}': per-source column '{name}' has type {type} in '{staged[typeFrom].Record.Path}' and {t} in this one");
+                            _store.SetMetadata(name, decision.Value);
                         }
-                    }
-                    result.Add(new SourceMetadataColumn(name, type!, values));
+                        DropField(staged, held, holders, field, name);
+                        break;
+                    case MetadataLevel.SourceColumn:
+                        result.Add(SourceColumnOf(staged, types, name, field, decision.Values!));
+                        DropField(staged, held, holders, field, name);
+                        break;
                 }
-                DropField(staged, held, holders, field, name);
             }
             return result;
         }
 
-        /// <summary>The configured metadata fields the reconciliation handles: distinct, and not a key, a layout key or a built-in source column.</summary>
+        /// <summary>The <c>source</c> table column for a per-source field: the merged type of its sources' columns and a value per source.</summary>
+        private static SourceMetadataColumn SourceColumnOf(
+            IReadOnlyList<StagedSource> staged,
+            List<Dictionary<string, string>> types,
+            string name,
+            string field,
+            IReadOnlyList<(int Index, object? Value)> constants)
+        {
+            var values = new object?[staged.Count];
+            string? type = null;
+            var typeFrom = constants[0].Index;
+            foreach (var (index, value) in constants)
+            {
+                values[index] = value;
+                var t = types[index][field];
+                if (type is null)
+                    type = t;
+                else if (DuckDbStore.MergedColumnType(type, t) is { } merged)
+                    type = merged;
+                else
+                {
+                    // A data column with types that cannot merge fails the open; so does a per-source column.
+                    throw new DataBallException(
+                        $"Cannot merge '{staged[index].Record.Path}': per-source column '{name}' has type {type} in '{staged[typeFrom].Record.Path}' and {t} in this one");
+                }
+            }
+            return new SourceMetadataColumn(name, type!, values);
+        }
+
+        /// <summary>
+        /// The configured metadata fields the reconciliation handles: distinct, and neither lineage nor a declared layout key. A field named like a
+        /// built-in column of the <c>source</c> table is among them: it may reach Metadata, but never becomes a column of <c>source</c>.
+        /// </summary>
         private List<string> MetadataFieldsToReconcile()
         {
             var fields = new List<string>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var field in _config.MetadataFields)
             {
-                if (!seen.Add(field)
-                    || field.Equals(Lineage.KeyColumn, StringComparison.OrdinalIgnoreCase)
-                    || IsLayoutKeyColumn(field)
-                    || DuckDbStore.IsBuiltInSourceColumn(field))
-                    continue;
-                fields.Add(field);
+                if (seen.Add(field) && ClassifyField(field) is FieldHome.Fresh or FieldHome.BuiltInSourceName)
+                    fields.Add(field);
             }
             return fields;
         }
@@ -532,22 +564,6 @@ namespace squalor.DataBall
             foreach (var i in holders)
                 _store.DropStagedColumn(staged[i].Table, held[i][field]);
             RemoveExpectedType(name);
-        }
-
-        /// <summary>Equality of two values read from staging, numerically for numbers of different widths.</summary>
-        private static bool SameValue(object? a, object? b)
-        {
-            if (a is null || b is null)
-                return a is null && b is null;
-            static bool Integral(object v) => v is sbyte or byte or short or ushort or int or uint or long;
-            static bool Number(object v) => Integral(v) || v is float or double or decimal;
-            if (Number(a) && Number(b))
-            {
-                return Integral(a) && Integral(b)
-                    ? Convert.ToInt64(a, CultureInfo.InvariantCulture) == Convert.ToInt64(b, CultureInfo.InvariantCulture)
-                    : Convert.ToDouble(a, CultureInfo.InvariantCulture) == Convert.ToDouble(b, CultureInfo.InvariantCulture);
-            }
-            return a.Equals(b);
         }
     }
 }

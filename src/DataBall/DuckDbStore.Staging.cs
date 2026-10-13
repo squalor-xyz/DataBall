@@ -9,7 +9,11 @@ using DuckDB.NET.Data;
 namespace squalor.DataBall
 {
     /// <summary>One source staged for a many-file open: its staging table, its record, the key its rows carry and how many rows it holds.</summary>
-    internal sealed record StagedSource(string Table, SourceRecord Record, long Key, long Rows, bool FromHandler);
+    internal sealed record StagedSource(string Table, SourceRecord Record, long Key, long Rows, bool FromHandler)
+    {
+        /// <summary>The last row a handler parsed for this source, as the handler yielded it; null for a file source or a handler without rows.</summary>
+        internal IReadOnlyDictionary<string, object?>? LastRow { get; init; }
+    }
 
     /// <summary>
     /// A per-source metadata column of the <c>source</c> table: a value constant within each source that varies between
@@ -32,11 +36,15 @@ namespace squalor.DataBall
         /// </summary>
         private string StagingKind => _exclusivePath is null ? "TEMP " : "";
 
+        /// <summary>Test hook: called with the name of each staging table <see cref="StageFile"/> creates.</summary>
+        internal static Action<string>? FileStagedForTests;
+
         /// <summary>Stages a file read by <paramref name="function"/> into staging <paramref name="table"/>, keyed to its source.</summary>
         internal void StageFile(string table, string function, string path, string extraArgs, long sourceKey)
         {
             ThrowIfDisposed();
             ValidateName(table, "Table");
+            FileStagedForTests?.Invoke(table);
             Execute($"CREATE OR REPLACE {StagingKind}TABLE {QuoteIdent(table)} AS SELECT * FROM {function}({QuotePath(path)}{extraArgs})");
             KeyStaged(table, sourceKey);
         }
