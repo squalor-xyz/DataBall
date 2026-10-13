@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 33,
+  "next_id": 34,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -2291,6 +2291,47 @@
         "trees_literal": false,
         "findings": "db-16 review (2026-10-13)",
         "discovered_from": "db-16",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": null,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-33",
+      "title": "DataBall must profile sample files and propose a file type deterministically",
+      "short_title": "Profiler + deterministic proposer",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [],
+      "note_records": [
+        {
+          "id": "3ab41ef4-2518-42a3-a8ee-fcd1149826be",
+          "kind": "",
+          "text": "**2026-10-13** — Owner idea (2026-10-13): two deterministic tools that help write a JSON file type for a new lab format. No ML, no LLM, no network; the same inputs and tool version give byte-identical output.\n\n(1) Profiler, inside DataBall: `databall profile <file>... --json` writes a versioned profile of facts, no decisions.\n- Identity: path, size, content hash, the full DetectionReport.\n- Layout: encoding/BOM, delimiter, quoting, line endings, and the preamble/header/data/trailer boundaries, each with the evidence that set it.\n- Preamble key/value pairs, with line numbers.\n- Per column: header text and position; sniffed type plus every narrower type all values parse as; null and empty counts; distinct count (capped, approximate past the cap); min/max; length range; constant; monotonic; value pattern or unit suffix.\n- Candidate keys (small arity cap) and functional dependencies.\n- Across samples: what is present in all files, what varies, and what is constant within a file but differs between files (per-source metadata candidates).\n- First/last sample rows are off by default; `--stats-only` drops all raw values.\n- Built on DuckDB (sniff_csv, SUMMARIZE, parquet_schema) and FileProbe/handlers. Every scan is bounded and the limits are recorded in the profile.\n\n(2) Proposer, deterministic rules: `databall propose <profile.json>...` writes a draft JSON file type (match, config, transforms), plus an explanation: one line per proposed item naming the rule and the facts it used.\n- Rules are named, ordered, unit-tested functions. Thresholds are named constants.\n- Match: only evidence that holds in all samples, checked with Detect against the samples.\n- Types: the narrowest type that parses everywhere, merged through DecideColumnMerge, or a reported conflict.\n- Metadata: constant within each file → liftConstant or per-source; preamble pairs → metadata fields.\n- Names: fixed header normalization → a rename step; unit suffixes → cast plus a recorded unit.\n- Shape: indexed repeats → unpivot; composite key plus dimensions → a tables layout.\n- Cleanup: sentinels → fill/map.\n- Conflicts between rules are settled by a fixed priority, and the losing proposal is reported.\n- It validates the draft through DataBall (config loads, db-13 column checks, every sample opens) and records the result. A failed draft is still written, marked as failed.\n- It never registers a type. A person registers it (RegisterFileType / --types), per the db-13 trust rule.\n\nPlacement: the profiler is in DataBall. The proposer starts in DataBall (CLI or a Propose namespace, since it uses DecideColumnMerge, Detect and config validation) and splits out only if it outgrows DataBall. The contract between them is the profile schema plus the file-type schema.\n\nOrder: the profiler can come now. The proposer's match, type and metadata rules come next; its transform and preamble rules wait for db-13 and db-12.\n\nTests: golden profile and proposal files per fixture; one unit test per rule; determinism (two runs, and shuffled input order, give identical output); round-trip (each fixture opens with its proposed type to the expected rows, columns and metadata).\n\nOwner to decide at spec time: size (likely split into a profiler slice and a proposer slice), and whether it should depend on db-12/db-13.",
+          "created_at": "2026-10-13T15:30:29Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "owner idea (2026-10-13)",
+        "discovered_from": "",
         "cites": [],
         "key": "",
         "pass": "v2.0",

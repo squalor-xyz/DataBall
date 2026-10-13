@@ -310,3 +310,5 @@
 {"when": "2026-10-13T15:17:45Z", "item": "db-15", "action": "note", "from": "", "to": "", "note": "From db-16 review round 2 (2026-10-13): DuckDbStore.ExportPa", "by": "Jon R"}
 {"when": "2026-10-13T15:29:28Z", "item": "db-16", "action": "note", "from": "", "to": "", "note": "Verified outcome (2026-10-13): one way in (Open/OpenAsync wi", "by": "Jon R"}
 {"when": "2026-10-13T15:29:28Z", "item": "db-16", "action": "status", "from": "started", "to": "done", "note": "Gate PASS; 992 + 56 tests green; PublicApi approved by owner.", "by": "Jon R"}
+{"when": "2026-10-13T15:30:16Z", "item": "db-33", "action": "add", "from": "", "to": "open", "note": "DataBall must profile sample files and propose a file type deterministically"}
+{"when": "2026-10-13T15:30:29Z", "item": "db-33", "action": "note", "from": "", "to": "", "note": "Owner idea (2026-10-13): two deterministic tools that help w", "by": "Jon R"}
