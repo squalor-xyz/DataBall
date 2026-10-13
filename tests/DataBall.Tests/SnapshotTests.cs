@@ -382,7 +382,8 @@ public sealed class SnapshotTests : IDisposable
         }
         File.Delete(f.Source);
         var missing = Assert.Throws<DataBallException>(() => DataBall.Open(linked.Path));
-        Assert.Contains(f.Source, missing.Message);
+        // Linked paths are stored with '/' separators, so DuckDB names that form on Windows.
+        Assert.Contains(f.Source.Replace('\\', '/'), missing.Message);
         using var stillThere = DataBall.Open(embedded.Path);
         Assert.Equal(20000L, stillThere.Count(new SessionFilter()));
     }
