@@ -2,7 +2,7 @@
   "version": 8,
   "id_prefix": "db-",
   "id_width": 2,
-  "next_id": 31,
+  "next_id": 32,
   "preamble": "Do not nuget-push or git-push from this list unless the owner asks.\n\nHandlers: custom CSV is implemented. STDF / Touchstone / production are registered slots (`CanHandle` by extension; `Parse` throws until a golden file is named). No ALC in this slice.",
   "passes": [],
   "items": [
@@ -1228,6 +1228,17 @@
           "verified_by": "",
           "verified_at": "",
           "stale_after": ""
+        },
+        {
+          "id": "32a83a44-892b-410b-a29d-ec70dae031cd",
+          "kind": "",
+          "text": "**2026-10-13** — Owner decisions 2026-10-13 (relay setup): (a) Implement step 1: the stored _databall config keeps the full merged defaults (today's behaviour; no change). (b) Scope cut: the handler InternalsVisibleTo skew (db-10), the store-held declared-type map (db-23) and the stale IsViewBacked flag after DDL through Query (db-09) move to db-31 and are not in this slice. (c) Relay: Sonnet 5.5 high lead implementer; Haiku 5.5 xhigh parallel workers (test ports, CLI/docs, rollback unification) and scoped fix rounds; reviewer and architect Opus medium; gate Sonnet medium; ends landed (no push).",
+          "created_at": "2026-10-13T14:09:15Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
         }
       ],
       "claim": null,
@@ -2105,6 +2116,49 @@
         "importance": 1,
         "urgency": 1,
         "effort": 2,
+        "attempts": 0
+      }
+    },
+    {
+      "id": "db-31",
+      "title": "API hygiene left over from db-16",
+      "short_title": "API hygiene after db-16",
+      "status": "open",
+      "has_slice": false,
+      "depends_on": [
+        "db-16"
+      ],
+      "note_records": [
+        {
+          "id": "4064a9ba-d1a1-4965-bc6f-50778ae8896d",
+          "kind": "",
+          "text": "**2026-10-13** — Moved out of db-16 by the owner (2026-10-13). (1) db-10 gate: DataBall.csproj grants InternalsVisibleTo to the shipped DataBall.Handlers package for LabHandlers.RegisterDefaults' idempotence (internal RegisterHandlerIfMissing); fold into the registry API (public overload or option that skips an already-registered type) or pin Handlers to an exact DataBall version. (2) db-23 relay: configTypes is threaded through ~8 store signatures defaulting to null; consider a store-held declared-type map set by DataBall so a new call site cannot skip the declared-type exemption. (3) db-09 gate: the cached IsViewBacked flag goes stale after raw DDL on \"data\" through Query; fold into the Query write guard or re-check DataIsView() in MaterializeView.",
+          "created_at": "2026-10-13T14:09:15Z",
+          "attempt": 0,
+          "by": "Jon R",
+          "verified_by": "",
+          "verified_at": "",
+          "stale_after": ""
+        }
+      ],
+      "claim": null,
+      "fields": {
+        "size": "S",
+        "flags": [],
+        "trees": [
+          "databall"
+        ],
+        "trees_literal": false,
+        "findings": "db-16 scope cut (owner, 2026-10-13)",
+        "discovered_from": "db-16",
+        "cites": [],
+        "key": "",
+        "pass": "v2.0",
+        "group": "",
+        "reason": "",
+        "importance": 2,
+        "urgency": 2,
+        "effort": null,
         "attempts": 0
       }
     }
